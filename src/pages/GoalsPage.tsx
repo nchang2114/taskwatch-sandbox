@@ -2650,6 +2650,8 @@ const GoalRow: React.FC<GoalRowProps> = ({
   const taskPtrJustDraggedRef = useRef<boolean>(false)
   // UI-only: single vs double click handling for subtask rows, and edit mode toggle
   const subtaskClickTimersRef = useRef<Map<string, number>>(new Map())
+  const taskEditDoubleClickGuardRef = useRef<{ taskId: string; until: number } | null>(null)
+  const taskTogglePendingRef = useRef<{ taskId: string; timer: number } | null>(null)
   const [editingSubtaskKey, setEditingSubtaskKey] = useState<string | null>(null)
   const [dragLine, setDragLine] = useState<
     | { bucketId: string; section: 'active' | 'completed'; top: number }
@@ -2782,6 +2784,60 @@ const GoalRow: React.FC<GoalRowProps> = ({
     const top = Math.round(clamped * 2) / 2
     return { index, top }
   }
+
+  const shouldSuppressTaskToggle = (taskId: string) => {
+    const guard = taskEditDoubleClickGuardRef.current
+    if (!guard) {
+      return false
+    }
+    const now = Date.now()
+    if (now > guard.until) {
+      taskEditDoubleClickGuardRef.current = null
+      return false
+    }
+    return guard.taskId === taskId
+  }
+
+  const cancelTaskToggle = (taskId: string) => {
+    const pending = taskTogglePendingRef.current
+    if (!pending || pending.taskId !== taskId) {
+      return
+    }
+    if (typeof window !== 'undefined') {
+      window.clearTimeout(pending.timer)
+    }
+    taskTogglePendingRef.current = null
+  }
+
+  const scheduleTaskToggle = (taskId: string) => {
+    const pending = taskTogglePendingRef.current
+    if (pending && typeof window !== 'undefined') {
+      window.clearTimeout(pending.timer)
+    }
+    if (typeof window === 'undefined') {
+      handleToggleTaskDetails(taskId)
+      taskTogglePendingRef.current = null
+      return
+    }
+    const timer = window.setTimeout(() => {
+      handleToggleTaskDetails(taskId)
+      if (taskTogglePendingRef.current?.taskId === taskId) {
+        taskTogglePendingRef.current = null
+      }
+    }, 160)
+    taskTogglePendingRef.current = { taskId, timer }
+  }
+
+  useEffect(() => {
+    return () => {
+      const pending = taskTogglePendingRef.current
+      if (pending && typeof window !== 'undefined') {
+        window.clearTimeout(pending.timer)
+      }
+      taskTogglePendingRef.current = null
+    }
+  }, [])
+
   const computeBucketInsertMetrics = (listEl: HTMLElement, y: number) => {
     const items = Array.from(listEl.querySelectorAll('li.goal-bucket-item')) as HTMLElement[]
     const candidates = items.filter(
@@ -4292,7 +4348,10 @@ const GoalRow: React.FC<GoalRowProps> = ({
                                       className="goal-task-text goal-task-text--button"
                                       onClick={(e) => {
                                         e.stopPropagation()
-                                        handleToggleTaskDetails(task.id)
+                                        if (shouldSuppressTaskToggle(task.id)) {
+                                          return
+                                        }
+                                        scheduleTaskToggle(task.id)
                                       }}
                                       onPointerDown={(e) => {
                                         // guard capture and drag vs edit/long-press
@@ -4303,6 +4362,7 @@ const GoalRow: React.FC<GoalRowProps> = ({
                                       onDoubleClick={(e) => {
                                         e.preventDefault()
                                         e.stopPropagation()
+                                        cancelTaskToggle(task.id)
                                         const container = e.currentTarget.querySelector('.goal-task-text__inner') as HTMLElement | null
                                         const caretOffset = findActivationCaretOffset(container, e.clientX, e.clientY)
                                         onDismissFocusPrompt()
@@ -4313,6 +4373,7 @@ const GoalRow: React.FC<GoalRowProps> = ({
                                           task.text,
                                           caretOffset !== null ? { caretOffset } : undefined,
                                         )
+                                        taskEditDoubleClickGuardRef.current = { taskId: task.id, until: Date.now() + 300 }
                                       }}
                                       aria-label="Toggle task details"
                                     >
@@ -5060,21 +5121,26 @@ const GoalRow: React.FC<GoalRowProps> = ({
                                           className="goal-task-text goal-task-text--button"
                                           onClick={(e) => {
                                             e.stopPropagation()
-                                            handleToggleTaskDetails(task.id)
+                                            if (shouldSuppressTaskToggle(task.id)) {
+                                              return
+                                            }
+                                            scheduleTaskToggle(task.id)
                                           }}
-                                        onDoubleClick={(e) => {
-                                        e.preventDefault()
-                                        e.stopPropagation()
-                                        const container = e.currentTarget.querySelector('.goal-task-text__inner') as HTMLElement | null
-                                        const caretOffset = findActivationCaretOffset(container, e.clientX, e.clientY)
-                                        onDismissFocusPrompt()
-                                        onStartTaskEdit(
-                                          goal.id,
-                                          b.id,
-                                          task.id,
+                                          onDoubleClick={(e) => {
+                                            e.preventDefault()
+                                            e.stopPropagation()
+                                            cancelTaskToggle(task.id)
+                                            const container = e.currentTarget.querySelector('.goal-task-text__inner') as HTMLElement | null
+                                            const caretOffset = findActivationCaretOffset(container, e.clientX, e.clientY)
+                                            onDismissFocusPrompt()
+                                            onStartTaskEdit(
+                                              goal.id,
+                                              b.id,
+                                              task.id,
                                               task.text,
                                               caretOffset !== null ? { caretOffset } : undefined,
                                             )
+                                            taskEditDoubleClickGuardRef.current = { taskId: task.id, until: Date.now() + 300 }
                                           }}
                                           aria-label="Toggle task details"
                                         >
