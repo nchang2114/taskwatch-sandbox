@@ -45,6 +45,7 @@ const getInitialTheme = (): Theme => {
 const COMPACT_BRAND_BREAKPOINT = 640
 const DEFAULT_NAV_BUFFER = 56
 const COMPACT_NAV_BUFFER = 24
+const NAV_COLLAPSE_BREAKPOINT = 640
 
 const TAB_PANEL_IDS: Record<TabKey, string> = {
   goals: 'tab-panel-goals',
@@ -978,10 +979,10 @@ function MainApp() {
     const linksWidth = measure.scrollWidth
     const buffer = isCompactBrand ? COMPACT_NAV_BUFFER : DEFAULT_NAV_BUFFER
     const available = Math.max(0, navWidth - brandWidth - controlsWidth - buffer)
-    const shouldCollapse = linksWidth > available
+    const shouldCollapse = viewportWidth <= NAV_COLLAPSE_BREAKPOINT && linksWidth > available
 
     setIsNavCollapsed((current) => (current !== shouldCollapse ? shouldCollapse : current))
-  }, [isCompactBrand])
+  }, [isCompactBrand, viewportWidth])
 
   const applyTheme = useCallback(
     (value: Theme) => {
