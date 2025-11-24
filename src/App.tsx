@@ -58,6 +58,8 @@ const SWIPE_SEQUENCE: TabKey[] = ['reflection', 'focus', 'goals']
 
 const AUTH_PROFILE_STORAGE_KEY = 'nc-taskwatch-auth-profile'
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
+const TERMS_URL = 'https://genzero.vercel.app/taskwatch/terms'
+const PRIVACY_URL = 'https://genzero.vercel.app/taskwatch/privacy'
 
 const sanitizeStoredProfile = (value: unknown): UserProfile | null => {
   if (!value || typeof value !== 'object') {
@@ -1848,8 +1850,15 @@ const nextThemeLabel = theme === 'dark' ? 'light' : 'dark'
                   </p>
                 ) : null}
                 <p className="auth-modal__terms auth-modal__terms--center">
-                  By continuing, you acknowledge that you understand and agree to the <span className="auth-modal__link">Terms &amp; Conditions</span> and{' '}
-                  <span className="auth-modal__link">Privacy Policy</span>.
+                  By continuing, you acknowledge that you understand and agree to the{' '}
+                  <a className="auth-modal__link" href={TERMS_URL} target="_blank" rel="noreferrer noopener">
+                    Terms &amp; Conditions
+                  </a>{' '}
+                  and{' '}
+                  <a className="auth-modal__link" href={PRIVACY_URL} target="_blank" rel="noreferrer noopener">
+                    Privacy Policy
+                  </a>
+                  .
                 </p>
               </form>
             ) : authEmailStage === 'verify' ? (
@@ -1963,7 +1972,15 @@ const nextThemeLabel = theme === 'dark' ? 'light' : 'dark'
                   </button>
                 </form>
                 <p className="auth-modal__terms">
-                  By continuing, you acknowledge that you understand and agree to the <span className="auth-modal__link">Terms &amp; Conditions</span> and <span className="auth-modal__link">Privacy Policy</span>.
+                  By continuing, you acknowledge that you understand and agree to the{' '}
+                  <a className="auth-modal__link" href={TERMS_URL} target="_blank" rel="noreferrer noopener">
+                    Terms &amp; Conditions
+                  </a>{' '}
+                  and{' '}
+                  <a className="auth-modal__link" href={PRIVACY_URL} target="_blank" rel="noreferrer noopener">
+                    Privacy Policy
+                  </a>
+                  .
                 </p>
               </>
             )}
