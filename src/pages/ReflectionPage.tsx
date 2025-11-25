@@ -3539,6 +3539,19 @@ const [inspectorFallbackMessage, setInspectorFallbackMessage] = useState<string 
     return map
   }, [goalsSnapshot])
 
+  const goalIdLookup = useMemo(() => {
+    const map = new Map<string, string>()
+    goalsSnapshot.forEach((goal) => {
+      const gName = goal.name?.trim()
+      if (!gName || goal.archived) return
+      const key = gName.toLowerCase()
+      if (!map.has(key)) {
+        map.set(key, goal.id)
+      }
+    })
+    return map
+  }, [goalsSnapshot])
+
   // Lookup task id from goal+bucket+task name (case-insensitive)
   const taskIdLookup = useMemo(() => {
     const map = new Map<string, string>() // key: `${goal.toLowerCase()}::${bucket.toLowerCase()}::${task.toLowerCase()}` -> taskId
@@ -4220,6 +4233,22 @@ const [inspectorFallbackMessage, setInspectorFallbackMessage] = useState<string 
         subtasks: nextSubtasks,
         // Keep the flag in sync with time edits: anything in the future is planned
         futureSession: nextStartedAt > Date.now(),
+        goalId:
+          normalizedGoalName.length > 0
+            ? goalIdLookup.get(normalizedGoalName.toLowerCase()) ?? target.goalId ?? null
+            : null,
+        bucketId:
+          normalizedGoalName.length > 0 && normalizedBucketName.length > 0
+            ? bucketIdLookup.get(`${normalizedGoalName.toLowerCase()}::${normalizedBucketName.toLowerCase()}`) ??
+              target.bucketId ??
+              null
+            : null,
+        taskId:
+          normalizedGoalName.length > 0 && normalizedBucketName.length > 0 && nextTaskName.length > 0
+            ? taskIdLookup.get(
+                `${normalizedGoalName.toLowerCase()}::${normalizedBucketName.toLowerCase()}::${nextTaskName.toLowerCase()}`,
+              ) ?? target.taskId ?? null
+            : null,
       }
       didUpdateHistory = true
       return next
@@ -4250,8 +4279,11 @@ const [inspectorFallbackMessage, setInspectorFallbackMessage] = useState<string 
   }, [
     bucketSurfaceLookup,
     goalSurfaceLookup,
+    bucketIdLookup,
+    goalIdLookup,
     historyDraft,
     lifeRoutineSurfaceLookup,
+    taskIdLookup,
     pendingNewHistoryId,
     selectedHistoryEntry,
     selectedHistoryId,

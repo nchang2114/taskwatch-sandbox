@@ -386,9 +386,8 @@ const areGoalTaskSubtasksEqual = (
 
 const deriveScheduledTaskIds = (history: HistoryEntry[]): Set<string> => {
   const ids = new Set<string>()
-  const now = Date.now()
   history.forEach((entry) => {
-    if (entry.taskId && (entry.futureSession || entry.startedAt > now)) {
+    if (entry.taskId) {
       ids.add(entry.taskId)
     }
   })
