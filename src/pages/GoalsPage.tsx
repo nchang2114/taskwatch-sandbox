@@ -7145,6 +7145,21 @@ export default function GoalsPage(): ReactElement {
   useEffect(() => {
     taskDetailsRef.current = taskDetails
   }, [taskDetails])
+
+  useEffect(() => {
+    if (managingArchivedGoalId || isCreateGoalOpen) {
+      const scrollbarWidth = window.innerWidth - document.documentElement.clientWidth
+      document.body.style.overflow = 'hidden'
+      document.body.style.paddingRight = `${scrollbarWidth}px`
+    } else {
+      document.body.style.overflow = ''
+      document.body.style.paddingRight = ''
+    }
+    return () => {
+      document.body.style.overflow = ''
+      document.body.style.paddingRight = ''
+    }
+  }, [managingArchivedGoalId, isCreateGoalOpen])
   const mergeSubtasksWithSources = useCallback(
     (taskId: string, remote: TaskSubtask[], sources: TaskSubtask[][]): TaskSubtask[] => {
       const merged = new Map<string, TaskSubtask>()
