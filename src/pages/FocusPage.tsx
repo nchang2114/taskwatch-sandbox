@@ -1727,6 +1727,16 @@ useEffect(() => {
       const d = new Date(ms)
       return `${d.getMonth() + 1}-${d.getDate()}`
     }
+    const ruleDayOfMonth = (rule: RepeatingSessionRule): number | null => {
+      const source =
+        Number.isFinite((rule as any).startAtMs as number)
+          ? ((rule as any).startAtMs as number)
+          : Number.isFinite((rule as any).createdAtMs as number)
+            ? ((rule as any).createdAtMs as number)
+            : null
+      if (!Number.isFinite(source as number)) return null
+      return new Date(source as number).getDate()
+    }
     const ruleMonthDayKey = (rule: RepeatingSessionRule): string | null => {
       const source =
         Number.isFinite((rule as any).startAtMs as number)
@@ -1736,6 +1746,14 @@ useEffect(() => {
             : null
       if (!Number.isFinite(source as number)) return null
       return monthDayKey(source as number)
+    }
+    const matchesMonthlyDay = (rule: RepeatingSessionRule, dayStart: number): boolean => {
+      const anchorDay = ruleDayOfMonth(rule)
+      if (!Number.isFinite(anchorDay as number)) return false
+      const d = new Date(dayStart)
+      const lastDay = new Date(d.getFullYear(), d.getMonth() + 1, 0).getDate()
+      const expectedDay = Math.min(anchorDay as number, lastDay)
+      return d.getDate() === expectedDay
     }
     const now = Date.now()
     const toDayStart = (t: number) => { const x = new Date(t); x.setHours(0,0,0,0); return x.getTime() }
@@ -1776,16 +1794,18 @@ useEffect(() => {
       list.push({ ...task, startedAt: start, endedAt: end, isGuide: true })
     }
     const lower = (s: string | null | undefined) => (s ?? '').trim().toLowerCase()
-    const considerOccurrence = (rule: RepeatingSessionRule, baseStart: number) => {
-      // Frequency filters
-      if (rule.frequency === 'weekly') {
-        const d = new Date(baseStart)
-        if (rule.dayOfWeek !== null && rule.dayOfWeek !== d.getDay()) return
-      } else if (rule.frequency === 'annually') {
-        const dayKey = monthDayKey(baseStart)
-        const ruleKey = ruleMonthDayKey(rule)
-        if (!ruleKey || ruleKey !== dayKey) return
-      }
+      const considerOccurrence = (rule: RepeatingSessionRule, baseStart: number) => {
+        // Frequency filters
+        if (rule.frequency === 'weekly') {
+          const d = new Date(baseStart)
+          if (rule.dayOfWeek !== null && rule.dayOfWeek !== d.getDay()) return
+        } else if (rule.frequency === 'monthly') {
+          if (!matchesMonthlyDay(rule, baseStart)) return
+        } else if (rule.frequency === 'annually') {
+          const dayKey = monthDayKey(baseStart)
+          const ruleKey = ruleMonthDayKey(rule)
+          if (!ruleKey || ruleKey !== dayKey) return
+        }
       // Boundaries based on scheduled start time
       const tMin = Math.max(0, Math.min(1439, rule.timeOfDayMinutes))
       const startedAt = baseStart + tMin * MINUTE_MS
