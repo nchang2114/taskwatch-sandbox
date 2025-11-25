@@ -5229,35 +5229,6 @@ const GoalRow: React.FC<GoalRowProps> = ({
                                         )}
                                       >
                                         <div className="goal-task-details__section-title">
-                                          <button
-                                            type="button"
-                                            className="goal-task-details__collapse"
-                                            aria-expanded={!isSubtasksCollapsed}
-                                            aria-controls={subtaskListId}
-                                            onClick={(event) => {
-                                              event.stopPropagation()
-                                              handleToggleSubtaskSection(task.id)
-                                            }}
-                                            onPointerDown={(event) => event.stopPropagation()}
-                                          >
-                                            <span className="sr-only">
-                                              {isSubtasksCollapsed ? 'Expand subtasks' : 'Collapse subtasks'}
-                                            </span>
-                                            <svg
-                                              className="goal-task-details__collapse-icon"
-                                              viewBox="0 0 24 24"
-                                              aria-hidden="true"
-                                            >
-                                              <path
-                                                d="M6 10l6 6 6-6"
-                                                fill="none"
-                                                stroke="currentColor"
-                                                strokeWidth="1.8"
-                                                strokeLinecap="round"
-                                                strokeLinejoin="round"
-                                              />
-                                            </svg>
-                                          </button>
                                           <p
                                             className="goal-task-details__heading"
                                             role="button"
@@ -5273,6 +5244,18 @@ const GoalRow: React.FC<GoalRowProps> = ({
                                             }}
                                           >
                                             Subtasks
+                                            <button
+                                              type="button"
+                                              className="goal-task-details__collapse"
+                                              aria-expanded={!isSubtasksCollapsed}
+                                              aria-controls={subtaskListId}
+                                              onClick={(event) => {
+                                                event.stopPropagation()
+                                                handleToggleSubtaskSection(task.id)
+                                              }}
+                                              onPointerDown={(event) => event.stopPropagation()}
+                                              aria-label={isSubtasksCollapsed ? 'Expand subtasks' : 'Collapse subtasks'}
+                                            />
                                           </p>
                                           {/* Subtask progress removed */}
                                           <button
