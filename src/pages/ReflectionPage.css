@@ -3760,8 +3760,8 @@ body.scroll-lock .calendar-day-column {
 
 .custom-recur__weekdays {
   display: grid;
-  grid-template-columns: repeat(7, 0fr);
-  gap: 0.5rem;
+  grid-template-columns: repeat(7, auto);
+  gap: 0.2rem;
   flex: 1;
 }
 
@@ -3870,6 +3870,116 @@ body.scroll-lock .calendar-day-column {
   background: linear-gradient(135deg, #1e46ff, #2f7dff);
   color: #fff;
   box-shadow: 0 10px 22px rgba(46, 109, 255, 0.3);
+}
+
+html[data-theme='dark'] .custom-recur {
+  background: #0f1429;
+  color: #e8ecff;
+  border: 1px solid rgba(122, 140, 230, 0.35);
+  box-shadow: 0 16px 32px rgba(8, 12, 36, 0.5);
+}
+
+html[data-theme='dark'] .custom-recur__title {
+  color: #f1f4ff;
+}
+
+html[data-theme='dark'] .custom-recur__label,
+html[data-theme='dark'] .custom-recur__occurrences-label {
+  color: #c6d2ff;
+}
+
+html[data-theme='dark'] .custom-recur__stepper {
+  border-color: #24315d;
+  background: #0c1227;
+}
+
+html[data-theme='dark'] .custom-recur__number {
+  color: #e9edff;
+}
+
+html[data-theme='dark'] .custom-recur__stepper-arrows button::before {
+  border-bottom-color: #d5deff;
+}
+
+html[data-theme='dark'] .custom-recur__stepper-arrows button:last-of-type::before {
+  border-top-color: #d5deff;
+}
+
+html[data-theme='dark'] .custom-recur__select {
+  border-color: #24315d;
+  background: #0c1227;
+  color: #e9edff;
+}
+
+html[data-theme='dark'] .custom-recur__select.is-open {
+  background: #161e3a;
+  border-color: #2f3e74;
+}
+
+html[data-theme='dark'] .custom-recur__chevron {
+  color: #cbd6ff;
+}
+
+html[data-theme='dark'] .custom-recur__menu {
+  background: #0d142c;
+  border-color: #24315d;
+  box-shadow: 0 12px 28px rgba(0, 0, 0, 0.45);
+}
+
+html[data-theme='dark'] .custom-recur__option {
+  color: #e9edff;
+}
+
+html[data-theme='dark'] .custom-recur__option:hover,
+html[data-theme='dark'] .custom-recur__option:focus-visible {
+  background: rgba(63, 106, 255, 0.14);
+}
+
+html[data-theme='dark'] .custom-recur__option.is-selected {
+  background: rgba(63, 106, 255, 0.2);
+  color: #f1f4ff;
+}
+
+html[data-theme='dark'] .custom-recur__weekday {
+  background: #1a2747;
+  color: #d3dcff;
+}
+
+html[data-theme='dark'] .custom-recur__weekday--active {
+  background: #3a63ff;
+  color: #fff;
+}
+
+html[data-theme='dark'] .custom-recur__dropdown {
+  border-color: #24315d;
+  background: #0c1227;
+  color: #e9edff;
+}
+
+html[data-theme='dark'] .custom-recur__radio {
+  color: #d3dcff;
+}
+
+html[data-theme='dark'] .custom-recur__radio input[type='radio'] {
+  accent-color: #3a63ff;
+  background: #0c1227;
+  border: 1.5px solid #24315d;
+  width: 1rem;
+  height: 1rem;
+}
+
+html[data-theme='dark'] .custom-recur__date {
+  border-color: #24315d;
+  background: #0c1227;
+  color: #d3dcff;
+}
+
+html[data-theme='dark'] .custom-recur__ghost {
+  color: #a7bcff;
+}
+
+html[data-theme='dark'] .custom-recur__primary {
+  box-shadow: 0 10px 22px rgba(46, 109, 255, 0.28);
 }
 
 @media (max-width: 600px) {
