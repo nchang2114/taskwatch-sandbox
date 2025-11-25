@@ -3115,6 +3115,18 @@ html[data-theme='light'] .goal-task-details__checkbox:checked::after {
   outline-offset: 2px;
 }
 
+.goal-task-focus__button--scheduled {
+  background: rgba(52, 211, 153, 0.2);
+  border-color: rgba(52, 211, 153, 0.7);
+  color: #ecfdf3;
+}
+
+.goal-task-focus__button--scheduled:hover,
+.goal-task-focus__button--scheduled:focus-visible {
+  background: rgba(52, 211, 153, 0.32);
+  border-color: rgba(52, 211, 153, 0.85);
+}
+
 /* Default hidden check for action marker; drawn during completion */
 .goal-task-marker--action .goal-task-check {
   opacity: 0;
@@ -3519,6 +3531,18 @@ html[data-theme='light'] .goal-task-focus__button:hover,
 html[data-theme='light'] .goal-task-focus__button:focus-visible {
   background: rgba(79, 70, 229, 0.22);
   border-color: rgba(67, 56, 202, 0.46);
+}
+
+html[data-theme='light'] .goal-task-focus__button--scheduled {
+  background: rgba(34, 197, 94, 0.16);
+  border-color: rgba(22, 101, 52, 0.55);
+  color: #0f172a;
+}
+
+html[data-theme='light'] .goal-task-focus__button--scheduled:hover,
+html[data-theme='light'] .goal-task-focus__button--scheduled:focus-visible {
+  background: rgba(34, 197, 94, 0.26);
+  border-color: rgba(22, 101, 52, 0.7);
 }
 
 html[data-theme='light'] .goal-task-marker--action:hover,

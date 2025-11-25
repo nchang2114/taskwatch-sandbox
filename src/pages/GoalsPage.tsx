@@ -77,6 +77,12 @@ import {
   type QuickSubtask,
 } from '../lib/quickList'
 import { fetchQuickListRemoteItems, ensureQuickListRemoteStructures, QUICK_LIST_GOAL_NAME } from '../lib/quickListRemote'
+import {
+  HISTORY_EVENT_NAME,
+  HISTORY_STORAGE_KEY,
+  readStoredHistory,
+  type HistoryEntry,
+} from '../lib/sessionHistory'
 import { logDebug, logInfo, logWarn } from '../lib/logging'
 
 // Minimal sync instrumentation disabled by default
@@ -372,6 +378,32 @@ const areGoalTaskSubtasksEqual = (
       nextLeft.completed !== nextRight.completed ||
       nextLeft.sortIndex !== nextRight.sortIndex
     ) {
+      return false
+    }
+  }
+  return true
+}
+
+const deriveScheduledTaskIds = (history: HistoryEntry[]): Set<string> => {
+  const ids = new Set<string>()
+  const now = Date.now()
+  history.forEach((entry) => {
+    if (entry.taskId && (entry.futureSession || entry.startedAt > now)) {
+      ids.add(entry.taskId)
+    }
+  })
+  return ids
+}
+
+const areStringSetsEqual = (a: Set<string>, b: Set<string>): boolean => {
+  if (a === b) {
+    return true
+  }
+  if (a.size !== b.size) {
+    return false
+  }
+  for (const value of a) {
+    if (!b.has(value)) {
       return false
     }
   }
@@ -2429,6 +2461,7 @@ interface GoalRowProps {
   registerTaskEditRef: (taskId: string, element: HTMLSpanElement | null) => void
   onDismissFocusPrompt: () => void
   onStartFocusTask: (goal: Goal, bucket: Bucket, task: TaskItem) => void
+  scheduledTaskIds: Set<string>
   onReorderTasks: (
     goalId: string,
     bucketId: string,
@@ -2626,6 +2659,7 @@ const GoalRow: React.FC<GoalRowProps> = ({
   registerTaskEditRef,
   onDismissFocusPrompt,
   onStartFocusTask,
+  scheduledTaskIds,
   onReorderTasks,
   onReorderBuckets,
   onOpenCustomizer,
@@ -4730,7 +4764,10 @@ const GoalRow: React.FC<GoalRowProps> = ({
                                         <div className="goal-task-focus">
                                           <button
                                             type="button"
-                                            className="goal-task-focus__button"
+                                            className={classNames(
+                                              'goal-task-focus__button',
+                                              scheduledTaskIds.has(task.id) && 'goal-task-focus__button--scheduled',
+                                            )}
                                             onClick={(event) => {
                                               event.stopPropagation()
                                               broadcastScheduleTask({
@@ -5509,7 +5546,10 @@ const GoalRow: React.FC<GoalRowProps> = ({
                                         <div className="goal-task-focus">
                                           <button
                                             type="button"
-                                            className="goal-task-focus__button"
+                                            className={classNames(
+                                              'goal-task-focus__button',
+                                              scheduledTaskIds.has(task.id) && 'goal-task-focus__button--scheduled',
+                                            )}
                                             onClick={(event) => {
                                               event.stopPropagation()
                                               broadcastScheduleTask({
@@ -5621,6 +5661,33 @@ export default function GoalsPage(): ReactElement {
   useEffect(() => {
     latestGoalsRef.current = goals
   }, [goals])
+  const [scheduledTaskIds, setScheduledTaskIds] = useState<Set<string>>(() =>
+    deriveScheduledTaskIds(readStoredHistory()),
+  )
+  useEffect(() => {
+    if (typeof window === 'undefined') {
+      return
+    }
+    const syncScheduledTasks = () => {
+      const next = deriveScheduledTaskIds(readStoredHistory())
+      setScheduledTaskIds((current) => (areStringSetsEqual(current, next) ? current : next))
+    }
+    const handleStorage = (event: StorageEvent) => {
+      if (event.key && event.key !== HISTORY_STORAGE_KEY) {
+        return
+      }
+      syncScheduledTasks()
+    }
+    const handleHistoryBroadcast = () => {
+      syncScheduledTasks()
+    }
+    window.addEventListener('storage', handleStorage)
+    window.addEventListener(HISTORY_EVENT_NAME, handleHistoryBroadcast as EventListener)
+    return () => {
+      window.removeEventListener('storage', handleStorage)
+      window.removeEventListener(HISTORY_EVENT_NAME, handleHistoryBroadcast as EventListener)
+    }
+  }, [])
   // Keep subtask inputs sized correctly on viewport changes (text wrap)
   useEffect(() => {
     if (typeof window === 'undefined') return
@@ -9735,7 +9802,10 @@ const normalizedSearch = searchTerm.trim().toLowerCase()
                                       <div className="goal-task-focus">
                                         <button
                                           type="button"
-                                          className="goal-task-focus__button"
+                                          className={classNames(
+                                            'goal-task-focus__button',
+                                            scheduledTaskIds.has(item.id) && 'goal-task-focus__button--scheduled',
+                                          )}
                                           onClick={(event) => {
                                             event.stopPropagation()
                                             broadcastScheduleTask({
@@ -10265,7 +10335,10 @@ const normalizedSearch = searchTerm.trim().toLowerCase()
                                       <div className="goal-task-focus">
                                         <button
                                           type="button"
-                                          className="goal-task-focus__button"
+                                          className={classNames(
+                                            'goal-task-focus__button',
+                                            scheduledTaskIds.has(item.id) && 'goal-task-focus__button--scheduled',
+                                          )}
                                           onClick={(event) => {
                                             event.stopPropagation()
                                             broadcastScheduleTask({
@@ -12099,7 +12172,10 @@ const normalizedSearch = searchTerm.trim().toLowerCase()
                             <div className="goal-task-focus">
                               <button
                                 type="button"
-                                className="goal-task-focus__button"
+                                className={classNames(
+                                  'goal-task-focus__button',
+                                  scheduledTaskIds.has(task.id) && 'goal-task-focus__button--scheduled',
+                                )}
                                 onClick={(event) => {
                                   event.stopPropagation()
                                   broadcastScheduleTask({
@@ -12481,6 +12557,7 @@ const normalizedSearch = searchTerm.trim().toLowerCase()
                         registerTaskEditRef={registerTaskEditRef}
                         onDismissFocusPrompt={dismissFocusPrompt}
                         onStartFocusTask={handleStartFocusTask}
+                        scheduledTaskIds={scheduledTaskIds}
                         onReorderTasks={(goalId, bucketId, section, fromIndex, toIndex) =>
                           reorderTasks(goalId, bucketId, section, fromIndex, toIndex)
                         }
@@ -12618,6 +12695,7 @@ const normalizedSearch = searchTerm.trim().toLowerCase()
                     
                     onDismissFocusPrompt={dismissFocusPrompt}
                     onStartFocusTask={handleStartFocusTask}
+                    scheduledTaskIds={scheduledTaskIds}
                     onReorderTasks={(goalId, bucketId, section, fromIndex, toIndex) =>
                       reorderTasks(goalId, bucketId, section, fromIndex, toIndex)
                     }
@@ -12751,6 +12829,7 @@ const normalizedSearch = searchTerm.trim().toLowerCase()
                         
                         onDismissFocusPrompt={dismissFocusPrompt}
                         onStartFocusTask={handleStartFocusTask}
+                        scheduledTaskIds={scheduledTaskIds}
                         onReorderTasks={(goalId, bucketId, section, fromIndex, toIndex) =>
                           reorderTasks(goalId, bucketId, section, fromIndex, toIndex)
                         }
