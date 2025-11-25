@@ -3572,6 +3572,20 @@ body.scroll-lock .calendar-day-column {
   font-weight: 600;
   color: #0f172a;
   outline: none;
+  -moz-appearance: textfield;
+  appearance: textfield;
+}
+
+.custom-recur__number::-webkit-outer-spin-button,
+.custom-recur__number::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+
+.custom-recur__number:hover,
+.custom-recur__number:focus-visible {
+  background: transparent;
+  box-shadow: none;
 }
 
 .custom-recur__stepper-arrows {
@@ -3585,10 +3599,33 @@ body.scroll-lock .calendar-day-column {
 .custom-recur__stepper-arrows button {
   border: 0;
   background: transparent;
-  padding: 0.05rem;
+  padding: 0;
+  width: 1.45rem;
+  height: 1rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   line-height: 1;
   color: #475569;
+  font-size: 0;
   cursor: pointer;
+}
+
+.custom-recur__stepper-arrows button::before {
+  content: '';
+  display: block;
+  width: 0;
+  height: 0;
+  border-left: 5px solid transparent;
+  border-right: 5px solid transparent;
+}
+
+.custom-recur__stepper-arrows button:first-of-type::before {
+  border-bottom: 5px solid #475569;
+}
+
+.custom-recur__stepper-arrows button:last-of-type::before {
+  border-top: 5px solid #475569;
 }
 
 .custom-recur__select-wrap {
