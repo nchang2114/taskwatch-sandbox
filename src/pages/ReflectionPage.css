@@ -3630,9 +3630,14 @@ body.scroll-lock .calendar-day-column {
 
 .custom-recur__select-wrap {
   position: relative;
+  z-index: 2;
   flex: 1;
   min-width: 120px;
   isolation: isolate;
+}
+
+.custom-recur__select-wrap[data-open='true'] {
+  z-index: 200000;
 }
 
 .custom-recur__select-wrap--menu {
@@ -3727,7 +3732,7 @@ body.scroll-lock .calendar-day-column {
   border: 1px solid rgba(26, 43, 77, 0.12);
   background: #fff;
   box-shadow: 0 10px 24px rgba(12, 21, 54, 0.12);
-  z-index: 40000;
+  z-index: 120000;
 }
 
 .custom-recur__option {
@@ -3755,8 +3760,8 @@ body.scroll-lock .calendar-day-column {
 
 .custom-recur__weekdays {
   display: grid;
-  grid-template-columns: repeat(7, 1fr);
-  gap: 0.28rem;
+  grid-template-columns: repeat(7, 0fr);
+  gap: 0.5rem;
   flex: 1;
 }
 
@@ -3765,8 +3770,9 @@ body.scroll-lock .calendar-day-column {
   background: #e7ecff;
   color: #2b3366;
   border-radius: 999px;
-  width: 32px;
-  height: 32px;
+  width: 28px;
+  height: 28px;
+  font-size: 0.82rem;
   font-weight: 600;
   cursor: pointer;
   transition: background 160ms ease, color 160ms ease;
