@@ -3982,12 +3982,4 @@ html[data-theme='dark'] .custom-recur__primary {
   box-shadow: 0 10px 22px rgba(46, 109, 255, 0.28);
 }
 
-@media (max-width: 600px) {
-  .custom-recur__backdrop {
-    align-items: flex-end;
-  }
-  .custom-recur {
-    width: 100%;
-    border-radius: 1rem 1rem 0.75rem 0.75rem;
-  }
-}
+
