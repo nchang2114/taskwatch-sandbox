@@ -256,6 +256,24 @@ const getNextHistorySubtaskSortIndex = (subtasks: HistorySubtask[]): number => {
   return maxSort + HISTORY_SUBTASK_SORT_STEP
 }
 
+const monthDayKey = (ms: number): string => {
+  const d = new Date(ms)
+  const m = d.getMonth() + 1
+  const day = d.getDate()
+  return `${m}-${day}`
+}
+
+const ruleMonthDayKey = (rule: RepeatingSessionRule): string | null => {
+  const source =
+    Number.isFinite((rule as any).startAtMs as number)
+      ? ((rule as any).startAtMs as number)
+      : Number.isFinite((rule as any).createdAtMs as number)
+        ? ((rule as any).createdAtMs as number)
+        : null
+  if (!Number.isFinite(source as number)) return null
+  return monthDayKey(source as number)
+}
+
 type CalendarPopoverEditingState = {
   entryId: string
   value: string
@@ -6789,6 +6807,11 @@ useEffect(() => {
               const d = new Date(dayStart)
               return rule.dayOfWeek === d.getDay()
             }
+            if (rule.frequency === 'annually') {
+              const dayKey = monthDayKey(dayStart)
+              const ruleKey = ruleMonthDayKey(rule)
+              return ruleKey !== null && ruleKey === dayKey
+            }
             return false
           }
           const isWithinBoundaries = (rule: RepeatingSessionRule, baseDayStart: number) => {
@@ -7021,6 +7044,11 @@ useEffect(() => {
             if (rule.frequency === 'weekly') {
               const d = new Date(dayStart)
               return rule.dayOfWeek === d.getDay()
+            }
+            if (rule.frequency === 'annually') {
+              const dayKey = monthDayKey(dayStart)
+              const ruleKey = ruleMonthDayKey(rule)
+              return ruleKey !== null && ruleKey === dayKey
             }
             return false
           }
@@ -9120,6 +9148,7 @@ useEffect(() => {
               const minutes = start.getHours() * 60 + start.getMinutes()
               const durMin = Math.max(1, Math.round((entry.endedAt - entry.startedAt) / 60000))
               const dow = start.getDay()
+              const monthDay = monthDayKey(start.getTime())
               const matches = (r: RepeatingSessionRule) =>
                 r.isActive &&
                 r.timeOfDayMinutes === minutes &&
@@ -9129,7 +9158,10 @@ useEffect(() => {
                 (r.bucketName?.trim() || null) === (entry.bucketName?.trim() || null)
               const hasDaily = repeatingRules.some((r) => matches(r) && r.frequency === 'daily')
               const hasWeekly = repeatingRules.some((r) => matches(r) && r.frequency === 'weekly' && r.dayOfWeek === dow)
-              const currentVal: 'none' | 'daily' | 'weekly' = hasDaily ? 'daily' : hasWeekly ? 'weekly' : 'none'
+              const hasAnnual = repeatingRules.some(
+                (r) => matches(r) && r.frequency === 'annually' && ruleMonthDayKey(r) === monthDay,
+              )
+              const currentVal: 'none' | 'daily' | 'weekly' | 'annually' = hasDaily ? 'daily' : hasWeekly ? 'weekly' : hasAnnual ? 'annually' : 'none'
               return (
                 <HistoryDropdown
                   id={`repeat-${entry.id}`}
@@ -9139,9 +9171,10 @@ useEffect(() => {
                     { value: 'none', label: 'None' },
                     { value: 'daily', label: 'Daily' },
                     { value: 'weekly', label: 'Weekly' },
+                    { value: 'annually', label: 'Annually' },
                   ]}
                   onChange={async (v) => {
-                    const val = (v as 'none' | 'daily' | 'weekly')
+                    const val = (v as 'none' | 'daily' | 'weekly' | 'annually')
                     if (val === 'none') {
                       // If this entry is a guide from a repeating rule, cut the series after this instance
                       if (isGuide) {
@@ -9180,7 +9213,10 @@ useEffect(() => {
                         const seedRules = repeatingRules.filter((r) => {
                           const labelMatch = (r.taskName?.trim() || '') === labelTask && (r.goalName?.trim() || null) === labelGoal && (r.bucketName?.trim() || null) === labelBucket
                           const timeMatch = r.timeOfDayMinutes === minutes && r.durationMinutes === durMin
-                          const freqMatch = r.frequency === 'daily' || (r.frequency === 'weekly' && r.dayOfWeek === dow)
+                          const freqMatch =
+                            r.frequency === 'daily' ||
+                            (r.frequency === 'weekly' && r.dayOfWeek === dow) ||
+                            (r.frequency === 'annually' && ruleMonthDayKey(r) === monthDay)
                           const startAt = (r as any).startAtMs as number | undefined
                           const startMatch = Number.isFinite(startAt as number) && (startAt as number) === scheduledStart
                           return labelMatch && timeMatch && freqMatch && startMatch
@@ -9201,7 +9237,10 @@ useEffect(() => {
                           setRepeatingRules((prev) => prev.filter((r) => {
                             const labelMatch = (r.taskName?.trim() || '') === (entry.taskName?.trim() || '') && (r.goalName?.trim() || null) === (entry.goalName?.trim() || null) && (r.bucketName?.trim() || null) === (entry.bucketName?.trim() || null)
                             const timeMatch = r.timeOfDayMinutes === minutes && r.durationMinutes === durMin
-                            const freqMatch = r.frequency === 'daily' || (r.frequency === 'weekly' && r.dayOfWeek === dow)
+                            const freqMatch =
+                              r.frequency === 'daily' ||
+                              (r.frequency === 'weekly' && r.dayOfWeek === dow) ||
+                              (r.frequency === 'annually' && ruleMonthDayKey(r) === monthDay)
                             return !(labelMatch && timeMatch && freqMatch)
                           }))
                         }
@@ -10113,7 +10152,9 @@ useEffect(() => {
           (r.bucketName?.trim() || null) === (inspectorEntry.bucketName?.trim() || null)
         const hasDaily = repeatingRules.some((r) => matches(r) && r.frequency === 'daily')
         const hasWeekly = repeatingRules.some((r) => matches(r) && r.frequency === 'weekly' && r.dayOfWeek === dow)
-        const currentVal: 'none' | 'daily' | 'weekly' = hasDaily ? 'daily' : hasWeekly ? 'weekly' : 'none'
+        const monthDay = monthDayKey(inspectorEntry.startedAt)
+        const hasAnnual = repeatingRules.some((r) => matches(r) && r.frequency === 'annually' && ruleMonthDayKey(r) === monthDay)
+        const currentVal: 'none' | 'daily' | 'weekly' | 'annually' = hasDaily ? 'daily' : hasWeekly ? 'weekly' : hasAnnual ? 'annually' : 'none'
         return (
           <div className="calendar-inspector__repeat" aria-label="Repeat schedule">
             <span className="calendar-inspector__repeat-label" aria-hidden>
@@ -10129,9 +10170,10 @@ useEffect(() => {
                 { value: 'none', label: 'None' },
                 { value: 'daily', label: 'Daily' },
                 { value: 'weekly', label: 'Weekly' },
+                { value: 'annually', label: 'Annually' },
               ]}
               onChange={async (v) => {
-                const val = v as 'none' | 'daily' | 'weekly'
+                const val = v as 'none' | 'daily' | 'weekly' | 'annually'
                 if (val === 'none') {
                   const ids = await deactivateMatchingRulesForEntry(inspectorEntry)
                   if (Array.isArray(ids) && ids.length > 0) {
@@ -10144,7 +10186,10 @@ useEffect(() => {
                           (r.goalName?.trim() || null) === (inspectorEntry.goalName?.trim() || null) &&
                           (r.bucketName?.trim() || null) === (inspectorEntry.bucketName?.trim() || null)
                         const timeMatch = r.timeOfDayMinutes === minutes && r.durationMinutes === durMin
-                        const freqMatch = r.frequency === 'daily' || (r.frequency === 'weekly' && r.dayOfWeek === dow)
+                        const freqMatch =
+                          r.frequency === 'daily' ||
+                          (r.frequency === 'weekly' && r.dayOfWeek === dow) ||
+                          (r.frequency === 'annually' && ruleMonthDayKey(r) === monthDay)
                         return labelMatch && timeMatch && freqMatch ? { ...r, isActive: false } : r
                       }),
                     )

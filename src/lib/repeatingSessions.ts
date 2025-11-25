@@ -6,7 +6,7 @@ import { readRepeatingExceptions } from './repeatingExceptions'
 export type RepeatingSessionRule = {
   id: string
   isActive: boolean
-  frequency: 'daily' | 'weekly'
+  frequency: 'daily' | 'weekly' | 'annually'
   // 0=Sun .. 6=Sat (required for weekly)
   dayOfWeek: number | null
   // Minutes from midnight 0..1439
@@ -287,7 +287,7 @@ const mapRowToRule = (row: any): RepeatingSessionRule | null => {
   if (!row) return null
   const id = typeof row.id === 'string' ? row.id : null
   if (!id) return null
-  const frequency = row.frequency === 'daily' || row.frequency === 'weekly' ? row.frequency : 'daily'
+  const frequency = row.frequency === 'daily' || row.frequency === 'weekly' || row.frequency === 'annually' ? row.frequency : 'daily'
   // Accept both snake_case (DB) and camelCase (local fallback) shapes
   const dayOfWeek = typeof row.day_of_week === 'number' ? row.day_of_week : (typeof row.dayOfWeek === 'number' ? row.dayOfWeek : null)
   const timeOfDayMinutes = Number.isFinite(row.time_of_day_minutes)
@@ -374,7 +374,7 @@ export async function fetchRepeatingSessionRules(): Promise<RepeatingSessionRule
 
 export async function createRepeatingRuleForEntry(
   entry: HistoryEntry,
-  frequency: 'daily' | 'weekly',
+  frequency: 'daily' | 'weekly' | 'annually',
 ): Promise<RepeatingSessionRule | null> {
   const startLocal = new Date(entry.startedAt)
   const hours = startLocal.getHours()
@@ -390,7 +390,14 @@ export async function createRepeatingRuleForEntry(
   const ruleStartMs = dayStart + timeOfDayMinutes * 60000
   // To avoid creating a guide on top of the source entry, start the series at the
   // NEXT occurrence after this entry (next day for daily, next same weekday for weekly).
-  const nextStartMs = ruleStartMs + (frequency === 'daily' ? 1 : 7) * 24 * 60 * 60 * 1000
+  const nextStartMs = (() => {
+    if (frequency === 'daily') return ruleStartMs + 1 * 24 * 60 * 60 * 1000
+    if (frequency === 'weekly') return ruleStartMs + 7 * 24 * 60 * 60 * 1000
+    // annually: same month/day next year at same time
+    const base = new Date(ruleStartMs)
+    base.setFullYear(base.getFullYear() + 1)
+    return base.getTime()
+  })()
 
   // Try Supabase; if not available, persist locally
   const ruleTaskName = deriveRuleTaskNameFromEntry(entry)
@@ -511,6 +518,7 @@ export async function deactivateMatchingRulesForEntry(entry: HistoryEntry): Prom
   const durationMs = Math.max(1, entry.endedAt - entry.startedAt)
   const durationMinutes = Math.max(1, Math.round(durationMs / 60000))
   const dow = startLocal.getDay()
+  const monthDay = monthDayKey(startLocal.getTime())
   const task = entry.taskName ?? ''
   const goal = entry.goalName ?? null
   const bucket = entry.bucketName ?? null
@@ -522,7 +530,10 @@ export async function deactivateMatchingRulesForEntry(entry: HistoryEntry): Prom
     const next = rules.map((r) => {
       const labelMatch = (r.taskName ?? '') === task && (r.goalName ?? null) === goal && (r.bucketName ?? null) === bucket
       const timeMatch = r.timeOfDayMinutes === minutes && r.durationMinutes === durationMinutes
-      const freqMatch = r.frequency === 'daily' || (r.frequency === 'weekly' && r.dayOfWeek === dow)
+      const freqMatch =
+        r.frequency === 'daily' ||
+        (r.frequency === 'weekly' && r.dayOfWeek === dow) ||
+        (r.frequency === 'annually' && getRuleMonthDayKey(r) === monthDay)
       if (r.isActive && labelMatch && timeMatch && freqMatch) {
         ids.push(r.id)
         return { ...r, isActive: false }
@@ -575,6 +586,38 @@ export async function deactivateMatchingRulesForEntry(entry: HistoryEntry): Prom
     ids.push(...weeklyRows.map((r: any) => String(r.id)))
   }
 
+  // Annually (same month/day)
+  const { data: annualRows } = await supabase
+    .from('repeating_sessions')
+    .select('id, start_date')
+    .eq('user_id', session.user.id)
+    .eq('frequency', 'annually')
+    .eq('time_of_day_minutes', minutes)
+    .eq('duration_minutes', durationMinutes)
+    .eq('task_name', task)
+    .eq('goal_name', goal)
+    .eq('bucket_name', bucket)
+  const annualIds =
+    Array.isArray(annualRows) && annualRows.length > 0
+      ? annualRows
+          .filter((row: any) => {
+            const start = typeof row.start_date === 'string' ? Date.parse(row.start_date) : NaN
+            if (!Number.isFinite(start)) return false
+            return monthDayKey(start) === monthDay
+          })
+          .map((r: any) => String(r.id))
+      : []
+  if (annualIds.length > 0) {
+    const { error: annualUpdateErr } = await supabase
+      .from('repeating_sessions')
+      .update({ is_active: false })
+      .eq('user_id', session.user.id)
+      .in('id', annualIds)
+    if (!annualUpdateErr) {
+      ids.push(...annualIds)
+    }
+  }
+
   return ids
 }
 
@@ -586,6 +629,7 @@ export async function deleteMatchingRulesForEntry(entry: HistoryEntry): Promise<
   const durationMs = Math.max(1, entry.endedAt - entry.startedAt)
   const durationMinutes = Math.max(1, Math.round(durationMs / 60000))
   const dow = startLocal.getDay()
+  const monthDay = monthDayKey(startLocal.getTime())
   const task = entry.taskName ?? ''
   const goal = entry.goalName ?? null
   const bucket = entry.bucketName ?? null
@@ -596,7 +640,10 @@ export async function deleteMatchingRulesForEntry(entry: HistoryEntry): Promise<
     const next = rules.filter((r) => {
       const labelMatch = (r.taskName ?? '') === task && (r.goalName ?? null) === goal && (r.bucketName ?? null) === bucket
       const timeMatch = r.timeOfDayMinutes === minutes && r.durationMinutes === durationMinutes
-      const freqMatch = r.frequency === 'daily' || (r.frequency === 'weekly' && r.dayOfWeek === dow)
+      const freqMatch =
+        r.frequency === 'daily' ||
+        (r.frequency === 'weekly' && r.dayOfWeek === dow) ||
+        (r.frequency === 'annually' && getRuleMonthDayKey(r) === monthDay)
       const match = labelMatch && timeMatch && freqMatch
       if (match) ids.push(r.id)
       return !match
@@ -647,6 +694,39 @@ export async function deleteMatchingRulesForEntry(entry: HistoryEntry): Promise<
     ids.push(...weeklyRows.map((r: any) => String(r.id)))
   }
 
+  // Annually (same month/day)
+  const { data: annualRows } = await supabase
+    .from('repeating_sessions')
+    .select('id, start_date')
+    .eq('user_id', session.user.id)
+    .eq('frequency', 'annually')
+    .eq('time_of_day_minutes', minutes)
+    .eq('duration_minutes', durationMinutes)
+    .eq('task_name', task)
+    .eq('goal_name', goal)
+    .eq('bucket_name', bucket)
+  const annualIds =
+    Array.isArray(annualRows) && annualRows.length > 0
+      ? annualRows
+          .filter((row: any) => {
+            const start = typeof row.start_date === 'string' ? Date.parse(row.start_date) : NaN
+            if (!Number.isFinite(start)) return false
+            return monthDayKey(start) === monthDay
+          })
+          .map((r: any) => String(r.id))
+      : []
+  if (annualIds.length > 0) {
+    const { error: annualDeleteErr } = await supabase
+      .from('repeating_sessions')
+      .delete()
+      .eq('user_id', session.user.id)
+      .in('id', annualIds)
+      .select('id')
+    if (!annualDeleteErr) {
+      ids.push(...annualIds)
+    }
+  }
+
   return ids
 }
 
@@ -656,6 +736,12 @@ const toLocalDayStart = (ms: number): number => {
   const d = new Date(ms)
   d.setHours(0, 0, 0, 0)
   return d.getTime()
+}
+const monthDayKey = (ms: number): string => {
+  const d = new Date(ms)
+  const m = d.getMonth() + 1
+  const day = d.getDate()
+  return `${m}-${day}`
 }
 const parseLocalYmd = (ymd: string): number => {
   const [y, m, d] = ymd.split('-').map((t) => Number(t))
@@ -670,6 +756,17 @@ const formatLocalYmd = (ms: number): string => {
   const m = String(d.getMonth() + 1).padStart(2, '0')
   const day = String(d.getDate()).padStart(2, '0')
   return `${y}-${m}-${day}`
+}
+
+const getRuleMonthDayKey = (rule: RepeatingSessionRule): string | null => {
+  const source =
+    Number.isFinite((rule as any).startAtMs as number)
+      ? ((rule as any).startAtMs as number)
+      : Number.isFinite((rule as any).createdAtMs as number)
+        ? ((rule as any).createdAtMs as number)
+        : null
+  if (!Number.isFinite(source as number)) return null
+  return monthDayKey(source as number)
 }
 
 // Update the end boundary for a rule by id. Persists locally and remotely when possible.
@@ -788,6 +885,20 @@ export function isRuleWindowFullyResolved(
     for (let day = start; day <= endDay; day += DAY_MS) {
       const key = makeKey(rule.id, day)
       if (!confirmed.has(key) && !excepted.has(key)) return false
+    }
+    return true
+  }
+  if (rule.frequency === 'annually') {
+    let day = start
+    const anchorMonthDay = monthDayKey(start)
+    while (day <= endDay) {
+      if (monthDayKey(day) === anchorMonthDay) {
+        const key = makeKey(rule.id, day)
+        if (!confirmed.has(key) && !excepted.has(key)) return false
+      }
+      const next = new Date(day)
+      next.setFullYear(next.getFullYear() + 1)
+      day = next.getTime()
     }
     return true
   }

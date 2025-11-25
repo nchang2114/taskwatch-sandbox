@@ -1723,6 +1723,20 @@ useEffect(() => {
   const guideNowSuggestions = useMemo<ScheduledSuggestion[]>(() => {
     if (repeatingRules.length === 0) return []
     const MINUTE_MS = 60 * 1000
+    const monthDayKey = (ms: number): string => {
+      const d = new Date(ms)
+      return `${d.getMonth() + 1}-${d.getDate()}`
+    }
+    const ruleMonthDayKey = (rule: RepeatingSessionRule): string | null => {
+      const source =
+        Number.isFinite((rule as any).startAtMs as number)
+          ? ((rule as any).startAtMs as number)
+          : Number.isFinite((rule as any).createdAtMs as number)
+            ? ((rule as any).createdAtMs as number)
+            : null
+      if (!Number.isFinite(source as number)) return null
+      return monthDayKey(source as number)
+    }
     const now = Date.now()
     const toDayStart = (t: number) => { const x = new Date(t); x.setHours(0,0,0,0); return x.getTime() }
     const todayStart = toDayStart(now)
@@ -1763,10 +1777,14 @@ useEffect(() => {
     }
     const lower = (s: string | null | undefined) => (s ?? '').trim().toLowerCase()
     const considerOccurrence = (rule: RepeatingSessionRule, baseStart: number) => {
-      // Frequency filter for weekly
+      // Frequency filters
       if (rule.frequency === 'weekly') {
         const d = new Date(baseStart)
         if (rule.dayOfWeek !== null && rule.dayOfWeek !== d.getDay()) return
+      } else if (rule.frequency === 'annually') {
+        const dayKey = monthDayKey(baseStart)
+        const ruleKey = ruleMonthDayKey(rule)
+        if (!ruleKey || ruleKey !== dayKey) return
       }
       // Boundaries based on scheduled start time
       const tMin = Math.max(0, Math.min(1439, rule.timeOfDayMinutes))
