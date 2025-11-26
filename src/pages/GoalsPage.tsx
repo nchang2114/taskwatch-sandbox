@@ -1057,16 +1057,16 @@ const BUCKET_STYLE_PRESETS: Array<{
 ]
 
 const LIFE_ROUTINE_THEME_OPTIONS: BucketSurfaceStyle[] = [
-  'midnight',          // 1
-  'grove',             // 4
-  'cool-blue',         // 11
-  'muted-lavender',    // 13
-  'neutral-grey-blue', // 14
-  'cherry',            // 2 (was charcoal)
-  'ember',             // 3
-  'soft-magenta',      // 12
-  'fresh-teal',        // 9
-  'glass',             // 6
+  'midnight',
+  'grove',
+  'cool-blue',
+  'muted-lavender',
+  'neutral-grey-blue', 
+  'cherry',
+  'ember',
+  'soft-magenta',
+  'fresh-teal',
+  'glass',
 ]
 
 const getBucketStyleLabel = (style: BucketSurfaceStyle): string =>
