@@ -2785,7 +2785,7 @@ export default function ReflectionPage() {
 
   const resolvePanSnap = useCallback(
     (
-      state: { baseOffset: number; startTime: number; dayCount: number },
+      state: { baseOffset: number; startTime: number; dayCount: number; isTouch?: boolean; mode?: 'pending' | 'hdrag' },
       dx: number,
       dayWidth: number,
       view: CalendarViewMode,
@@ -2805,21 +2805,23 @@ export default function ReflectionPage() {
           ? 1
           : chunkSize
       const effectiveRaw = snapUnitSpan === 1 ? rawDays : rawDays / snapUnitSpan
-      let snapUnits = Math.round(effectiveRaw)
       const now = typeof performance !== 'undefined' ? performance.now() : Date.now()
       const elapsedMs = Math.max(now - state.startTime, 1)
-      const velocityPxPerMs = dx / elapsedMs
+      const absRaw = Math.abs(effectiveRaw)
+      const direction = effectiveRaw >= 0 ? 1 : -1
 
-      if (snapUnits === 0) {
-        if (Math.abs(effectiveRaw) > PAN_SNAP_THRESHOLD) {
-          snapUnits = effectiveRaw > 0 ? 1 : -1
-        } else if (Math.abs(velocityPxPerMs) > PAN_FLICK_VELOCITY_PX_PER_MS) {
-          snapUnits = velocityPxPerMs > 0 ? 1 : -1
-        }
+      const quickTouchFling = Boolean(state.isTouch) && state.mode === 'hdrag' && elapsedMs < 300 && absRaw > 0.05
+      let snapUnits: number
+      if (quickTouchFling) {
+        // Fast swipe: always advance at least one chunk in the swipe direction
+        const steps = Math.max(1, Math.ceil(absRaw))
+        snapUnits = direction * steps
+      } else {
+        // Controlled drag: snap only if past halfway into the next chunk
+        snapUnits = absRaw >= 0.5 ? direction * Math.max(1, Math.round(absRaw)) : 0
       }
 
       const snap = snapUnits * snapUnitSpan
-
       const targetOffset = state.baseOffset - snap
       return { snap, targetOffset }
     },
@@ -6614,6 +6616,8 @@ useEffect(() => {
       baseOffset,
       mode: 'pending',
       lastAppliedDx: 0,
+      isTouch,
+      isTouch,
     }
     // Don't capture or preventDefault yet; wait until we detect horizontal intent
     const handleMove = (e: PointerEvent) => {
@@ -7699,6 +7703,7 @@ useEffect(() => {
                         dayCount,
                         baseOffset,
                         mode: 'hdrag',
+                        isTouch,
                         lastAppliedDx: 0,
                       }
                       try { area.setPointerCapture?.(s.pointerId) } catch {}
