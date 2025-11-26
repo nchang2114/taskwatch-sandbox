@@ -771,6 +771,9 @@ html[data-theme='light'] .task-selector__bucket-badge { background: rgba(178, 24
   position: relative;
   z-index: 1;
   flex: 1 1 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
   border: none;
   background: transparent;
   color: rgba(255, 255, 255, 0.72);
@@ -801,16 +804,26 @@ html[data-theme='light'] .task-selector__bucket-badge { background: rgba(178, 24
   box-shadow: none;
 }
 
+.time-mode-toggle__text {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
 .time-mode-toggle__dot {
-  display: inline-block;
+  position: absolute;
+  right: 100%;
+  top: 50%;
+  transform: translateY(-50%);
   width: 6px;
   height: 6px;
   border-radius: 50%;
   background-color: var(--status-idle);
   box-shadow: 0 0 6px var(--status-idle);
   transition: background-color 0.2s ease, box-shadow 0.2s ease, opacity 0.2s ease;
-  margin-left: 0.4rem;
   opacity: 0.6;
+  margin-right: 0.5rem;
 }
 .time-mode-toggle__dot.status-running {
   background-color: var(--status-running);

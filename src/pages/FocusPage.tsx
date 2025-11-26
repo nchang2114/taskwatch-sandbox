@@ -5165,8 +5165,10 @@ useEffect(() => {
               className={classNames('time-mode-toggle__button', isCurrent && 'time-mode-toggle__button--active')}
               onClick={() => handleSwitchTimeMode(option.id)}
             >
-              {option.label}
-              <span className={`time-mode-toggle__dot ${dotClass}`} />
+              <span className="time-mode-toggle__text">
+                <span className={`time-mode-toggle__dot ${dotClass}`} />
+                {option.label}
+              </span>
             </button>
           )
         })}
