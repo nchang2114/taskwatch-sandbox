@@ -7,6 +7,7 @@ export type LifeRoutineConfig = {
   title: string
   blurb: string
   surfaceStyle: SurfaceStyle
+  surfaceColor?: string | null
   sortIndex: number
 }
 
@@ -281,6 +282,7 @@ const mapDbRowToRoutine = (row: LifeRoutineDbRow): LifeRoutineConfig | null => {
     return null
   }
   const blurb = typeof row.blurb === 'string' ? row.blurb : ''
+  const surfaceColor = typeof (row as any).surface_colour === 'string' ? ((row as any).surface_colour as string) : null
   const surfaceStyle = ensureSurfaceStyle(row.surface_style, DEFAULT_SURFACE_STYLE)
   const sortIndex = typeof row.sort_index === 'number' && Number.isFinite(row.sort_index) ? row.sort_index : 0
   return {
@@ -289,6 +291,7 @@ const mapDbRowToRoutine = (row: LifeRoutineDbRow): LifeRoutineConfig | null => {
     title,
     blurb,
     surfaceStyle,
+    surfaceColor,
     sortIndex,
   }
 }

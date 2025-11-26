@@ -3171,8 +3171,7 @@ const GoalRow: React.FC<GoalRowProps> = ({
     }
   }, [menuOpen, updateMenuPosition])
 
-  const surfaceStyle = goal.surfaceStyle ?? 'glass'
-  const surfaceClass = GOAL_SURFACE_CLASS_MAP[surfaceStyle] || GOAL_SURFACE_CLASS_MAP.glass
+  const surfaceClass = GOAL_SURFACE_CLASS_MAP.glass
   const isCustomizerOpen = activeCustomizerGoalId === goal.id
   const milestonesVisible = Boolean(goal.milestonesShown)
 

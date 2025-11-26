@@ -287,7 +287,7 @@ export async function fetchGoalsHierarchy(): Promise<
   const tree = goals.map((g) => {
     // card_surface column has been removed; default to 'glass' for now.
     const surfaceStyle = 'glass'
-    const goalColor = (g as any).goal_colour ?? g.color
+    const goalColor = (g as any).goal_colour ?? g.color ?? FALLBACK_GOAL_COLOR
     return {
       id: g.id,
       name: g.name,

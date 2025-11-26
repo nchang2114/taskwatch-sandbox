@@ -733,6 +733,24 @@ export function FocusPage({ viewportWidth: _viewportWidth }: FocusPageProps) {
       return false
     }
   }, [])
+  const goalGradientById = useMemo(() => {
+    const map = new Map<string, string>()
+    goalsSnapshot.forEach((goal) => {
+      if (goal?.id && typeof goal.color === 'string' && goal.color.trim().length > 0) {
+        map.set(goal.id, goal.color)
+      }
+    })
+    return map
+  }, [goalsSnapshot])
+  const lifeRoutineColorByBucket = useMemo(() => {
+    const map = new Map<string, string>()
+    lifeRoutineTasks.forEach((r) => {
+      if (r.bucketId && typeof r.surfaceColor === 'string' && r.surfaceColor.trim().length > 0) {
+        map.set(r.bucketId, r.surfaceColor.trim())
+      }
+    })
+    return map
+  }, [lifeRoutineTasks])
   // Build a lookup of life routine (bucket) title -> surface style so we can restore colors for
   // history-derived life routine suggestions that may have missing bucketSurface metadata.
   const lifeRoutineSurfaceLookup = useMemo(() => {
@@ -4657,7 +4675,16 @@ useEffect(() => {
           ? formatLocalYmd(contextRepeatingOriginalTime)
           : null)
 
-      const entryColor = gradientFromSurface(normalizedGoalSurface)
+      let entryColor: string | null = null
+      if (contextGoalId === LIFE_ROUTINES_GOAL_ID && contextBucketId) {
+        entryColor = lifeRoutineColorByBucket.get(contextBucketId) ?? null
+      }
+      if (!entryColor && contextGoalId) {
+        entryColor = goalGradientById.get(contextGoalId) ?? null
+      }
+      if (!entryColor) {
+        entryColor = gradientFromSurface(normalizedGoalSurface)
+      }
 
       const entry: HistoryEntry = {
         id: makeHistoryId(),
@@ -4703,7 +4730,7 @@ useEffect(() => {
         sessionMetadataRef.current = createEmptySessionMetadata(nextLabel)
       }
     },
-    [applyLocalHistoryChange, sessionStart],
+    [applyLocalHistoryChange, goalGradientById, sessionStart],
   )
 
   const handleOpenSnapback = useCallback(() => {
