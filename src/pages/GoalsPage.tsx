@@ -1005,27 +1005,6 @@ const sampleGradientColor = (stops: ColorStop[], pct: number): string => {
   return rgbToHex({ r: lerp(ra.r, rb.r, t), g: lerp(ra.g, rb.g, t), b: lerp(ra.b, rb.b, t) })
 }
 
-// Use Partial<Record<GoalSurfaceStyle, string>> so newly added surfaces don't trigger build errors until styled.
-const GOAL_SURFACE_CLASS_MAP: Partial<Record<GoalSurfaceStyle, string>> = {
-  glass: 'goal-card--glass',
-  midnight: 'goal-card--midnight',
-  coastal: 'goal-card--slate',
-  cherry: 'goal-card--charcoal',
-  linen: 'goal-card--linen',
-  frost: 'goal-card--frost',
-  grove: 'goal-card--grove',
-  lagoon: 'goal-card--lagoon',
-  ember: 'goal-card--ember',
-  'deep-indigo': 'goal-card--deep-indigo',
-  'warm-amber': 'goal-card--warm-amber',
-  'fresh-teal': 'goal-card--fresh-teal',
-  'sunset-orange': 'goal-card--sunset-orange',
-  'cool-blue': 'goal-card--cool-blue',
-  'soft-magenta': 'goal-card--soft-magenta',
-  'muted-lavender': 'goal-card--muted-lavender',
-  'neutral-grey-blue': 'goal-card--neutral-grey-blue',
-}
-
 const formatGradientLabel = (value: string) =>
   value
     .replace(/^from-/, '')
@@ -3191,7 +3170,7 @@ const GoalRow: React.FC<GoalRowProps> = ({
     }
   }, [menuOpen, updateMenuPosition])
 
-  const surfaceClass = GOAL_SURFACE_CLASS_MAP.glass
+  const surfaceClass = 'goal-card--glass'
   const isCustomizerOpen = activeCustomizerGoalId === goal.id
   const milestonesVisible = Boolean(goal.milestonesShown)
 
