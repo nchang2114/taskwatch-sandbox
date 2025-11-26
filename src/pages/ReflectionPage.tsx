@@ -6578,6 +6578,8 @@ useEffect(() => {
       return
     }
     if (event.button !== 0) return
+    const isTouch = (event as any).pointerType === 'touch'
+    let scrollLocked = false
     const target = event.target as HTMLElement | null
     if (target && (target.closest('.calendar-event') || target.closest('.calendar-allday-event') || target.closest('button'))) {
       return
@@ -6638,6 +6640,10 @@ useEffect(() => {
           // Horizontal drag confirmed: capture and prevent default
           try { area.setPointerCapture?.(e.pointerId) } catch {}
           state.mode = 'hdrag'
+          if (isTouch && !scrollLocked) {
+            setPageScrollLock(true)
+            scrollLocked = true
+          }
         } else {
           return
         }
@@ -6711,6 +6717,10 @@ useEffect(() => {
         }
       }
       calendarDragRef.current = null
+      if (scrollLocked) {
+        setPageScrollLock(false)
+        scrollLocked = false
+      }
     }
     window.addEventListener('pointermove', handleMove)
     window.addEventListener('pointerup', handleUp)
