@@ -1239,7 +1239,7 @@ const mapDbRowToRecord = (row: Record<string, unknown>): HistoryRecord | null =>
     bucketSurface: null,
     entryColor: typeof (row as any).entry_colour === 'string' ? ((row as any).entry_colour as string) : null,
     notes: typeof row.notes === 'string' ? row.notes : null,
-    subtasks: row.subtasks ?? null,
+    subtasks: Array.isArray((row as any).subtasks) ? ((row as any).subtasks as HistorySubtask[]) : [],
     futureSession: typeof (row as any).future_session === 'boolean' ? ((row as any).future_session as boolean) : null,
     repeatingSessionId: typeof (row as any).repeating_session_id === 'string' ? (row as any).repeating_session_id : null,
     originalTime: parseTimestamp((row as any).original_time, NaN),
