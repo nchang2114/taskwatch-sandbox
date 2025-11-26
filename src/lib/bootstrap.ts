@@ -36,6 +36,25 @@ const sanitizeTaskText = (value: string | undefined): string | null => {
   return trimmed.length > 0 ? trimmed : null
 }
 
+const normalizeGradient = (value: string | undefined | null): string => {
+  if (!value) {
+    return 'linear-gradient(135deg, #FFF8BF 0%, #FFF8BF 100%)'
+  }
+  const trimmed = value.trim()
+  if (trimmed.toLowerCase().startsWith('custom:linear-gradient(')) {
+    return trimmed.slice(7)
+  }
+  if (trimmed.toLowerCase().startsWith('linear-gradient(')) {
+    return trimmed
+  }
+  const hexMatch = trimmed.match(/^#?[0-9a-fA-F]{6}$/)
+  if (hexMatch) {
+    const hex = trimmed.startsWith('#') ? trimmed : `#${trimmed}`
+    return `linear-gradient(135deg, ${hex} 0%, ${hex} 100%)`
+  }
+  return 'linear-gradient(135deg, #FFF8BF 0%, #FFF8BF 100%)'
+}
+
 const sanitizeDifficulty = (value: string | undefined): 'none' | 'green' | 'yellow' | 'red' => {
   if (value === 'green' || value === 'yellow' || value === 'red') {
     return value
@@ -171,7 +190,8 @@ const migrateGoalsSnapshot = async (): Promise<void> => {
       id: goalId,
       user_id: userId,
       name: sanitizeGoalName(goal.name),
-      color: goal.color ?? 'from-sky-500 to-indigo-500',
+      color: normalizeGradient(goal.color),
+      goal_colour: normalizeGradient(goal.color),
       sort_index: (goalIndex + 1) * GOAL_SORT_STEP,
       starred: Boolean(goal.starred),
       goal_archive: Boolean(goal.archived),

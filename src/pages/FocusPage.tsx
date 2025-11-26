@@ -90,6 +90,7 @@ import {
   readHistoryOwnerId,
   readStoredHistory as readPersistedHistory,
   syncHistoryWithSupabase,
+  gradientFromSurface,
   type HistoryEntry,
 } from '../lib/sessionHistory'
 import { logDebug, logWarn } from '../lib/logging'
@@ -4656,6 +4657,8 @@ useEffect(() => {
           ? formatLocalYmd(contextRepeatingOriginalTime)
           : null)
 
+      const entryColor = gradientFromSurface(normalizedGoalSurface)
+
       const entry: HistoryEntry = {
         id: makeHistoryId(),
         taskName,
@@ -4669,6 +4672,7 @@ useEffect(() => {
         taskId: contextTaskId ?? null,
         goalSurface: normalizedGoalSurface,
         bucketSurface: normalizedBucketSurface,
+        entryColor,
         notes: '',
         subtasks: [],
         repeatingSessionId: contextRepeatingRuleId ?? null,

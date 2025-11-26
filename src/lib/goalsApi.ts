@@ -165,7 +165,7 @@ export async function fetchGoalsHierarchy(): Promise<
   {
     const { data, error } = await supabase
       .from('goals')
-      .select('id, name, color, sort_index, starred, goal_archive, created_at, milestones_shown')
+      .select('id, name, color, goal_colour, sort_index, starred, goal_archive, created_at, milestones_shown')
       .order('sort_index', { ascending: true })
     goals = data as any[] | null
     gErr = error
@@ -175,7 +175,7 @@ export async function fetchGoalsHierarchy(): Promise<
       includeMilestones = false
       const retry = await supabase
         .from('goals')
-        .select('id, name, color, sort_index, starred, goal_archive, created_at')
+        .select('id, name, color, goal_colour, sort_index, starred, goal_archive, created_at')
         .order('sort_index', { ascending: true })
       goals = retry.data as any[] | null
       gErr = retry.error
@@ -287,10 +287,11 @@ export async function fetchGoalsHierarchy(): Promise<
   const tree = goals.map((g) => {
     // card_surface column has been removed; default to 'glass' for now.
     const surfaceStyle = 'glass'
+    const goalColor = (g as any).goal_colour ?? g.color
     return {
       id: g.id,
       name: g.name,
-      color: g.color,
+      color: goalColor,
       createdAt: typeof (g as any).created_at === 'string' ? ((g as any).created_at as string) : undefined,
       starred: Boolean((g as any).starred),
       surfaceStyle,
@@ -523,6 +524,7 @@ export async function createGoal(name: string, color: string, surface: string = 
     user_id: session.user.id,
     name,
     color,
+    goal_colour: color,
     sort_index,
     starred: false,
     goal_archive: false,
@@ -549,7 +551,11 @@ export async function setGoalColor(goalId: string, color: string) {
   if (!supabase) return
   const userId = await getActiveUserId()
   if (!userId) return
-  await supabase.from('goals').update({ color }).eq('id', goalId).eq('user_id', userId)
+  await supabase
+    .from('goals')
+    .update({ color, goal_colour: color })
+    .eq('id', goalId)
+    .eq('user_id', userId)
 }
 
 export async function setGoalSurface(goalId: string, surface: string | null) {

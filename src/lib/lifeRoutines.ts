@@ -10,6 +10,44 @@ export type LifeRoutineConfig = {
   sortIndex: number
 }
 
+const SURFACE_GRADIENTS: Record<SurfaceStyle, string> = {
+  glass: 'linear-gradient(135deg, #313c67 0%, #1f2952 45%, #121830 100%)',
+  midnight: 'linear-gradient(135deg, #8e9bff 0%, #6c86ff 45%, #3f51b5 100%)',
+  slate: 'linear-gradient(135deg, #97e3ff 0%, #5ec0ff 45%, #1f7adb 100%)',
+  charcoal: 'linear-gradient(135deg, #ffb8d5 0%, #f472b6 45%, #be3a84 100%)',
+  linen: 'linear-gradient(135deg, #ffd4aa 0%, #f9a84f 45%, #d97706 100%)',
+  frost: 'linear-gradient(135deg, #aee9ff 0%, #6dd3ff 45%, #1d9bf0 100%)',
+  grove: 'linear-gradient(135deg, #baf5d8 0%, #4ade80 45%, #15803d 100%)',
+  lagoon: 'linear-gradient(135deg, #a7dcff 0%, #60a5fa 45%, #2563eb 100%)',
+  ember: 'linear-gradient(135deg, #ffd5b5 0%, #fb923c 45%, #c2410c 100%)',
+  'deep-indigo': 'linear-gradient(135deg, #b4b8ff 0%, #6a6ee8 45%, #2c2f7a 100%)',
+  'warm-amber': 'linear-gradient(135deg, #ffe6b3 0%, #fbbf24 45%, #b45309 100%)',
+  'fresh-teal': 'linear-gradient(135deg, #99f6e4 0%, #2dd4bf 45%, #0f766e 100%)',
+  'sunset-orange': 'linear-gradient(135deg, #ffc6b3 0%, #fb8a72 45%, #e1532e 100%)',
+  'cool-blue': 'linear-gradient(135deg, #cfe8ff 0%, #60a5fa 45%, #1e40af 100%)',
+  'soft-magenta': 'linear-gradient(135deg, #ffd1f4 0%, #f472b6 45%, #a21caf 100%)',
+  'muted-lavender': 'linear-gradient(135deg, #e9e1ff 0%, #c4b5fd 45%, #6d28d9 100%)',
+  'neutral-grey-blue': 'linear-gradient(135deg, #e2e8f0 0%, #94a3b8 45%, #475569 100%)',
+  leaf: 'linear-gradient(135deg, #a4eec4 0%, #4ade80 45%, #15803d 100%)',
+  sprout: 'linear-gradient(135deg, #bdf7d3 0%, #22c55e 45%, #166534 100%)',
+  fern: 'linear-gradient(135deg, #c8f7da 0%, #16a34a 45%, #14532d 100%)',
+  sage: 'linear-gradient(135deg, #d6f4e0 0%, #84cc16 45%, #4d7c0f 100%)',
+  meadow: 'linear-gradient(135deg, #e0f7d6 0%, #65a30d 45%, #3f6212 100%)',
+  willow: 'linear-gradient(135deg, #e5f6e0 0%, #22c55e 45%, #15803d 100%)',
+  pine: 'linear-gradient(135deg, #d9f5e6 0%, #15803d 45%, #0f3d23 100%)',
+  basil: 'linear-gradient(135deg, #e3f8e7 0%, #16a34a 45%, #166534 100%)',
+  mint: 'linear-gradient(135deg, #d5f7ef 0%, #22c55e 45%, #0f766e 100%)',
+  coral: 'linear-gradient(135deg, #ffd6c9 0%, #fb8a72 45%, #e1532e 100%)',
+  peach: 'linear-gradient(135deg, #ffe1c7 0%, #fbbf24 45%, #d97706 100%)',
+  apricot: 'linear-gradient(135deg, #ffe5cf 0%, #f59e0b 45%, #b45309 100%)',
+  salmon: 'linear-gradient(135deg, #ffd1c7 0%, #fb8a72 45%, #e1532e 100%)',
+  tangerine: 'linear-gradient(135deg, #ffe0c2 0%, #f97316 45%, #c2410c 100%)',
+  papaya: 'linear-gradient(135deg, #ffe7d0 0%, #fb923c 45%, #c2410c 100%)',
+}
+
+const gradientFromSurface = (surface: SurfaceStyle | null | undefined): string =>
+  (surface && SURFACE_GRADIENTS[surface]) || 'linear-gradient(135deg, #FFF8BF 0%, #FFF8BF 100%)'
+
 export const LIFE_ROUTINE_STORAGE_KEY = 'nc-taskwatch-life-routines-v1'
 export const LIFE_ROUTINE_UPDATE_EVENT = 'nc-life-routines:updated'
 export const LIFE_ROUTINE_USER_STORAGE_KEY = 'nc-taskwatch-life-routines-user'
@@ -286,6 +324,7 @@ export const pushLifeRoutinesToSupabase = async (
     title: routine.title,
     blurb: routine.blurb,
     surface_style: routine.surfaceStyle,
+    surface_colour: gradientFromSurface(routine.surfaceStyle),
     sort_index: index,
   }))
 

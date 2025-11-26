@@ -50,6 +50,7 @@ import {
   readStoredHistory as readPersistedHistory,
   persistHistorySnapshot,
   syncHistoryWithSupabase,
+  gradientFromSurface,
   type HistoryEntry,
   type HistorySubtask,
   areHistorySubtasksEqual,
@@ -2273,6 +2274,7 @@ const resolveGoalMetadata = (
   const normalizedGoalName = goalNameRaw?.toLowerCase() ?? ''
   const normalizedBucketName = bucketNameRaw?.toLowerCase() ?? ''
   const storedGoalSurfaceInfo = entry.goalSurface ? getSurfaceColorInfo(entry.goalSurface) : undefined
+  const entryColorInfo = resolveGoalColorInfo(entry.entryColor)
   // Treat logged Snapback markers as a virtual goal with crimson/orange accent
   const parseSnapbackReason = (taskName: string): string | null => {
     const prefix = 'Snapback • '
@@ -2322,7 +2324,7 @@ const resolveGoalMetadata = (
     }
   }
 
-  const fallbackSurfaceInfo = storedGoalSurfaceInfo ?? getSurfaceColorInfo(entry.goalSurface)
+  const fallbackSurfaceInfo = entryColorInfo ?? storedGoalSurfaceInfo ?? getSurfaceColorInfo(entry.goalSurface)
   return { label: UNCATEGORISED_LABEL, colorInfo: fallbackSurfaceInfo }
 }
 
@@ -3378,6 +3380,7 @@ const [inspectorFallbackMessage, setInspectorFallbackMessage] = useState<string 
       if (bucketKey.length > 0) {
         bucketSurface = bucketSurfaceLookup.byGoal.get(scopedBucketKey) ?? bucketSurfaceLookup.byName.get(bucketKey) ?? null
       }
+      const entryColor = gradientFromSurface(goalSurface)
       const entry: HistoryEntry = {
         id: makeHistoryId(),
         taskName: detail.taskName,
@@ -3391,6 +3394,7 @@ const [inspectorFallbackMessage, setInspectorFallbackMessage] = useState<string 
         endedAt: end,
         goalSurface,
         bucketSurface: bucketSurface,
+        entryColor,
         notes: '',
         subtasks: [],
         futureSession: true,
@@ -3957,6 +3961,7 @@ const [inspectorFallbackMessage, setInspectorFallbackMessage] = useState<string 
       endedAt,
       goalSurface: DEFAULT_SURFACE_STYLE,
       bucketSurface: null,
+      entryColor: gradientFromSurface(DEFAULT_SURFACE_STYLE),
       notes: '',
       subtasks: [],
       futureSession: isFuture,
@@ -6979,6 +6984,7 @@ useEffect(() => {
                 taskId: null,
                 goalSurface: DEFAULT_SURFACE_STYLE,
                 bucketSurface: null,
+                entryColor: gradientFromSurface(DEFAULT_SURFACE_STYLE),
                 notes: '',
                 subtasks: [],
               }
@@ -7226,6 +7232,7 @@ useEffect(() => {
               taskId: null,
               goalSurface: DEFAULT_SURFACE_STYLE,
               bucketSurface: null,
+              entryColor: gradientFromSurface(DEFAULT_SURFACE_STYLE),
               notes: '',
               subtasks: [],
             }
