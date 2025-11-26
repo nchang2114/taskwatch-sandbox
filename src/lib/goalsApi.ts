@@ -3,12 +3,6 @@ import { QUICK_LIST_GOAL_NAME, generateUuid } from './quickListRemote'
 // Surface styles are now neutralized for goals; keep import placeholder-free.
 
 const FALLBACK_GOAL_COLOR = 'linear-gradient(135deg, #FFF8BF 0%, #FFF8BF 100%)'
-const errorMentionsColumn = (err: any, column: string): boolean => {
-  if (!err) return false
-  const normalized = column.toLowerCase()
-  const combined = `${(err.message || '').toString()} ${(err.details || '').toString()} ${(err.hint || '').toString()}`.toLowerCase()
-  return combined.includes(normalized)
-}
 
 export type DbGoal = {
   id: string
