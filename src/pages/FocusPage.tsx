@@ -199,7 +199,6 @@ const LIFE_ROUTINES_SURFACE: SurfaceStyle = 'linen'
 const QUICK_LIST_NAME = 'Quick List'
 const QUICK_LIST_GOAL_ID = 'quick-list'
 const QUICK_LIST_BUCKET_ID = 'quick-list-bucket'
-const QUICK_LIST_SURFACE: SurfaceStyle = 'cool-blue'
 const formatLocalYmd = (ms: number): string => {
   const d = new Date(ms)
   const y = d.getFullYear()
@@ -2072,18 +2071,6 @@ useEffect(() => {
     focusSource?.goalSurface ?? activeFocusCandidate?.goalSurface ?? DEFAULT_SURFACE_STYLE
   const effectiveBucketSurface =
     focusSource?.bucketSurface ?? activeFocusCandidate?.bucketSurface ?? null
-  const focusGoalIdentifier = focusSource?.goalId ?? activeFocusCandidate?.goalId ?? null
-  const isLifeRoutineFocus = focusGoalIdentifier === LIFE_ROUTINES_GOAL_ID
-  const isQuickListFocus = isQuickListGoal(focusGoalIdentifier)
-  const focusGradient = useMemo(() => {
-    if (isLifeRoutineFocus && activeFocusCandidate?.bucketId) {
-      return lifeRoutineColorByBucket.get(activeFocusCandidate.bucketId) ?? null
-    }
-    if (focusGoalIdentifier) {
-      return goalGradientById.get(focusGoalIdentifier) ?? null
-    }
-    return null
-  }, [activeFocusCandidate?.bucketId, focusGoalIdentifier, goalGradientById, isLifeRoutineFocus, lifeRoutineColorByBucket])
   const focusSurfaceClasses = useMemo(() => [], [])
   const focusInlineStyle: React.CSSProperties | undefined = undefined
   const notebookKey = useMemo(
@@ -5184,9 +5171,6 @@ useEffect(() => {
                             : !isDefaultTask && candidateLower === currentTaskLower
                           const diffClass =
                             task.difficulty && task.difficulty !== 'none' ? `goal-task-row--diff-${task.difficulty}` : ''
-                          const isLifeSuggestion =
-                            (task.goalName ?? '').trim().toLowerCase() === LIFE_ROUTINES_NAME.toLowerCase()
-                          const gradientStyle: React.CSSProperties | undefined = undefined
                           const isQuickListTask = isQuickListGoal(task.goalId)
                           const rowClassName = [
                             'task-selector__task',
@@ -5210,7 +5194,6 @@ useEffect(() => {
                               <button
                                 type="button"
                                 className={rowClassName}
-                                style={gradientStyle}
                                 onClick={() =>
                                   handleSelectTask(task.taskName, {
                                     goalId: task.goalId,
@@ -5302,7 +5285,6 @@ useEffect(() => {
                           ]
                             .filter(Boolean)
                             .join(' ')
-                          const gradientStyle: React.CSSProperties | undefined = undefined
                           const diffBadgeClass =
                             task.difficulty && task.difficulty !== 'none'
                               ? ['goal-task-diff', `goal-task-diff--${task.difficulty}`, 'task-selector__diff', 'task-selector__diff-chip']
@@ -5315,7 +5297,6 @@ useEffect(() => {
                               <button
                                 type="button"
                                 className={rowClassName}
-                                style={gradientStyle}
                                 onClick={() =>
                                   handleSelectTask(task.taskName, {
                                     goalId: task.goalId,
@@ -5390,10 +5371,6 @@ useEffect(() => {
                               focusSource.bucketId === task.bucketId &&
                               currentTaskLower === taskLower
                             : !isDefaultTask && currentTaskLower === taskLower
-                          const gradientStyle: React.CSSProperties | undefined =
-                            task.surfaceColor && task.surfaceColor.toLowerCase().includes('gradient')
-                              ? { backgroundImage: task.surfaceColor }
-                              : undefined
                           const rowClassName = [
                             'task-selector__task',
                             'goal-task-row',
@@ -5867,10 +5844,6 @@ useEffect(() => {
                           ]
                             .filter(Boolean)
                             .join(' ')
-                          const gradientStyle: React.CSSProperties | undefined =
-                            task.entryColor && task.entryColor.toLowerCase().includes('gradient')
-                              ? { backgroundImage: task.entryColor }
-                              : undefined
                           const diffBadgeClass =
                             task.difficulty && task.difficulty !== 'none'
                               ? ['goal-task-diff', `goal-task-diff--${task.difficulty}`, 'task-selector__diff', 'task-selector__diff-chip']
@@ -5974,10 +5947,6 @@ useEffect(() => {
                     ]
                       .filter(Boolean)
                       .join(' ')
-                    const gradientStyle: React.CSSProperties | undefined =
-                      task.entryColor && task.entryColor.toLowerCase().includes('gradient')
-                        ? { backgroundImage: task.entryColor }
-                        : undefined
                     const diffBadgeClass =
                       task.difficulty && task.difficulty !== 'none'
                         ? ['goal-task-diff', `goal-task-diff--${task.difficulty}`, 'task-selector__diff', 'task-selector__diff-chip']
@@ -6064,7 +6033,6 @@ useEffect(() => {
                         focusSource.bucketId === task.bucketId &&
                         currentTaskLower === taskLower
                       : !isDefaultTask && currentTaskLower === taskLower
-                    const gradientStyle: React.CSSProperties | undefined = undefined
                     const rowClassName = [
                       'task-selector__task',
                       'goal-task-row',
@@ -6096,8 +6064,6 @@ useEffect(() => {
                               repeatingOriginalTime: null,
                             })
                           }
-                          style={gradientStyle}
-                            style={gradientStyle}
                         >
                           <div className="task-selector__task-main">
                             <div className="task-selector__task-content">
