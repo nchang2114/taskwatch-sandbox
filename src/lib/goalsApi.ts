@@ -273,13 +273,18 @@ export async function fetchGoalsHierarchy(): Promise<
 
   // Build hierarchy
   const bucketsByGoal = new Map<string, Array<{ id: string; name: string; favorite: boolean; tasks: any[] }>>()
-  const bucketMap = new Map<string, { id: string; name: string; favorite: boolean; tasks: any[] }>()
+  const bucketMap = new Map<
+    string,
+    { id: string; name: string; favorite: boolean; archived: boolean; surfaceStyle: string; tasks: any[] }
+  >()
   ;(buckets ?? []).forEach((b) => {
+    const surfaceStyle = ensureSurfaceStyle((b as any).buckets_card_style, DEFAULT_SURFACE_STYLE)
     const node = {
       id: b.id,
       name: b.name,
       favorite: b.favorite,
       archived: Boolean((b as any).bucket_archive),
+      surfaceStyle,
       tasks: [] as any[],
     }
     bucketMap.set(b.id, node)
@@ -322,7 +327,6 @@ export async function fetchGoalsHierarchy(): Promise<
       milestonesShown: includeMilestones ? Boolean((g as any).milestones_shown) : undefined,
       buckets: (bucketsByGoal.get(g.id) ?? []).map((bucket) => ({
         ...bucket,
-        // Buckets no longer carry a surface style for UI; keep structure flat.
       })),
     }
   })
