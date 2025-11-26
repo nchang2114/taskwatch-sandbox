@@ -108,8 +108,6 @@ const SNAP_RANGE_DEFS: Record<SnapRangeKey, RangeDefinition> = {
 }
 // snap-tabs removed; keep range fixed to 'all'
 
-const PAN_SNAP_THRESHOLD = 0.35
-const PAN_FLICK_VELOCITY_PX_PER_MS = 0.6
 const PAN_MIN_ANIMATION_MS = 220
 const PAN_MAX_ANIMATION_MS = 450
 const MAX_BUFFER_DAYS = 28
@@ -2521,6 +2519,7 @@ export default function ReflectionPage() {
     baseOffset: number
     mode: 'pending' | 'hdrag'
     lastAppliedDx: number
+    isTouch?: boolean
   } | null>(null)
   const calendarPanCleanupRef = useRef<((shouldCommit: boolean) => void) | null>(null)
   const calendarPanFallbackTimeoutRef = useRef<number | null>(null)
@@ -6616,7 +6615,6 @@ useEffect(() => {
       baseOffset,
       mode: 'pending',
       lastAppliedDx: 0,
-      isTouch,
       isTouch,
     }
     // Don't capture or preventDefault yet; wait until we detect horizontal intent
