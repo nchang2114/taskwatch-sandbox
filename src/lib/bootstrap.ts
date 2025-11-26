@@ -14,7 +14,7 @@ import {
 import { readStoredLifeRoutines, pushLifeRoutinesToSupabase } from './lifeRoutines'
 import { readStoredGoalsSnapshot, readGoalsSnapshotOwner, GOALS_GUEST_USER_ID } from './goalsSync'
 import { QUICK_LIST_GOAL_NAME } from './quickListRemote'
-import { ensureSurfaceStyle, DEFAULT_SURFACE_STYLE, ensureServerBucketStyle } from './surfaceStyles'
+import { DEFAULT_SURFACE_STYLE, ensureServerBucketStyle } from './surfaceStyles'
 
 let bootstrapPromises = new Map<string, Promise<boolean>>()
 const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
