@@ -1,5 +1,6 @@
 import { supabase, ensureSingleUserSession } from './supabaseClient'
 import { QUICK_LIST_GOAL_NAME, generateUuid } from './quickListRemote'
+import { DEFAULT_SURFACE_STYLE, ensureSurfaceStyle } from './surfaceStyles'
 // Surface styles are now neutralized for goals; keep import placeholder-free.
 
 const GOAL_COLOUR_PRESETS: Record<string, string> = {
@@ -27,6 +28,11 @@ const normalizeGoalColour = (value: string | null | undefined): string | null =>
     return `linear-gradient(135deg, ${hex} 0%, ${hex} 100%)`
   }
   return null
+}
+
+const sanitizeBucketSurfaceStyle = (value: string | null | undefined): string | null => {
+  if (value === null || value === undefined) return null
+  return ensureSurfaceStyle(value, DEFAULT_SURFACE_STYLE)
 }
 
 export type DbGoal = {
@@ -691,6 +697,7 @@ export async function createBucket(goalId: string, name: string, surface: string
   if (!session?.user?.id) {
     return null
   }
+  const normalizedSurface = sanitizeBucketSurfaceStyle(surface) ?? DEFAULT_SURFACE_STYLE
   const sort_index = await nextSortIndex('buckets', { goal_id: goalId })
   const { data, error } = await supabase
     .from('buckets')
@@ -702,7 +709,7 @@ export async function createBucket(goalId: string, name: string, surface: string
         favorite: false,
         bucket_archive: false,
         sort_index,
-        buckets_card_style: surface,
+        buckets_card_style: normalizedSurface,
       },
     ])
     .select('id, name, favorite, bucket_archive, sort_index, buckets_card_style')
@@ -715,7 +722,13 @@ export async function setBucketSurface(bucketId: string, surface: string | null)
   if (!supabase) return
   const userId = await getActiveUserId()
   if (!userId) return
-  await supabase.from('buckets').update({ buckets_card_style: surface }).eq('id', bucketId).eq('user_id', userId)
+  const normalizedSurface =
+    surface === null ? null : sanitizeBucketSurfaceStyle(surface) ?? DEFAULT_SURFACE_STYLE
+  await supabase
+    .from('buckets')
+    .update({ buckets_card_style: normalizedSurface })
+    .eq('id', bucketId)
+    .eq('user_id', userId)
 }
 
 export async function renameBucket(bucketId: string, name: string) {
