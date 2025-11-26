@@ -1014,8 +1014,8 @@ const formatGradientLabel = (value: string) =>
 // Life routine theme choices (ordered as requested)
 const BUCKET_STYLE_CLASS_MAP: Partial<Record<BucketSurfaceStyle, string>> = {
   glass: 'goal-bucket-item--surface-glass',
-  coastal: 'goal-bucket-item--surface-slate',
-  cherry: 'goal-bucket-item--surface-charcoal',
+  coastal: 'goal-bucket-item--surface-coastal',
+  cherry: 'goal-bucket-item--surface-cherry',
   midnight: 'goal-bucket-item--surface-midnight',
   linen: 'goal-bucket-item--surface-linen',
   frost: 'goal-bucket-item--surface-frost',

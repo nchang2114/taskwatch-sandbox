@@ -3639,12 +3639,14 @@ html[data-theme='light'] .goal-task-add:focus-visible {
   box-shadow: 0 16px 30px -22px rgba(40, 54, 170, 0.24);
 }
 
+.goal-bucket-item--surface-coastal,
 .goal-bucket-item--surface-slate {
   background: linear-gradient(135deg, rgba(151, 227, 255, 0.24), rgba(120, 198, 255, 0.14));
   border-color: rgba(82, 168, 255, 0.2);
   box-shadow: 0 16px 30px -22px rgba(22, 94, 160, 0.22);
 }
 
+.goal-bucket-item--surface-cherry,
 .goal-bucket-item--surface-charcoal {
   background: linear-gradient(135deg, rgba(255, 188, 213, 0.26), rgba(255, 214, 229, 0.16));
   border-color: rgba(231, 174, 206, 0.22);
@@ -3735,12 +3737,14 @@ html[data-theme='light'] .goal-bucket-item--surface-midnight {
   box-shadow: 0 12px 22px -18px rgba(93, 95, 240, 0.16);
 }
 
+html[data-theme='light'] .goal-bucket-item--surface-coastal,
 html[data-theme='light'] .goal-bucket-item--surface-slate {
   background: linear-gradient(135deg, rgba(120, 215, 255, 0.2), rgba(162, 220, 255, 0.12));
   border-color: rgba(31, 200, 255, 0.2);
   box-shadow: 0 12px 22px -18px rgba(66, 150, 220, 0.16);
 }
 
+html[data-theme='light'] .goal-bucket-item--surface-cherry,
 html[data-theme='light'] .goal-bucket-item--surface-charcoal {
   background: linear-gradient(135deg, rgba(255, 188, 213, 0.2), rgba(255, 222, 232, 0.12));
   border-color: rgba(255, 155, 201, 0.2);
