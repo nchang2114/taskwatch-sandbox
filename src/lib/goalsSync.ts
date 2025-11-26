@@ -162,7 +162,8 @@ export const createGoalsSnapshot = (goals: Goal[] | unknown): GoalSnapshot[] => 
       return
     }
     const color = typeof candidate.color === 'string' ? candidate.color : undefined
-    const surfaceStyle = ensureSurfaceStyle(candidate.surfaceStyle, DEFAULT_SURFACE_STYLE)
+    // Force goal surface to default; goal card styling no longer depends on persisted surface styles.
+    const surfaceStyle = DEFAULT_SURFACE_STYLE
     const starred = Boolean(candidate.starred)
     const archived = Boolean(candidate.archived)
     const milestonesShown = typeof (candidate as any).milestonesShown === 'boolean' ? ((candidate as any).milestonesShown as boolean) : undefined
