@@ -703,21 +703,29 @@ export async function createBucket(goalId: string, name: string, surface: string
   }
   const normalizedSurface = sanitizeBucketSurfaceStyle(surface) ?? DEFAULT_SURFACE_STYLE
   const sort_index = await nextSortIndex('buckets', { goal_id: goalId })
-  const { data, error } = await supabase
-    .from('buckets')
-    .insert([
-      {
-        user_id: session.user.id,
-        goal_id: goalId,
-        name,
-        favorite: false,
-        bucket_archive: false,
-        sort_index,
-        buckets_card_style: normalizedSurface,
-      },
-    ])
-    .select('id, name, favorite, bucket_archive, sort_index, buckets_card_style')
-    .single()
+  const payload = {
+    user_id: session.user.id,
+    goal_id: goalId,
+    name,
+    favorite: false,
+    bucket_archive: false,
+    sort_index,
+    buckets_card_style: normalizedSurface,
+  }
+  const attemptInsert = async (style: string | null) => {
+    const base = { ...payload, buckets_card_style: style }
+    return supabase
+      .from('buckets')
+      .insert([base])
+      .select('id, name, favorite, bucket_archive, sort_index, buckets_card_style')
+      .single()
+  }
+  let { data, error } = await attemptInsert(normalizedSurface)
+  if (error && String((error as any)?.code || '') === '23514') {
+    const retry = await attemptInsert(null)
+    data = retry.data
+    error = retry.error
+  }
   if (error) return null
   return data as { id: string; name: string; favorite: boolean; bucket_archive?: boolean; sort_index: number }
 }
@@ -728,11 +736,22 @@ export async function setBucketSurface(bucketId: string, surface: string | null)
   if (!userId) return
   const normalizedSurface =
     surface === null ? null : sanitizeBucketSurfaceStyle(surface) ?? DEFAULT_SURFACE_STYLE
-  await supabase
+  let { error } = await supabase
     .from('buckets')
     .update({ buckets_card_style: normalizedSurface })
     .eq('id', bucketId)
     .eq('user_id', userId)
+  if (error && String((error as any)?.code || '') === '23514') {
+    const retry = await supabase
+      .from('buckets')
+      .update({ buckets_card_style: null })
+      .eq('id', bucketId)
+      .eq('user_id', userId)
+    error = retry.error
+  }
+  if (error) {
+    throw error
+  }
 }
 
 export async function renameBucket(bucketId: string, name: string) {

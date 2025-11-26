@@ -273,7 +273,17 @@ const migrateGoalsSnapshot = async (): Promise<void> => {
   if (bucketRows.length > 0) {
     const { error } = await supabase.from('buckets').insert(bucketRows)
     if (error) {
-      throw error
+      const code = String((error as any)?.code || '')
+      if (code === '23514') {
+        // Retry with null surface styles to satisfy strict server checks
+        const fallbackRows = bucketRows.map((row) => ({ ...row, buckets_card_style: null }))
+        const { error: retryError } = await supabase.from('buckets').insert(fallbackRows)
+        if (retryError) {
+          throw retryError
+        }
+      } else {
+        throw error
+      }
     }
   }
   if (taskRows.length > 0) {

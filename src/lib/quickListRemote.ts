@@ -140,7 +140,17 @@ export async function ensureQuickListRemoteStructures(): Promise<{ goalId: strin
         }
         const { error: bucketInsertError } = await supabase.from('buckets').insert(bucketPayload)
         if (bucketInsertError) {
-          return null
+          const code = String((bucketInsertError as any)?.code || '')
+          if (code === '23514') {
+            const { error: retryError } = await supabase
+              .from('buckets')
+              .insert({ ...bucketPayload, buckets_card_style: null })
+            if (retryError) {
+              return null
+            }
+          } else {
+            return null
+          }
         }
       }
       return { goalId, bucketId }
