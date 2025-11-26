@@ -1076,17 +1076,19 @@ const getSurfaceLabel = (surface: BucketSurfaceStyle): string =>
 const ThinProgress: React.FC<{ value: number; gradient: string; className?: string }> = ({ value, gradient, className }) => {
   const isCustomGradient = gradient.startsWith('custom:')
   const customGradientValue = isCustomGradient ? gradient.slice(7) : undefined
+  const resolvedGradient =
+    customGradientValue ||
+    (gradient.toLowerCase().startsWith('linear-gradient(') ? gradient : BASE_GRADIENT_PREVIEW[gradient]) ||
+    'linear-gradient(135deg, #6366f1 0%, #ec4899 100%)'
   return (
     <div className={classNames('h-2 w-full rounded-full bg-white/10 overflow-hidden', className)}>
       <div
         className={classNames(
           'h-full rounded-full goal-progress-fill',
-          !isCustomGradient && 'bg-gradient-to-r',
-          !isCustomGradient && gradient,
         )}
         style={{
           width: `${Math.max(0, Math.min(100, value))}%`,
-          backgroundImage: customGradientValue,
+          backgroundImage: resolvedGradient,
         }}
       />
     </div>
