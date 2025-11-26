@@ -1,5 +1,6 @@
 import type { GoalSeed } from './goalsApi'
 import { DEFAULT_SURFACE_STYLE, ensureServerBucketStyle } from './surfaceStyles'
+import { normalizeGoalColour, FALLBACK_GOAL_COLOR } from './goalsApi'
 
 type DemoTask = {
   id: string
@@ -182,7 +183,7 @@ export const DEMO_GOALS: DemoGoal[] = [
 
 export const DEMO_GOAL_SEEDS: GoalSeed[] = DEMO_GOALS.map((goal) => ({
   name: goal.name,
-  goalColour: goal.goalColour,
+  goalColour: normalizeGoalColour(goal.goalColour, FALLBACK_GOAL_COLOR),
   surfaceStyle: ensureServerBucketStyle(goal.surfaceStyle, DEFAULT_SURFACE_STYLE),
   starred: Boolean(goal.starred),
   archived: Boolean(goal.archived),

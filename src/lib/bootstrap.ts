@@ -10,6 +10,8 @@ import {
   setTaskPriorityAndResort,
   setTaskCompletedAndResort,
   upsertTaskSubtask,
+  normalizeGoalColour,
+  FALLBACK_GOAL_COLOR,
 } from './goalsApi'
 import { readStoredLifeRoutines, pushLifeRoutinesToSupabase } from './lifeRoutines'
 import { readStoredGoalsSnapshot, readGoalsSnapshotOwner, GOALS_GUEST_USER_ID } from './goalsSync'
@@ -37,24 +39,8 @@ const sanitizeTaskText = (value: string | undefined): string | null => {
   return trimmed.length > 0 ? trimmed : null
 }
 
-const normalizeGradient = (value: string | undefined | null): string => {
-  if (!value) {
-    return 'linear-gradient(135deg, #FFF8BF 0%, #FFF8BF 100%)'
-  }
-  const trimmed = value.trim()
-  if (trimmed.toLowerCase().startsWith('custom:linear-gradient(')) {
-    return trimmed.slice(7)
-  }
-  if (trimmed.toLowerCase().startsWith('linear-gradient(')) {
-    return trimmed
-  }
-  const hexMatch = trimmed.match(/^#?[0-9a-fA-F]{6}$/)
-  if (hexMatch) {
-    const hex = trimmed.startsWith('#') ? trimmed : `#${trimmed}`
-    return `linear-gradient(135deg, ${hex} 0%, ${hex} 100%)`
-  }
-  return 'linear-gradient(135deg, #FFF8BF 0%, #FFF8BF 100%)'
-}
+const normalizeGradient = (value: string | undefined | null): string =>
+  normalizeGoalColour(value, FALLBACK_GOAL_COLOR)
 
 const sanitizeDifficulty = (value: string | undefined): 'none' | 'green' | 'yellow' | 'red' => {
   if (value === 'green' || value === 'yellow' || value === 'red') {
