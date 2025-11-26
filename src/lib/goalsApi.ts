@@ -697,6 +697,7 @@ export async function setGoalSortIndex(goalId: string, toIndex: number) {
 // ---------- Buckets ----------
 export async function createBucket(goalId: string, name: string, surface: string = 'glass') {
   if (!supabase) return null
+  const client = supabase
   const session = await ensureSingleUserSession()
   if (!session?.user?.id) {
     return null
@@ -714,7 +715,7 @@ export async function createBucket(goalId: string, name: string, surface: string
   }
   const attemptInsert = async (style: string | null) => {
     const base = { ...payload, buckets_card_style: style }
-    return supabase
+    return client
       .from('buckets')
       .insert([base])
       .select('id, name, favorite, bucket_archive, sort_index, buckets_card_style')
@@ -732,17 +733,18 @@ export async function createBucket(goalId: string, name: string, surface: string
 
 export async function setBucketSurface(bucketId: string, surface: string | null) {
   if (!supabase) return
+  const client = supabase
   const userId = await getActiveUserId()
   if (!userId) return
   const normalizedSurface =
     surface === null ? null : sanitizeBucketSurfaceStyle(surface) ?? DEFAULT_SURFACE_STYLE
-  let { error } = await supabase
+  let { error } = await client
     .from('buckets')
     .update({ buckets_card_style: normalizedSurface })
     .eq('id', bucketId)
     .eq('user_id', userId)
   if (error && String((error as any)?.code || '') === '23514') {
-    const retry = await supabase
+    const retry = await client
       .from('buckets')
       .update({ buckets_card_style: null })
       .eq('id', bucketId)
