@@ -1,6 +1,6 @@
 import { supabase, ensureSingleUserSession } from './supabaseClient'
 import { QUICK_LIST_GOAL_NAME, generateUuid } from './quickListRemote'
-import { DEFAULT_SURFACE_STYLE, sanitizeSurfaceStyle } from './surfaceStyles'
+// Surface styles are now neutralized for goals; keep import placeholder-free.
 
 const FALLBACK_GOAL_COLOR = 'linear-gradient(135deg, #FFF8BF 0%, #FFF8BF 100%)'
 const errorMentionsColumn = (err: any, column: string): boolean => {
@@ -253,20 +253,13 @@ export async function fetchGoalsHierarchy(): Promise<
   })
 
   // Build hierarchy
-  const bucketsByGoal = new Map<
-    string,
-    Array<{ id: string; name: string; favorite: boolean; surfaceStyle?: string | null; tasks: any[] }>
-  >()
-  const bucketMap = new Map<
-    string,
-    { id: string; name: string; favorite: boolean; surfaceStyle?: string | null; tasks: any[] }
-  >()
+  const bucketsByGoal = new Map<string, Array<{ id: string; name: string; favorite: boolean; tasks: any[] }>>()
+  const bucketMap = new Map<string, { id: string; name: string; favorite: boolean; tasks: any[] }>()
   ;(buckets ?? []).forEach((b) => {
     const node = {
       id: b.id,
       name: b.name,
       favorite: b.favorite,
-      surfaceStyle: (b as any).buckets_card_style ?? null,
       archived: Boolean((b as any).bucket_archive),
       tasks: [] as any[],
     }
@@ -299,8 +292,6 @@ export async function fetchGoalsHierarchy(): Promise<
   })
 
   const tree = goals.map((g) => {
-    // card_surface column has been removed; default to 'glass' for now.
-    const surfaceStyle = 'glass'
     const goalColor = (g as any).goal_colour ?? g.color ?? FALLBACK_GOAL_COLOR
     return {
       id: g.id,
@@ -308,15 +299,11 @@ export async function fetchGoalsHierarchy(): Promise<
       color: goalColor,
       createdAt: typeof (g as any).created_at === 'string' ? ((g as any).created_at as string) : undefined,
       starred: Boolean((g as any).starred),
-      surfaceStyle,
       archived: Boolean((g as any).goal_archive),
       milestonesShown: includeMilestones ? Boolean((g as any).milestones_shown) : undefined,
       buckets: (bucketsByGoal.get(g.id) ?? []).map((bucket) => ({
         ...bucket,
-        surfaceStyle:
-          typeof bucket.surfaceStyle === 'string' && bucket.surfaceStyle.length > 0
-            ? bucket.surfaceStyle
-            : 'glass',
+        // Buckets no longer carry a surface style for UI; keep structure flat.
       })),
     }
   })
@@ -527,7 +514,7 @@ async function updateTaskWithGuard(
 }
 
 // ---------- Goals ----------
-export async function createGoal(name: string, color: string, surface: string = 'glass') {
+export async function createGoal(name: string, color: string) {
   if (!supabase) return null
   const session = await ensureSingleUserSession()
   if (!session?.user?.id) {
@@ -569,10 +556,7 @@ export async function createGoal(name: string, color: string, surface: string = 
   if (!base) {
     return null
   }
-  return {
-    ...base,
-    card_surface: surface ?? base.card_surface ?? null,
-  }
+  return { ...base }
 }
 
 export async function setGoalColor(goalId: string, color: string) {
@@ -1149,7 +1133,6 @@ export async function seedGoalsIfEmpty(seeds: GoalSeed[]): Promise<boolean> {
       const goalId = goalIdBySeedIndex[goalIndex]
       if (!goalId) return
       goal.buckets?.forEach((bucket, bucketIndex) => {
-        const normalizedSurface = sanitizeSurfaceStyle(bucket.surfaceStyle) ?? DEFAULT_SURFACE_STYLE
         bucketInserts.push({
           user_id: userId,
           goal_id: goalId,
@@ -1157,7 +1140,7 @@ export async function seedGoalsIfEmpty(seeds: GoalSeed[]): Promise<boolean> {
           favorite: Boolean(bucket.favorite),
           bucket_archive: Boolean(bucket.archived),
           sort_index: (bucketIndex + 1) * STEP,
-          buckets_card_style: normalizedSurface,
+          buckets_card_style: (bucket as any).surfaceStyle ?? null,
         })
       })
     })

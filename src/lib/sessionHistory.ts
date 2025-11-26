@@ -117,7 +117,7 @@ const disableHistorySubtasks = () => {
   writeFeatureFlags(flags)
 }
 const HISTORY_BASE_SELECT_COLUMNS =
-  'id, task_name, elapsed_ms, started_at, ended_at, goal_name, bucket_name, goal_id, bucket_id, task_id, goal_surface, bucket_surface, entry_colour, created_at, updated_at, future_session'
+  'id, task_name, elapsed_ms, started_at, ended_at, goal_name, bucket_name, goal_id, bucket_id, task_id, goal_surface, entry_colour, created_at, updated_at, future_session, buckets(buckets_card_style)'
 
 const buildHistorySelectColumns = (): string => {
   let columns = HISTORY_BASE_SELECT_COLUMNS
@@ -1254,7 +1254,6 @@ const payloadFromRecord = (
     task_id: isUuid(record.taskId) ? record.taskId : null,
     // Clamp surfaces to DB-allowed values to satisfy CHECK constraints server-side
     goal_surface: toDbSurface(record.goalSurface),
-    bucket_surface: toDbSurface(record.bucketSurface ?? undefined),
     created_at: new Date(createdAtSource).toISOString(),
     updated_at: new Date(updatedAt).toISOString(),
     ...(typeof record.futureSession === 'boolean' ? { future_session: record.futureSession } : {}),
@@ -1279,6 +1278,24 @@ const mapDbRowToRecord = (row: Record<string, unknown>): HistoryRecord | null =>
   const endedAt = snapToNearestMinute(rawEnd)
   const elapsed = clampNumber(row.elapsed_ms, Math.max(0, endedAt - startedAt))
 
+  const bucketSurfaceFromRelation = (() => {
+    const relation = (row as any).buckets
+    const readStyle = (source: any): string | null => {
+      if (!source || typeof source !== 'object') return null
+      const value = (source as any).buckets_card_style
+      return typeof value === 'string' ? value : null
+    }
+    if (Array.isArray(relation)) {
+      for (const item of relation) {
+        const style = readStyle(item)
+        if (style) return style
+      }
+      return null
+    }
+    return readStyle(relation)
+  })()
+  const bucketSurfaceRaw = bucketSurfaceFromRelation
+
   const candidate: HistoryCandidate = {
     id,
     taskName,
@@ -1291,7 +1308,7 @@ const mapDbRowToRecord = (row: Record<string, unknown>): HistoryRecord | null =>
     bucketId: typeof row.bucket_id === 'string' ? row.bucket_id : null,
     taskId: typeof row.task_id === 'string' ? row.task_id : null,
     goalSurface: typeof row.goal_surface === 'string' ? row.goal_surface : null,
-    bucketSurface: typeof row.bucket_surface === 'string' ? row.bucket_surface : null,
+    bucketSurface: bucketSurfaceRaw,
     entryColor: typeof (row as any).entry_colour === 'string' ? ((row as any).entry_colour as string) : null,
     notes: typeof row.notes === 'string' ? row.notes : null,
     subtasks: row.subtasks ?? null,
