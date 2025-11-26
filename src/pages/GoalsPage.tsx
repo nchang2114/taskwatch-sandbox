@@ -189,7 +189,12 @@ const normalizeSupabaseGoalsPayload = (payload: any[]): Goal[] =>
   payload.map((goal: any) => ({
     id: goal.id,
     name: goal.name,
-    color: typeof goal.color === 'string' ? goal.color : FALLBACK_GOAL_COLOR,
+    goalColour:
+      typeof goal.goal_colour === 'string'
+        ? goal.goal_colour
+        : typeof goal.goalColour === 'string'
+          ? goal.goalColour
+          : FALLBACK_GOAL_COLOR,
     createdAt: typeof goal.createdAt === 'string' ? goal.createdAt : typeof goal.created_at === 'string' ? goal.created_at : undefined,
     surfaceStyle: normalizeSurfaceStyle(goal.surfaceStyle as string | null | undefined),
     starred: Boolean(goal.starred),
@@ -802,7 +807,7 @@ export interface Bucket {
 export interface Goal {
   id: string
   name: string
-  color: string
+  goalColour: string
   createdAt?: string
   surfaceStyle?: GoalSurfaceStyle
   starred: boolean
@@ -817,7 +822,7 @@ export interface Goal {
 
 type GoalAppearanceUpdate = {
   surfaceStyle?: GoalSurfaceStyle
-  color?: string
+  goalColour?: string
   customGradient?: {
     from: string
     to: string
@@ -844,7 +849,11 @@ function reconcileGoalsWithSnapshot(snapshot: GoalSnapshot[], current: Goal[]): 
     return {
       id: goal.id,
       name: goal.name,
-      color: goal.color ?? existingGoal?.color ?? FALLBACK_GOAL_COLOR,
+      goalColour:
+        (goal as any).goalColour ??
+        (goal as any).goal_colour ??
+        existingGoal?.goalColour ??
+        FALLBACK_GOAL_COLOR,
       createdAt: existingGoal?.createdAt,
       surfaceStyle: goal.surfaceStyle,
       starred: goal.starred ?? existingGoal?.starred ?? false,
@@ -1106,14 +1115,14 @@ const GoalCustomizer = React.forwardRef<HTMLDivElement, GoalCustomizerProps>(({ 
     if (goal.customGradient) {
       return goal.customGradient
     }
-    if (goal.color.startsWith('custom:')) {
-      const parsed = extractStopsFromGradient(goal.color.slice(7))
+    if (goal.goalColour.startsWith('custom:')) {
+      const parsed = extractStopsFromGradient(goal.goalColour.slice(7))
       if (parsed) {
         return { ...parsed }
       }
     }
     return { ...DEFAULT_CUSTOM_STOPS }
-  }, [goal.color, goal.customGradient])
+  }, [goal.goalColour, goal.customGradient])
 
   const [customStops, setCustomStops] = useState(initialStops)
   const { from: initialFrom, to: initialTo } = initialStops
@@ -1123,7 +1132,7 @@ const GoalCustomizer = React.forwardRef<HTMLDivElement, GoalCustomizerProps>(({ 
   }, [goal.id, initialFrom, initialTo])
 
   const customPreview = useMemo(() => createCustomGradientString(customStops.from, customStops.to), [customStops])
-  const activeGradient = goal.color.startsWith('custom:') ? 'custom' : goal.color
+  const activeGradient = goal.goalColour.startsWith('custom:') ? 'custom' : goal.goalColour
   const gradientSwatches = useMemo(() => [...GOAL_GRADIENTS, 'custom'], [])
   const gradientPreviewMap = useMemo<Record<string, string>>(
     () => ({
@@ -1138,7 +1147,7 @@ const GoalCustomizer = React.forwardRef<HTMLDivElement, GoalCustomizerProps>(({ 
       onUpdate({ customGradient: { ...customStops } })
       return
     }
-    onUpdate({ color: value, customGradient: null })
+    onUpdate({ goalColour: value, customGradient: null })
   }
 
   const handleCustomStopChange = (key: 'from' | 'to') => (event: React.ChangeEvent<HTMLInputElement>) => {
@@ -2099,9 +2108,9 @@ const MilestoneLayer: React.FC<{
           let bg = ''
           if (goal.customGradient?.from && goal.customGradient?.to) {
             bg = createCustomGradientString(goal.customGradient.from, goal.customGradient.to, 90)
-          } else if (goal.color && BASE_GRADIENT_PREVIEW[goal.color]) {
+          } else if (goal.goalColour && BASE_GRADIENT_PREVIEW[goal.goalColour]) {
             // Use the base gradient preview mapping
-            bg = BASE_GRADIENT_PREVIEW[goal.color]
+            bg = BASE_GRADIENT_PREVIEW[goal.goalColour]
           } else {
             bg = 'linear-gradient(90deg, rgba(118,142,255,0.9), rgba(59,130,246,0.7))'
           }
@@ -2162,8 +2171,8 @@ const MilestoneLayer: React.FC<{
                 { color: goal.customGradient.to, pct: 100 },
               ]
             }
-            if (goal.color && BASE_GRADIENT_PREVIEW[goal.color]) {
-              return parseGradientStops(BASE_GRADIENT_PREVIEW[goal.color])
+            if (goal.goalColour && BASE_GRADIENT_PREVIEW[goal.goalColour]) {
+              return parseGradientStops(BASE_GRADIENT_PREVIEW[goal.goalColour])
             }
             return [
               { color: '#9fc2ff', pct: 0 },
@@ -3584,7 +3593,7 @@ const GoalRow: React.FC<GoalRowProps> = ({
           </div>
         </div>
         <div className="mt-3 flex items-center gap-3 flex-nowrap">
-          <ThinProgress value={pct} gradient={goal.color} className="h-1 flex-1 min-w-0" />
+          <ThinProgress value={pct} gradient={goal.goalColour} className="h-1 flex-1 min-w-0" />
           <span className="text-xs sm:text-sm text-white/80 whitespace-nowrap flex-none">{progressLabel}</span>
         </div>
 
@@ -8401,7 +8410,7 @@ export default function GoalsPage(): ReactElement {
       gs.map((g) => {
         if (g.id !== goalId) return g
         let next: Goal = { ...g }
-        const previousColor = g.color
+        const previousColor = g.goalColour
         if (updates.surfaceStyle) {
           next.surfaceStyle = normalizeSurfaceStyle(updates.surfaceStyle)
         }
@@ -8412,7 +8421,7 @@ export default function GoalsPage(): ReactElement {
             const gradientString = createCustomGradientString(custom.from, custom.to)
             next.customGradient = { ...custom }
             const newColor = `custom:${gradientString}`
-            next.color = newColor
+            next.goalColour = newColor
             if (newColor !== previousColor) {
               colorToPersist = newColor
             }
@@ -8421,13 +8430,13 @@ export default function GoalsPage(): ReactElement {
           }
         }
 
-        if (updates.color) {
-          next.color = updates.color
-          if (!updates.color.startsWith('custom:')) {
+        if (updates.goalColour) {
+          next.goalColour = updates.goalColour
+          if (!updates.goalColour.startsWith('custom:')) {
             next.customGradient = undefined
           }
-          if (updates.color !== previousColor) {
-            colorToPersist = updates.color
+          if (updates.goalColour !== previousColor) {
+            colorToPersist = updates.goalColour
           }
         }
 
@@ -9149,7 +9158,7 @@ export default function GoalsPage(): ReactElement {
       .then((db) => {
         const id = db?.id ?? `g_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`
         const surfaceStyle = normalizeSurfaceStyle((db?.card_surface as string | null | undefined) ?? 'glass')
-        const newGoal: Goal = { id, name: trimmed, color: gradientForGoal, surfaceStyle, starred: false, archived: false, buckets: [] }
+        const newGoal: Goal = { id, name: trimmed, goalColour: gradientForGoal, surfaceStyle, starred: false, archived: false, buckets: [] }
         setGoals((current) => [newGoal, ...current])
         setExpanded((current) => ({ ...current, [id]: true }))
         // Persist new goal at the top to match optimistic UI order
@@ -9159,7 +9168,7 @@ export default function GoalsPage(): ReactElement {
       })
       .catch(() => {
         const id = `g_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`
-        const newGoal: Goal = { id, name: trimmed, color: gradientForGoal, surfaceStyle: 'glass', starred: false, archived: false, buckets: [] }
+        const newGoal: Goal = { id, name: trimmed, goalColour: gradientForGoal, surfaceStyle: 'glass', starred: false, archived: false, buckets: [] }
         setGoals((current) => [newGoal, ...current])
         setExpanded((current) => ({ ...current, [id]: true }))
       })
@@ -11864,7 +11873,7 @@ const normalizedSearch = searchTerm.trim().toLowerCase()
                     >
                       <h3 className="goal-tile__name">{g.name}</h3>
                       <div className="goal-tile__progress-row">
-                        <ThinProgress value={pct} gradient={g.color} className="goal-tile__progress" />
+                        <ThinProgress value={pct} gradient={g.goalColour} className="goal-tile__progress" />
                         <span className="goal-tile__counts">
                           {done} / {total} tasks
                         </span>

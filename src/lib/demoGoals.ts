@@ -21,7 +21,7 @@ type DemoBucket = {
 type DemoGoal = {
   id: string
   name: string
-  color: string
+  goalColour: string
   surfaceStyle?: string
   starred: boolean
   archived: boolean
@@ -32,7 +32,7 @@ export const DEMO_GOALS: DemoGoal[] = [
   {
     id: 'g_demo',
     name: 'Ace This Semester',
-    color: 'from-sky-500 to-indigo-500',
+    goalColour: 'from-sky-500 to-indigo-500',
     surfaceStyle: 'glass',
     starred: false,
     archived: false,
@@ -89,7 +89,7 @@ export const DEMO_GOALS: DemoGoal[] = [
   {
     id: 'g2',
     name: 'Level Up at Work',
-    color: 'from-emerald-500 to-cyan-500',
+    goalColour: 'from-emerald-500 to-cyan-500',
     surfaceStyle: 'glass',
     starred: false,
     archived: false,
@@ -135,7 +135,7 @@ export const DEMO_GOALS: DemoGoal[] = [
   {
     id: 'g3',
     name: 'Healthy Work-Life Rhythm',
-    color: 'from-lime-400 to-emerald-500',
+    goalColour: 'from-lime-400 to-emerald-500',
     surfaceStyle: 'glass',
     starred: false,
     archived: false,
@@ -182,7 +182,7 @@ export const DEMO_GOALS: DemoGoal[] = [
 
 export const DEMO_GOAL_SEEDS: GoalSeed[] = DEMO_GOALS.map((goal) => ({
   name: goal.name,
-  color: goal.color,
+  goalColour: goal.goalColour,
   surfaceStyle: goal.surfaceStyle ?? DEFAULT_SURFACE_STYLE,
   starred: Boolean(goal.starred),
   archived: Boolean(goal.archived),

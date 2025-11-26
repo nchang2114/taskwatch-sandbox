@@ -716,8 +716,8 @@ export function FocusPage({ viewportWidth: _viewportWidth }: FocusPageProps) {
   const goalGradientById = useMemo(() => {
     const map = new Map<string, string>()
     goalsSnapshot.forEach((goal) => {
-      if (goal?.id && typeof goal.color === 'string' && goal.color.trim().length > 0) {
-        map.set(goal.id, goal.color)
+      if (goal?.id && typeof (goal as any).goalColour === 'string' && (goal as any).goalColour.trim().length > 0) {
+        map.set(goal.id, (goal as any).goalColour.trim())
       }
     })
     return map
@@ -1320,7 +1320,10 @@ useEffect(() => {
   const focusCandidates = useMemo<FocusCandidate[]>(() => {
     const candidates: FocusCandidate[] = []
     activeGoalSnapshots.forEach((goal) => {
-      const goalGradient = typeof goal.color === 'string' && goal.color.trim().length > 0 ? goal.color.trim() : null
+      const goalGradient =
+        typeof (goal as any).goalColour === 'string' && (goal as any).goalColour.trim().length > 0
+          ? (goal as any).goalColour.trim()
+          : null
       goal.buckets
         .filter((bucket) => !bucket.archived)
         .forEach((bucket) => {

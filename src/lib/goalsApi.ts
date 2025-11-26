@@ -105,7 +105,7 @@ type BucketSeed = {
 
 export type GoalSeed = {
   name: string
-  color?: string | null
+  goalColour?: string | null
   surfaceStyle?: string | null
   starred?: boolean
   archived?: boolean
@@ -284,7 +284,7 @@ export async function fetchGoalsHierarchy(): Promise<
     return {
       id: g.id,
       name: g.name,
-      color: goalColor,
+      goalColour: goalColor,
       createdAt: typeof (g as any).created_at === 'string' ? ((g as any).created_at as string) : undefined,
       starred: Boolean((g as any).starred),
       archived: Boolean((g as any).goal_archive),
@@ -1078,7 +1078,7 @@ export async function seedGoalsIfEmpty(seeds: GoalSeed[]): Promise<boolean> {
     const goalInserts = seeds.map((goal, index) => ({
       user_id: userId,
       name: goal.name,
-      color: goal.color ?? 'from-fuchsia-500 to-purple-500',
+      goal_colour: goal.goalColour ?? 'from-fuchsia-500 to-purple-500',
       sort_index: (index + 1) * STEP,
       starred: Boolean(goal.starred),
       goal_archive: Boolean(goal.archived),

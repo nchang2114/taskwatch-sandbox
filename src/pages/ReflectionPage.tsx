@@ -2213,7 +2213,7 @@ const createGoalTaskMap = (snapshot: GoalSnapshot[]): GoalLookup => {
     if (!goalName) {
       return
     }
-    const colorInfo = resolveGoalColorInfo(goal.color)
+    const colorInfo = resolveGoalColorInfo((goal as any).goalColour ?? (goal as any).goal_colour)
     goal.buckets.forEach((bucket) => {
       bucket.tasks.forEach((task) => {
         const key = task.text.trim().toLowerCase()
@@ -2238,7 +2238,7 @@ const createGoalColorMap = (snapshot: GoalSnapshot[]): Map<string, GoalColorInfo
     if (map.has(normalized)) {
       return
     }
-    map.set(normalized, resolveGoalColorInfo(goal.color))
+    map.set(normalized, resolveGoalColorInfo((goal as any).goalColour ?? (goal as any).goal_colour))
   })
   return map
 }

@@ -39,7 +39,7 @@ export type GoalBucketSnapshot = {
 export type GoalSnapshot = {
   id: string
   name: string
-  color?: string
+  goalColour?: string
   surfaceStyle: SurfaceStyle
   starred: boolean
   archived: boolean
@@ -161,14 +161,19 @@ export const createGoalsSnapshot = (goals: Goal[] | unknown): GoalSnapshot[] => 
     if (!id || name === null) {
       return
     }
-    const color = typeof candidate.color === 'string' ? candidate.color : undefined
+    const goalColour =
+      typeof (candidate as any).goalColour === 'string'
+        ? ((candidate as any).goalColour as string)
+        : typeof (candidate as any).goal_colour === 'string'
+          ? ((candidate as any).goal_colour as string)
+          : undefined
     // Force goal surface to default; goal card styling no longer depends on persisted surface styles.
     const surfaceStyle = DEFAULT_SURFACE_STYLE
     const starred = Boolean(candidate.starred)
     const archived = Boolean(candidate.archived)
     const milestonesShown = typeof (candidate as any).milestonesShown === 'boolean' ? ((candidate as any).milestonesShown as boolean) : undefined
     const buckets = coerceBuckets(candidate.buckets)
-    snapshot.push({ id, name, color, surfaceStyle, starred, archived, milestonesShown, buckets })
+    snapshot.push({ id, name, goalColour, surfaceStyle, starred, archived, milestonesShown, buckets })
   })
   return snapshot
 }
