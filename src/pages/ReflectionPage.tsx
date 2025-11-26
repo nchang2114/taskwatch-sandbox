@@ -475,14 +475,14 @@ const SURFACE_GRADIENT_INFO: Partial<Record<SurfaceStyle, SurfaceGradientInfo>> 
     end: '#3f51b5',
     base: '#5a63f1',
   },
-  slate: {
+  coastal: {
     gradient: 'linear-gradient(135deg, #97e3ff 0%, #5ec0ff 45%, #1f7adb 100%)',
     start: '#97e3ff',
     mid: '#5ec0ff',
     end: '#1f7adb',
     base: '#45b0ff',
   },
-  charcoal: {
+  cherry: {
     gradient: 'linear-gradient(135deg, #ffb8d5 0%, #f472b6 45%, #be3a84 100%)',
     start: '#ffb8d5',
     mid: '#f472b6',
@@ -599,21 +599,21 @@ const LIFE_ROUTINE_SURFACE_GRADIENT_INFO: Partial<Record<SurfaceStyle, SurfaceGr
     end: 'rgba(92, 106, 230, 0.22)',
   base: (SURFACE_GRADIENT_INFO.midnight!).base,
   },
-  slate: {
+  coastal: {
     gradient:
       'linear-gradient(135deg, rgba(151, 227, 255, 0.3) 0%, rgba(120, 198, 255, 0.26) 48%, rgba(96, 180, 255, 0.22) 100%)',
     start: 'rgba(151, 227, 255, 0.3)',
     mid: 'rgba(120, 198, 255, 0.26)',
     end: 'rgba(96, 180, 255, 0.22)',
-  base: (SURFACE_GRADIENT_INFO.slate!).base,
+  base: (SURFACE_GRADIENT_INFO.coastal!).base,
   },
-  charcoal: {
+  cherry: {
     gradient:
       'linear-gradient(135deg, rgba(255, 188, 213, 0.34) 0%, rgba(250, 190, 216, 0.3) 50%, rgba(244, 174, 206, 0.26) 100%)',
     start: 'rgba(255, 188, 213, 0.34)',
     mid: 'rgba(250, 190, 216, 0.3)',
     end: 'rgba(244, 174, 206, 0.26)',
-  base: (SURFACE_GRADIENT_INFO.charcoal!).base,
+  base: (SURFACE_GRADIENT_INFO.cherry!).base,
   },
   linen: {
     gradient:

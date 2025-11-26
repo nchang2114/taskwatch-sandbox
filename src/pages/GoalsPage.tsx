@@ -1009,8 +1009,8 @@ const sampleGradientColor = (stops: ColorStop[], pct: number): string => {
 const GOAL_SURFACE_CLASS_MAP: Partial<Record<GoalSurfaceStyle, string>> = {
   glass: 'goal-card--glass',
   midnight: 'goal-card--midnight',
-  slate: 'goal-card--slate',
-  charcoal: 'goal-card--charcoal',
+  coastal: 'goal-card--slate',
+  cherry: 'goal-card--charcoal',
   linen: 'goal-card--linen',
   frost: 'goal-card--frost',
   grove: 'goal-card--grove',
@@ -1025,52 +1025,6 @@ const GOAL_SURFACE_CLASS_MAP: Partial<Record<GoalSurfaceStyle, string>> = {
   'muted-lavender': 'goal-card--muted-lavender',
   'neutral-grey-blue': 'goal-card--neutral-grey-blue',
 }
-
-// Same Partial strategy for bucket surfaces.
-const BUCKET_STYLE_CLASS_MAP: Partial<Record<BucketSurfaceStyle, string>> = {
-  glass: 'goal-bucket-item--surface-glass',
-  coastal: 'goal-bucket-item--surface-slate',
-  slate: 'goal-bucket-item--surface-slate',
-  midnight: 'goal-bucket-item--surface-midnight',
-  charcoal: 'goal-bucket-item--surface-charcoal',
-  linen: 'goal-bucket-item--surface-linen',
-  frost: 'goal-bucket-item--surface-frost',
-  grove: 'goal-bucket-item--surface-grove',
-  lagoon: 'goal-bucket-item--surface-lagoon',
-  ember: 'goal-bucket-item--surface-ember',
-  'deep-indigo': 'goal-bucket-item--surface-deep-indigo',
-  'warm-amber': 'goal-bucket-item--surface-warm-amber',
-  'fresh-teal': 'goal-bucket-item--surface-fresh-teal',
-  'sunset-orange': 'goal-bucket-item--surface-sunset-orange',
-  'cool-blue': 'goal-bucket-item--surface-cool-blue',
-  'soft-magenta': 'goal-bucket-item--surface-soft-magenta',
-  'muted-lavender': 'goal-bucket-item--surface-muted-lavender',
-  'neutral-grey-blue': 'goal-bucket-item--surface-neutral-grey-blue',
-}
-
-const BUCKET_STYLE_PRESETS: Array<{
-  id: BucketSurfaceStyle
-  label: string
-  description: string
-}> = [
-  { id: 'glass', label: 'Glass', description: 'Barely-there wash with a soft outline.' },
-  { id: 'coastal', label: 'Coastal', description: 'Airy blue tint for relaxed columns.' },
-  { id: 'midnight', label: 'Midnight', description: 'Cool indigo haze for subtle depth.' },
-  { id: 'charcoal', label: 'Charcoal', description: 'Deep charcoal with a gentle glow.' },
-  { id: 'linen', label: 'Linen', description: 'Golden peach accent with gentle warmth.' },
-  { id: 'frost', label: 'Frost', description: 'Minty aqua highlight with a breezy feel.' },
-  { id: 'grove', label: 'Grove', description: 'Fresh green lift with botanical energy.' },
-  { id: 'lagoon', label: 'Lagoon', description: 'Crystal blue blend for clean focus.' },
-  { id: 'ember', label: 'Ember', description: 'Radiant amber spark with soft glow.' },
-  { id: 'deep-indigo', label: 'Deep Indigo', description: 'Deep indigo-violet with focused depth.' },
-  { id: 'warm-amber', label: 'Warm Amber', description: 'Soft amber warmth with a mellow glow.' },
-  { id: 'fresh-teal', label: 'Fresh Teal', description: 'Refreshing teal lift with calm energy.' },
-  { id: 'sunset-orange', label: 'Sunset Orange', description: 'Dusky orange fade with evening vibe.' },
-  { id: 'cool-blue', label: 'Cool Blue', description: 'Balanced blue tone with crisp clarity.' },
-  { id: 'soft-magenta', label: 'Soft Magenta', description: 'Gentle magenta bloom with subtle pop.' },
-  { id: 'muted-lavender', label: 'Muted Lavender', description: 'Muted lavender haze for quiet focus.' },
-  { id: 'neutral-grey-blue', label: 'Neutral Grey Blue', description: 'Neutral grey-blue base for minimalism.' },
-]
 
 const formatGradientLabel = (value: string) =>
   value

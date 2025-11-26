@@ -266,8 +266,8 @@ const toDbSurface = (value: SurfaceStyle | null | undefined): SurfaceStyle | nul
 const SURFACE_GRADIENTS: Record<SurfaceStyle, string> = {
   glass: 'linear-gradient(135deg, #313c67 0%, #1f2952 45%, #121830 100%)',
   midnight: 'linear-gradient(135deg, #8e9bff 0%, #6c86ff 45%, #3f51b5 100%)',
-  slate: 'linear-gradient(135deg, #97e3ff 0%, #5ec0ff 45%, #1f7adb 100%)',
-  charcoal: 'linear-gradient(135deg, #ffb8d5 0%, #f472b6 45%, #be3a84 100%)',
+  coastal: 'linear-gradient(135deg, #97e3ff 0%, #5ec0ff 45%, #1f7adb 100%)',
+  cherry: 'linear-gradient(135deg, #ffb8d5 0%, #f472b6 45%, #be3a84 100%)',
   linen: 'linear-gradient(135deg, #ffd4aa 0%, #f9a84f 45%, #d97706 100%)',
   frost: 'linear-gradient(135deg, #aee9ff 0%, #6dd3ff 45%, #1d9bf0 100%)',
   grove: 'linear-gradient(135deg, #baf5d8 0%, #4ade80 45%, #15803d 100%)',
@@ -583,7 +583,7 @@ export const createSampleHistoryRecords = (): HistoryRecord[] => {
       bucketId: 'b4',
       taskId: 't19',
       goalSurface: 'glass',
-      bucketSurface: 'charcoal',
+      bucketSurface: 'cherry',
       notes: 'Heads-down product work.',
     },
     creative: {
@@ -730,8 +730,8 @@ export const createSampleHistoryRecords = (): HistoryRecord[] => {
     goalId: 'snapback',
     bucketId: 'snapback-doomscrolling',
     taskId: 'snapback-doomscroll',
-    goalSurface: 'charcoal',
-    bucketSurface: 'charcoal',
+    goalSurface: 'cherry',
+    bucketSurface: 'cherry',
     notes: 'Mindless scrolling that pulled me off track.',
   })
 

@@ -99,7 +99,7 @@ export const DEMO_GOALS: DemoGoal[] = [
         name: 'Deep Work Sprints',
         favorite: true,
         archived: false,
-        surfaceStyle: 'charcoal',
+        surfaceStyle: 'cherry',
         tasks: [
           { id: 't8', text: 'Draft QBR storyline', completed: false },
           { id: 't9', text: 'Polish slide templates', completed: false },
