@@ -1858,6 +1858,46 @@ useEffect(() => {
       list.push({ ...task, startedAt: start, endedAt: end, isGuide: true })
     }
     const lower = (s: string | null | undefined) => (s ?? '').trim().toLowerCase()
+    const getAnchorDayStart = (rule: RepeatingSessionRule): number | null => {
+      const startAt = (rule as any).startAtMs as number | undefined
+      const createdAt = (rule as any).createdAtMs as number | undefined
+      const anchor = Number.isFinite(startAt as number) ? (startAt as number) : (Number.isFinite(createdAt as number) ? (createdAt as number) : null)
+      if (!Number.isFinite(anchor as number)) return null
+      const d = new Date(anchor as number)
+      d.setHours(0, 0, 0, 0)
+      return d.getTime()
+    }
+    const intervalAllowsDay = (rule: RepeatingSessionRule, dayStart: number): boolean => {
+      const interval = Math.max(1, Number.isFinite((rule as any).repeatEvery as number) ? Math.floor((rule as any).repeatEvery as number) : 1)
+      if (interval === 1) return true
+      const anchor = getAnchorDayStart(rule)
+      if (!Number.isFinite(anchor as number)) return true
+      const DAY_MS = 24 * 60 * 60 * 1000
+      const diffDays = Math.floor((dayStart - (anchor as number)) / DAY_MS)
+      if (diffDays < 0) return false
+      if (rule.frequency === 'daily') return diffDays % interval === 0
+      if (rule.frequency === 'weekly') {
+        const diffWeeks = Math.floor(diffDays / 7)
+        return diffWeeks % interval === 0
+      }
+      if (rule.frequency === 'monthly') {
+        const a = new Date(anchor as number)
+        const b = new Date(dayStart)
+        const aIndex = a.getFullYear() * 12 + a.getMonth()
+        const bIndex = b.getFullYear() * 12 + b.getMonth()
+        const diffMonths = bIndex - aIndex
+        if (diffMonths < 0) return false
+        return diffMonths % interval === 0
+      }
+      if (rule.frequency === 'annually') {
+        const a = new Date(anchor as number)
+        const b = new Date(dayStart)
+        const diffYears = b.getFullYear() - a.getFullYear()
+        if (diffYears < 0) return false
+        return diffYears % interval === 0
+      }
+      return true
+    }
       const considerOccurrence = (rule: RepeatingSessionRule, baseStart: number) => {
         // Frequency filters
         if (rule.frequency === 'weekly') {
@@ -1871,6 +1911,7 @@ useEffect(() => {
           const ruleKey = ruleMonthDayKey(rule)
           if (!ruleKey || ruleKey !== dayKey) return
         }
+      if (!intervalAllowsDay(rule, baseStart)) return
       // Boundaries based on scheduled start time
       const tMin = Math.max(0, Math.min(1439, rule.timeOfDayMinutes))
       const startedAt = baseStart + tMin * MINUTE_MS

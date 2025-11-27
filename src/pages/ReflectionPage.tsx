@@ -3337,6 +3337,14 @@ const [inspectorFallbackMessage, setInspectorFallbackMessage] = useState<string 
     })
   }, [])
 
+  const computeEntryScheduledStart = useCallback((entry: HistoryEntry): number => {
+    const start = new Date(entry.startedAt)
+    const minutes = start.getHours() * 60 + start.getMinutes()
+    const dayStart = new Date(entry.startedAt)
+    dayStart.setHours(0, 0, 0, 0)
+    return dayStart.getTime() + minutes * 60000
+  }, [])
+
   useEffect(() => {
     latestHistoryRef.current = history
   }, [history])
@@ -6936,6 +6944,48 @@ useEffect(() => {
         isGuide?: boolean
       }
 
+      const getRuleAnchorDayStart = (rule: RepeatingSessionRule): number | null => {
+        const startAt = (rule as any).startAtMs as number | undefined
+        const createdAt = (rule as any).createdAtMs as number | undefined
+        const anchor = Number.isFinite(startAt as number) ? (startAt as number) : (Number.isFinite(createdAt as number) ? (createdAt as number) : null)
+        if (!Number.isFinite(anchor as number)) return null
+        const d = new Date(anchor as number)
+        d.setHours(0, 0, 0, 0)
+        return d.getTime()
+      }
+
+      const ruleIntervalAllowsDay = (rule: RepeatingSessionRule, dayStart: number): boolean => {
+        const interval = Math.max(1, Number.isFinite((rule as any).repeatEvery as number) ? Math.floor((rule as any).repeatEvery as number) : 1)
+        if (interval === 1) return true
+        const anchor = getRuleAnchorDayStart(rule)
+        if (!Number.isFinite(anchor as number)) return true
+        const DAY_MS = 24 * 60 * 60 * 1000
+        const diffDays = Math.floor((dayStart - (anchor as number)) / DAY_MS)
+        if (diffDays < 0) return false
+        if (rule.frequency === 'daily') return diffDays % interval === 0
+        if (rule.frequency === 'weekly') {
+          const diffWeeks = Math.floor(diffDays / 7)
+          return diffWeeks % interval === 0
+        }
+        if (rule.frequency === 'monthly') {
+          const a = new Date(anchor as number)
+          const b = new Date(dayStart)
+          const aIndex = a.getFullYear() * 12 + a.getMonth()
+          const bIndex = b.getFullYear() * 12 + b.getMonth()
+          const diffMonths = bIndex - aIndex
+          if (diffMonths < 0) return false
+          return diffMonths % interval === 0
+        }
+        if (rule.frequency === 'annually') {
+          const a = new Date(anchor as number)
+          const b = new Date(dayStart)
+          const diffYears = b.getFullYear() - a.getFullYear()
+          if (diffYears < 0) return false
+          return diffYears % interval === 0
+        }
+        return true
+      }
+
       const computeAllDayBars = (): AllDayBar[] => {
         if (dayStarts.length === 0) return []
         const windowStartMs = dayStarts[0]
@@ -7015,18 +7065,18 @@ useEffect(() => {
           const makeOccurrenceKey = (ruleId: string, baseMs: number) => `${ruleId}:${formatLocalYmd(baseMs)}`
           const isRuleScheduledForDay = (rule: RepeatingSessionRule, dayStart: number) => {
             if (!rule.isActive) return false
-            if (rule.frequency === 'daily') return true
+            if (rule.frequency === 'daily') return ruleIntervalAllowsDay(rule, dayStart)
             if (rule.frequency === 'weekly') {
               const d = new Date(dayStart)
-              return Array.isArray(rule.dayOfWeek) && rule.dayOfWeek.includes(d.getDay())
+              return Array.isArray(rule.dayOfWeek) && rule.dayOfWeek.includes(d.getDay()) && ruleIntervalAllowsDay(rule, dayStart)
             }
             if (rule.frequency === 'monthly') {
-              return matchesMonthlyDay(rule, dayStart)
+              return matchesMonthlyDay(rule, dayStart) && ruleIntervalAllowsDay(rule, dayStart)
             }
             if (rule.frequency === 'annually') {
               const dayKey = monthDayKey(dayStart)
               const ruleKey = ruleMonthDayKey(rule)
-              return ruleKey !== null && ruleKey === dayKey
+              return ruleKey !== null && ruleKey === dayKey && ruleIntervalAllowsDay(rule, dayStart)
             }
             return false
           }
@@ -7257,18 +7307,18 @@ useEffect(() => {
 
           const isRuleScheduledForDay = (rule: RepeatingSessionRule, dayStart: number) => {
             if (!rule.isActive) return false
-            if (rule.frequency === 'daily') return true
+            if (rule.frequency === 'daily') return ruleIntervalAllowsDay(rule, dayStart)
             if (rule.frequency === 'weekly') {
               const d = new Date(dayStart)
-              return Array.isArray(rule.dayOfWeek) && rule.dayOfWeek.includes(d.getDay())
+              return Array.isArray(rule.dayOfWeek) && rule.dayOfWeek.includes(d.getDay()) && ruleIntervalAllowsDay(rule, dayStart)
             }
             if (rule.frequency === 'monthly') {
-              return matchesMonthlyDay(rule, dayStart)
+              return matchesMonthlyDay(rule, dayStart) && ruleIntervalAllowsDay(rule, dayStart)
             }
             if (rule.frequency === 'annually') {
               const dayKey = monthDayKey(dayStart)
               const ruleKey = ruleMonthDayKey(rule)
-              return ruleKey !== null && ruleKey === dayKey
+              return ruleKey !== null && ruleKey === dayKey && ruleIntervalAllowsDay(rule, dayStart)
             }
             return false
           }
@@ -9510,6 +9560,8 @@ useEffect(() => {
                     const created = await createRepeatingRuleForEntry(entry, val)
                     if (created) {
                       setRepeatingRules((prev) => [...prev, created])
+                      const scheduledStart = computeEntryScheduledStart(entry)
+                      updateHistory((current) => current.map((h) => (h.id === entry.id ? { ...h, repeatingSessionId: created.id, originalTime: scheduledStart } : h)))
                     }
                   }}
                 />
@@ -10484,6 +10536,10 @@ useEffect(() => {
                 const created = await createRepeatingRuleForEntry(inspectorEntry, val)
                 if (created) {
                   setRepeatingRules((prev) => [...prev, created])
+                  const scheduledStart = computeEntryScheduledStart(inspectorEntry)
+                  updateHistory((current) =>
+                    current.map((h) => (h.id === inspectorEntry.id ? { ...h, repeatingSessionId: created.id, originalTime: scheduledStart } : h)),
+                  )
                 }
               }}
             />
@@ -11006,7 +11062,9 @@ useEffect(() => {
       weeklyDays?: number[]
       endDateMs?: number
       endAfterOccurrences?: number
+      repeatEvery?: number
     } = {}
+    createOptions.repeatEvery = draft.interval
     if (draft.ends === 'on') {
       const endMs = parseLocalDateInput(draft.endDate)
       if (Number.isFinite(endMs as number)) {
@@ -11033,6 +11091,10 @@ useEffect(() => {
                 storeRepeatingRulesLocal(next)
                 return next
               })
+              const scheduledStart = computeEntryScheduledStart(customRecurrenceEntry)
+              updateHistory((current) =>
+                current.map((h) => (h.id === customRecurrenceEntry.id ? { ...h, repeatingSessionId: created.id, originalTime: scheduledStart } : h)),
+              )
             }
             closeCustomRecurrence()
           }
