@@ -1510,13 +1510,26 @@ useEffect(() => {
   )
 
   // Promote scheduled (planned) sessions that overlap 'now' to the top of the selector
+  const isAllDayEntry = (entry: HistoryEntry): boolean => {
+    const DAY_MS = 24 * 60 * 60 * 1000
+    const startMid = new Date(entry.startedAt)
+    startMid.setHours(0, 0, 0, 0)
+    const endMid = new Date(entry.endedAt)
+    endMid.setHours(0, 0, 0, 0)
+    const startsAtMidnight = Math.abs(entry.startedAt - startMid.getTime()) <= 60_000
+    const endsAtMidnight = Math.abs(entry.endedAt - endMid.getTime()) <= 60_000
+    const span = entry.endedAt - entry.startedAt
+    return startsAtMidnight && endsAtMidnight && span >= DAY_MS - 5 * 60 * 1000
+  }
 
   type ScheduledSuggestion = FocusCandidate & { startedAt: number; endedAt: number; isGuide?: boolean }
   const scheduledNowSuggestions = useMemo<ScheduledSuggestion[]>(() => {
     const now = Date.now()
     const TOL = 60 * 1000
     // Any entries overlapping now (real or planned)
-    const overlapping = history.filter((h) => h.startedAt <= (now + TOL) && h.endedAt >= (now - TOL))
+    const overlapping = history.filter(
+      (h) => h.startedAt <= (now + TOL) && h.endedAt >= (now - TOL) && !isAllDayEntry(h),
+    )
     const suggestions: ScheduledSuggestion[] = []
       overlapping.forEach((entry) => {
         const entryOriginalTime =
