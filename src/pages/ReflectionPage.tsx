@@ -10883,8 +10883,16 @@ useEffect(() => {
         (() => {
           const draft = customRecurrenceDraft
           const baseDate = Number.isFinite(customRecurrenceBaseMs as number) ? new Date(customRecurrenceBaseMs as number) : new Date()
-          const weekdayLabels = ['S', 'M', 'T', 'W', 'T', 'F', 'S']
-          const weekdayFull = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday']
+          // UI uses 1–7 semantics (Sunday=1 ... Saturday=7); normalize to JS 0–6 internally.
+          const WEEKDAY_META = [
+            { dbValue: 1, jsValue: 0, label: 'S', full: 'Sunday' },
+            { dbValue: 2, jsValue: 1, label: 'M', full: 'Monday' },
+            { dbValue: 3, jsValue: 2, label: 'T', full: 'Tuesday' },
+            { dbValue: 4, jsValue: 3, label: 'W', full: 'Wednesday' },
+            { dbValue: 5, jsValue: 4, label: 'T', full: 'Thursday' },
+            { dbValue: 6, jsValue: 5, label: 'F', full: 'Friday' },
+            { dbValue: 7, jsValue: 6, label: 'S', full: 'Saturday' },
+          ]
           const clampInterval = (value: number) => Math.max(1, Math.min(365, Math.round(value)))
           const clampOccurrences = (value: number) => Math.max(1, Math.min(999, Math.round(value)))
           const incrementInterval = (delta: number) => {
@@ -10893,11 +10901,11 @@ useEffect(() => {
           const incrementOccurrences = (delta: number) => {
             setCustomRecurrenceDraft((prev) => ({ ...prev, occurrences: clampOccurrences((prev.occurrences || 1) + delta) }))
           }
-          const toggleWeeklyDay = (idx: number) => {
+          const toggleWeeklyDay = (dayValue: number) => {
             setCustomRecurrenceDraft((prev) => {
               const next = new Set(prev.weeklyDays)
-              if (next.has(idx)) next.delete(idx)
-              else next.add(idx)
+              if (next.has(dayValue)) next.delete(dayValue)
+              else next.add(dayValue)
               return { ...prev, weeklyDays: next }
             })
           }
@@ -10997,21 +11005,23 @@ useEffect(() => {
                     </div>
                   </div>
 
-                  {draft.unit === 'week' ? (
+                    {draft.unit === 'week' ? (
                     <div className="custom-recur__row">
                       <span className="custom-recur__label">Repeat on</span>
                       <div className="custom-recur__weekdays" role="group" aria-label="Repeat on days of week">
-                        {weekdayLabels.map((label, idx) => {
-                          const active = draft.weeklyDays.has(idx)
+                        {WEEKDAY_META.map((day) => {
+                          const active = draft.weeklyDays.has(day.jsValue)
                           return (
                             <button
-                              key={label + idx}
+                              key={day.dbValue}
                               type="button"
                               className={`custom-recur__weekday${active ? ' custom-recur__weekday--active' : ''}`}
-                              onClick={() => toggleWeeklyDay(idx)}
+                              title={`${day.full} (${day.dbValue})`}
+                              aria-label={`${day.full} (${day.dbValue})`}
+                              onClick={() => toggleWeeklyDay(day.jsValue)}
                               aria-pressed={active}
                             >
-                              {label}
+                              {day.label}
                             </button>
                           )
                         })}
