@@ -38,7 +38,7 @@ const parseEnvToggle = (value: unknown): boolean | null => {
   return null
 }
 const ENV_ENABLE_HISTORY_NOTES = parseEnvToggle((import.meta as any)?.env?.VITE_ENABLE_HISTORY_NOTES)
-const ENV_ENABLE_REPEAT_ORIGINAL = true
+const ENV_ENABLE_REPEAT_ORIGINAL = parseEnvToggle((import.meta as any)?.env?.VITE_ENABLE_REPEAT_ORIGINAL)
 const ENV_ENABLE_HISTORY_FUTURE_SESSION = parseEnvToggle(
   (import.meta as any)?.env?.VITE_ENABLE_HISTORY_FUTURE_SESSION,
 )
@@ -59,8 +59,20 @@ const writeFeatureFlags = (flags: FeatureFlags) => {
 }
 const envOverride = (flag: boolean | null): boolean | null => flag
 
-const isRepeatOriginalEnabled = (): boolean => true
-const disableRepeatOriginal = () => {}
+const isRepeatOriginalEnabled = (): boolean => {
+  const override = envOverride(ENV_ENABLE_REPEAT_ORIGINAL)
+  if (override !== null) {
+    return override
+  }
+  const flags = readFeatureFlags()
+  return flags.repeatOriginal !== false
+}
+const disableRepeatOriginal = () => {
+  const flags = readFeatureFlags()
+  if (flags.repeatOriginal === false) return
+  flags.repeatOriginal = false
+  writeFeatureFlags(flags)
+}
 const isHistoryFutureSessionEnabled = (): boolean => {
   const override = envOverride(ENV_ENABLE_HISTORY_FUTURE_SESSION)
   if (override !== null) {
