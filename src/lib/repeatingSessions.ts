@@ -48,15 +48,6 @@ const randomRuleId = (): string => {
   return `local-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
 }
 
-const toJsWeekday = (val: number): number | null => {
-  if (!Number.isFinite(val)) return null
-  const n = Math.round(val)
-  // Accept both JS (0-6) and DB (1-7, Sunday=1) encodings; normalize to JS 0-6.
-  if (n >= 0 && n <= 6) return n
-  if (n >= 1 && n <= 7) return (n + 6) % 7
-  return null
-}
-
 const normalizeWeekdays = (value: unknown): number[] | null => {
   if (value === null || value === undefined) return null
   const arr = Array.isArray(value)
@@ -65,19 +56,19 @@ const normalizeWeekdays = (value: unknown): number[] | null => {
       ? Array.from(value)
       : [value]
   const normalized = arr
-    .map((v) => toJsWeekday(Number(v)))
-    .filter((v): v is number => typeof v === 'number' && v >= 0 && v <= 6)
+    .map((v) => Number(v))
+    .filter((v) => Number.isFinite(v) && v >= 0 && v <= 6)
   if (normalized.length === 0) return []
   const uniq = Array.from(new Set(normalized))
   return uniq.sort((a, b) => a - b)
 }
 
+// Store to DB using JS weekday encoding (0=Sunday .. 6=Saturday)
 const toDbWeekdays = (days: number[] | null | undefined): number[] | null => {
   if (!Array.isArray(days)) return null
   const norm = days
     .map((d) => (Number.isFinite(d) ? Math.round(d) : NaN))
     .filter((d) => d >= 0 && d <= 6)
-    .map((d) => d + 1) // DB stores 1-7 with Sunday=1
   if (norm.length === 0) return null
   const uniq = Array.from(new Set(norm))
   return uniq.sort((a, b) => a - b)

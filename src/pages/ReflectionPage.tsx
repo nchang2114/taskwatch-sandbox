@@ -10885,14 +10885,15 @@ useEffect(() => {
           const baseDate = Number.isFinite(customRecurrenceBaseMs as number) ? new Date(customRecurrenceBaseMs as number) : new Date()
           // UI uses 1–7 semantics (Sunday=1 ... Saturday=7); normalize to JS 0–6 internally.
           const weekdayFull = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday']
+          // Display and store using JS encoding: 0=Sunday .. 6=Saturday
           const WEEKDAY_META = [
-            { dbValue: 1, jsValue: 0, label: 'S', full: weekdayFull[0] },
-            { dbValue: 2, jsValue: 1, label: 'M', full: weekdayFull[1] },
-            { dbValue: 3, jsValue: 2, label: 'T', full: weekdayFull[2] },
-            { dbValue: 4, jsValue: 3, label: 'W', full: weekdayFull[3] },
-            { dbValue: 5, jsValue: 4, label: 'T', full: weekdayFull[4] },
-            { dbValue: 6, jsValue: 5, label: 'F', full: weekdayFull[5] },
-            { dbValue: 7, jsValue: 6, label: 'S', full: weekdayFull[6] },
+            { jsValue: 0, label: 'S', full: weekdayFull[0] },
+            { jsValue: 1, label: 'M', full: weekdayFull[1] },
+            { jsValue: 2, label: 'T', full: weekdayFull[2] },
+            { jsValue: 3, label: 'W', full: weekdayFull[3] },
+            { jsValue: 4, label: 'T', full: weekdayFull[4] },
+            { jsValue: 5, label: 'F', full: weekdayFull[5] },
+            { jsValue: 6, label: 'S', full: weekdayFull[6] },
           ]
           const clampInterval = (value: number) => Math.max(1, Math.min(365, Math.round(value)))
           const clampOccurrences = (value: number) => Math.max(1, Math.min(999, Math.round(value)))
@@ -11014,11 +11015,11 @@ useEffect(() => {
                           const active = draft.weeklyDays.has(day.jsValue)
                           return (
                             <button
-                              key={day.dbValue}
+                              key={day.jsValue}
                               type="button"
                               className={`custom-recur__weekday${active ? ' custom-recur__weekday--active' : ''}`}
-                              title={`${day.full} (${day.dbValue})`}
-                              aria-label={`${day.full} (${day.dbValue})`}
+                              title={day.full}
+                              aria-label={day.full}
                               onClick={() => toggleWeeklyDay(day.jsValue)}
                               aria-pressed={active}
                             >
