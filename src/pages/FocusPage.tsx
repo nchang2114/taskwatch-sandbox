@@ -5113,6 +5113,38 @@ useEffect(() => {
   // Keep standard view as default; dashboard toggles on demand
   const [dashboardLayout, setDashboardLayout] = useState(false)
 
+  const timeModeToggle = (
+    <div className="time-mode-toggle" role="tablist" aria-label="Timer mode">
+      {timeModeOptions.map((option) => {
+        const isCurrent = timeMode === option.id
+        const modeIsRunning = isCurrent ? isRunning : modeStateRef.current[option.id].isRunning
+        const modeElapsed = isCurrent ? elapsed : modeStateRef.current[option.id].elapsed
+        let dotClass = 'status-idle'
+        if (modeIsRunning) {
+          dotClass = 'status-running'
+        } else if (modeElapsed > 0) {
+          dotClass = 'status-paused'
+        }
+
+        return (
+          <button
+            key={option.id}
+            type="button"
+            role="tab"
+            aria-selected={isCurrent}
+            className={classNames('time-mode-toggle__button', isCurrent && 'time-mode-toggle__button--active')}
+            onClick={() => handleSwitchTimeMode(option.id)}
+          >
+            <span className="time-mode-toggle__text">
+              <span className={`time-mode-toggle__dot ${dotClass}`} />
+              {option.label}
+            </span>
+          </button>
+        )
+      })}
+    </div>
+  )
+
   return (
     <div className={classNames('site-main__inner', 'taskwatch-page', dashboardLayout && 'taskwatch--dashboard')}>
       {dashboardLayout ? (
@@ -5144,37 +5176,10 @@ useEffect(() => {
           <h1 className="stopwatch-heading">Taskwatch</h1>
         </>
       )}
-      <div className="time-mode-toggle" role="tablist" aria-label="Timer mode">
-        {timeModeOptions.map((option) => {
-          const isCurrent = timeMode === option.id
-          const modeIsRunning = isCurrent ? isRunning : modeStateRef.current[option.id].isRunning
-          const modeElapsed = isCurrent ? elapsed : modeStateRef.current[option.id].elapsed
-          let dotClass = 'status-idle'
-          if (modeIsRunning) {
-            dotClass = 'status-running'
-          } else if (modeElapsed > 0) {
-            dotClass = 'status-paused'
-          }
-
-          return (
-            <button
-              key={option.id}
-              type="button"
-              role="tab"
-              aria-selected={isCurrent}
-              className={classNames('time-mode-toggle__button', isCurrent && 'time-mode-toggle__button--active')}
-              onClick={() => handleSwitchTimeMode(option.id)}
-            >
-              <span className="time-mode-toggle__text">
-                <span className={`time-mode-toggle__dot ${dotClass}`} />
-                {option.label}
-              </span>
-            </button>
-          )
-        })}
-      </div>
       {dashboardLayout ? (
-        <div className="taskwatch-columns">
+        <>
+          {timeModeToggle}
+          <div className="taskwatch-columns">
           <div className="taskwatch-col taskwatch-col--left">
             <div className="task-selector-container">
               <div
@@ -5826,10 +5831,13 @@ useEffect(() => {
             {notebookSection}
           </div>
         </div>
+        </>
       ) : null}
       {!dashboardLayout && (
         <>
-      <div className="task-selector-container">
+          <div className="focus-group-header">
+            {timeModeToggle}
+            <div className="task-selector-container">
         <div
           className={[
             'focus-task',
@@ -6417,7 +6425,8 @@ useEffect(() => {
             </div>
           </div>
         ) : null}
-      </div>
+          </div>
+        </div>
       <section className="stopwatch-card" role="region" aria-live="polite">
         <button
           type="button"

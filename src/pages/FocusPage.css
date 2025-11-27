@@ -1118,3 +1118,11 @@ html[data-theme='light'] .snapback-panel__button--ghost:hover, html[data-theme='
 html[data-theme='light'] .snapback-panel__button--primary { background: linear-gradient(135deg, rgba(120, 134, 230, 0.98) 0%, rgba(86, 106, 224, 0.95) 90%); border-color: rgba(134, 150, 230, 0.82); }
 
 /* (dashboard-specific compaction overrides removed to restore standard card styles) */
+
+.focus-group-header {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  width: 100%;
+  align-items: center;
+}
