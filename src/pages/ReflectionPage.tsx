@@ -6980,7 +6980,7 @@ useEffect(() => {
             }
             const endAtMs = (rule as any).endAtMs as number | undefined
             if (Number.isFinite(endAtMs as number)) {
-              if (scheduledStart >= (endAtMs as number)) return false
+              if (scheduledStart > (endAtMs as number)) return false
             }
             return true
           }
@@ -7226,7 +7226,7 @@ useEffect(() => {
             // End boundary: inclusive (allow selected occurrence when end_date equals its start time)
             const endAtMs = (rule as any).endAtMs as number | undefined
             if (Number.isFinite(endAtMs as number)) {
-              if (scheduledStart >= (endAtMs as number)) return false
+              if (scheduledStart > (endAtMs as number)) return false
             }
             return true
           }
@@ -9387,7 +9387,7 @@ useEffect(() => {
                           setRepeatingRules((prev) => {
                             const found = prev.find((r) => r.id === parsedGuide.ruleId)
                             if (!found) return prev
-                            const nextEnd = Math.max(0, preciseStart + 1) // keep selected occurrence
+                            const nextEnd = Math.max(0, preciseStart)
                             return prev.map((r) => (r.id === parsedGuide.ruleId ? { ...r, endAtMs: nextEnd } : r))
                           })
                         }

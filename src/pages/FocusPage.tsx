@@ -1881,7 +1881,7 @@ useEffect(() => {
       const endAtMs = (rule as any).endAtMs as number | undefined
       if (Number.isFinite(startAtMs as number) && startedAt < (startAtMs as number)) return
       if (!Number.isFinite(startAtMs as number) && Number.isFinite(createdAtMs as number) && startedAt <= (createdAtMs as number)) return
-      if (Number.isFinite(endAtMs as number) && startedAt >= (endAtMs as number)) return
+      if (Number.isFinite(endAtMs as number) && startedAt > (endAtMs as number)) return
       // Skip if explicitly skipped or already transformed/confirmed
       const occKey = `${rule.id}:${formatYmd(baseStart)}`
       if (skippedSet.has(occKey) || coveredOriginalSet.has(`${rule.id}:${startedAt}`) || coveredOccurrenceSet.has(occKey)) return

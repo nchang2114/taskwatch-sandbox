@@ -22,8 +22,9 @@ export type RepeatingSessionRule = {
   // Used to suppress the creation day when creating from an existing entry.
   createdAtMs?: number
   // Server-defined start/end boundaries (mapped from start_date/end_date). Used to bound
-  // guide synthesis window. These are interpreted in local time (best-effort) unless
-  // explicit timezone handling is added later.
+  // guide synthesis window. endAtMs is the last allowed occurrence start (inclusive).
+  // These are interpreted in local time (best-effort) unless explicit timezone handling
+  // is added later.
   startAtMs?: number
   endAtMs?: number
 }
@@ -470,7 +471,9 @@ export async function createRepeatingRuleForEntry(
   }
   let computedEndAt: number | undefined
   if (Number.isFinite(options?.endDateMs as number)) {
-    computedEndAt = Math.max(0, options?.endDateMs as number)
+    const boundary = Math.max(0, options?.endDateMs as number)
+    const last = computeLastOccurrenceBeforeBoundary(baseRule, boundary)
+    computedEndAt = Number.isFinite(last as number) ? (last as number) : Math.max(0, boundary - 1)
   } else if (Number.isFinite(options?.endAfterOccurrences as number)) {
     const end = computeEndDateAfterOccurrences(baseRule, options?.endAfterOccurrences as number)
     if (Number.isFinite(end as number)) {
@@ -1012,15 +1015,36 @@ export const computeEndDateAfterOccurrences = (
   let current = first as number
   for (let i = 1; i < count; i += 1) {
     const next = nextOccurrenceStart(rule, current)
-    if (!Number.isFinite(next as number)) return null
-    current = next as number
+    if (!Number.isFinite(next as number)) return current
+    const nextStart = next as number
+    if (nextStart <= current) return current
+    current = nextStart
   }
-  const cutoff = nextOccurrenceStart(rule, current)
-  if (Number.isFinite(cutoff as number)) {
-    return cutoff as number
+  return current
+}
+
+// Find the last occurrence start that lands strictly before the provided boundary (exclusive).
+// This is used to map an "ends on" date to the actual final occurrence timestamp.
+const computeLastOccurrenceBeforeBoundary = (
+  rule: RepeatingSessionRule,
+  boundaryExclusiveMs: number,
+): number | null => {
+  if (!Number.isFinite(boundaryExclusiveMs)) return null
+  const limit = Math.max(0, boundaryExclusiveMs)
+  const first = firstOccurrenceStart(rule)
+  if (!Number.isFinite(first as number)) return null
+  if ((first as number) >= limit) return null
+  let current = first as number
+  const MAX_STEPS = 10000
+  for (let i = 0; i < MAX_STEPS; i += 1) {
+    const next = nextOccurrenceStart(rule, current)
+    if (!Number.isFinite(next as number)) return current
+    const nextStart = next as number
+    if (nextStart >= limit) return current
+    if (nextStart <= current) return current
+    current = nextStart
   }
-  const durationMs = Math.max(1, (Number.isFinite(rule.durationMinutes as number) ? (rule.durationMinutes as number) : 60) * MINUTE_MS)
-  return current + durationMs
+  return current
 }
 
 // Update the end boundary for a rule by id. Persists locally and remotely when possible.
@@ -1047,7 +1071,7 @@ export async function updateRepeatingRuleEndDate(ruleId: string, endAtMs: number
   if (error) {
     return false
   }
-  // After updating, fetch start_date and end_date. If equal, delete the row since nothing repeats.
+  // After updating, fetch start_date and end_date. If the start is after the end, delete the row since it cannot repeat.
   const { data: row, error: fetchErr } = await supabase
     .from('repeating_sessions')
     .select('id, start_date, end_date')
@@ -1057,7 +1081,7 @@ export async function updateRepeatingRuleEndDate(ruleId: string, endAtMs: number
   if (!fetchErr && row) {
     const s = typeof (row as any).start_date === 'string' ? Date.parse((row as any).start_date) : NaN
     const e = typeof (row as any).end_date === 'string' ? Date.parse((row as any).end_date) : NaN
-    if (Number.isFinite(s) && Number.isFinite(e) && s === e) {
+    if (Number.isFinite(s) && Number.isFinite(e) && s > e) {
       // Clean up local caches first
       const current = readLocalRepeatingRules()
       const filtered = current.filter((r) => r.id !== ruleId)
@@ -1181,7 +1205,7 @@ export function isRuleWindowFullyResolved(
 }
 
 // Set repeat to none for all future occurrences after the selected occurrence date (YYYY-MM-DD, local).
-// This updates the rule's end boundary to the start of the NEXT local day so the selected occurrence remains.
+// This updates the rule's end boundary to the final occurrence on or before that day.
 export async function setRepeatToNoneAfterOccurrence(
   ruleId: string,
   occurrenceDateYmd: string,
@@ -1190,8 +1214,20 @@ export async function setRepeatToNoneAfterOccurrence(
   const occStart = parseLocalYmd(occurrenceDateYmd)
   if (!Number.isFinite(occStart)) return false
   const DAY_MS = 24 * 60 * 60 * 1000
-  // Set boundary to the start of the next local day so the selected occurrence is still included
-  const ok = await updateRepeatingRuleEndDate(ruleId, occStart + DAY_MS)
+  const boundaryExclusive = occStart + DAY_MS
+  // Prefer an exact match to the last scheduled occurrence on/before the chosen day
+  let endAt = Math.max(0, boundaryExclusive - 1)
+  try {
+    const rules = await fetchRepeatingSessionRules()
+    const rule = rules.find((r) => r.id === ruleId)
+    if (rule) {
+      const last = computeLastOccurrenceBeforeBoundary(rule, boundaryExclusive)
+      if (Number.isFinite(last as number)) {
+        endAt = last as number
+      }
+    }
+  } catch {}
+  const ok = await updateRepeatingRuleEndDate(ruleId, Math.max(0, endAt))
   try {
     await prunePlanned(ruleId, occurrenceDateYmd)
   } catch {}
@@ -1204,11 +1240,10 @@ export async function setRepeatToNoneAfterOccurrenceDefault(ruleId: string, occu
 }
 
 // Variant that uses a precise selected startedAt timestamp (ms). end_date is set to this timestamp,
-// and planned entries after the selected LOCAL day are pruned. Boundary is nudged forward so the
-// selected occurrence remains visible, but subsequent ones are suppressed.
+// and planned entries after the selected LOCAL day are pruned.
 export async function setRepeatToNoneAfterTimestamp(ruleId: string, selectedStartMs: number): Promise<boolean> {
   const ymd = formatLocalYmd(selectedStartMs)
-  const ok = await updateRepeatingRuleEndDate(ruleId, Math.max(0, selectedStartMs) + 1)
+  const ok = await updateRepeatingRuleEndDate(ruleId, Math.max(0, selectedStartMs))
   try {
     await pruneFuturePlannedForRuleAfter(ruleId, ymd)
   } catch {}
