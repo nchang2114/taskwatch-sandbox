@@ -412,14 +412,14 @@ export async function fetchRepeatingSessionRules(): Promise<RepeatingSessionRule
 export async function createRepeatingRuleForEntry(
   entry: HistoryEntry,
   frequency: 'daily' | 'weekly' | 'monthly' | 'annually',
-  options?: { weeklyDays?: number[] | Set<number> },
+  options?: { weeklyDays?: number[] | Set<number>; endDateMs?: number; endAfterOccurrences?: number },
 ): Promise<RepeatingSessionRule | null> {
   const startLocal = new Date(entry.startedAt)
   const hours = startLocal.getHours()
   const minutes = startLocal.getMinutes()
   const timeOfDayMinutes = hours * 60 + minutes
   const durationMs = Math.max(1, entry.endedAt - entry.startedAt)
-  const durationMinutes = Math.max(1, Math.round(durationMs / 60000))
+  const durationMinutes = Math.max(1, Math.round(durationMs / MINUTE_MS))
   const weeklyDaysNormalized = frequency === 'weekly'
     ? (() => {
         const normalized = normalizeWeekdays(options?.weeklyDays ?? [startLocal.getDay()]) ?? []
@@ -431,11 +431,10 @@ export async function createRepeatingRuleForEntry(
   // Canonicalize series start to the scheduled minute (truncate seconds/ms) so it matches
   // guide occurrence timestamps exactly. This avoids start/end millisecond mismatches later.
   const dayStart = (() => { const d = new Date(entry.startedAt); d.setHours(0,0,0,0); return d.getTime() })()
-  const ruleStartMs = dayStart + timeOfDayMinutes * 60000
+  const ruleStartMs = dayStart + timeOfDayMinutes * MINUTE_MS
   // To avoid creating a guide on top of the source entry, start the series at the
   // NEXT occurrence after this entry (next day for daily, next same weekday for weekly).
   const nextStartMs = (() => {
-    const DAY_MS = 24 * 60 * 60 * 1000
     if (frequency === 'daily') return ruleStartMs + DAY_MS
     if (frequency === 'weekly') {
       const days = Array.isArray(weeklyDaysNormalized) && weeklyDaysNormalized.length > 0
@@ -453,25 +452,39 @@ export async function createRepeatingRuleForEntry(
     base.setFullYear(base.getFullYear() + 1)
     return base.getTime()
   })()
+  const ruleTaskName = deriveRuleTaskNameFromEntry(entry)
+  const baseRule: RepeatingSessionRule = {
+    id: 'temp',
+    isActive: true,
+    frequency,
+    dayOfWeek,
+    timeOfDayMinutes,
+    durationMinutes,
+    taskName: ruleTaskName,
+    goalName: entry.goalName ?? null,
+    bucketName: entry.bucketName ?? null,
+    timezone: tz,
+    createdAtMs: Math.max(0, entry.startedAt),
+    startAtMs: Math.max(0, nextStartMs),
+    endAtMs: undefined,
+  }
+  let computedEndAt: number | undefined
+  if (Number.isFinite(options?.endDateMs as number)) {
+    computedEndAt = Math.max(0, options?.endDateMs as number)
+  } else if (Number.isFinite(options?.endAfterOccurrences as number)) {
+    const end = computeEndDateAfterOccurrences(baseRule, options?.endAfterOccurrences as number)
+    if (Number.isFinite(end as number)) {
+      computedEndAt = end as number
+    }
+  }
+  if (Number.isFinite(computedEndAt as number)) {
+    baseRule.endAtMs = computedEndAt as number
+  }
 
   // Try Supabase; if not available, persist locally
-  const ruleTaskName = deriveRuleTaskNameFromEntry(entry)
 
   if (!supabase) {
-    const localRule: RepeatingSessionRule = {
-      id: randomRuleId(),
-      isActive: true,
-      frequency,
-      dayOfWeek,
-      timeOfDayMinutes,
-      durationMinutes,
-      taskName: ruleTaskName,
-      goalName: entry.goalName ?? null,
-      bucketName: entry.bucketName ?? null,
-      timezone: tz,
-      createdAtMs: Math.max(0, entry.startedAt),
-      startAtMs: Math.max(0, nextStartMs),
-    }
+    const localRule: RepeatingSessionRule = { ...baseRule, id: randomRuleId(), taskName: ruleTaskName }
     const current = readLocalRepeatingRules()
     const next = [...current, localRule]
     writeLocalRules(next)
@@ -479,20 +492,7 @@ export async function createRepeatingRuleForEntry(
   }
   const session = await ensureSingleUserSession()
   if (!session) {
-    const localRule: RepeatingSessionRule = {
-      id: randomRuleId(),
-      isActive: true,
-      frequency,
-      dayOfWeek,
-      timeOfDayMinutes,
-      durationMinutes,
-      taskName: ruleTaskName,
-      goalName: entry.goalName ?? null,
-      bucketName: entry.bucketName ?? null,
-      timezone: tz,
-      createdAtMs: Math.max(0, entry.startedAt),
-      startAtMs: Math.max(0, nextStartMs),
-    }
+    const localRule: RepeatingSessionRule = { ...baseRule, id: randomRuleId(), taskName: ruleTaskName }
     const current = readLocalRepeatingRules()
     const next = [...current, localRule]
     writeLocalRules(next)
@@ -511,6 +511,7 @@ export async function createRepeatingRuleForEntry(
     bucket_name: entry.bucketName,
     timezone: tz,
     start_date: new Date(nextStartMs).toISOString(),
+    end_date: Number.isFinite(computedEndAt as number) ? new Date(computedEndAt as number).toISOString() : null,
   }
   const { data, error } = await supabase
     .from('repeating_sessions')
@@ -863,6 +864,7 @@ export async function deleteMatchingRulesForEntry(entry: HistoryEntry): Promise<
 
 // --- Utilities for date math (local) ---
 const DAY_MS = 24 * 60 * 60 * 1000
+const MINUTE_MS = 60 * 1000
 const toLocalDayStart = (ms: number): number => {
   const d = new Date(ms)
   d.setHours(0, 0, 0, 0)
@@ -921,6 +923,104 @@ const addMonthsClamped = (ms: number, months: number, anchorDay?: number): numbe
   const lastDay = new Date(next.getFullYear(), next.getMonth() + 1, 0).getDate()
   next.setDate(Math.min(dayAnchor, lastDay))
   return next.getTime()
+}
+
+const ruleMatchesDay = (rule: RepeatingSessionRule, dayStart: number): boolean => {
+  if (rule.frequency === 'daily') return true
+  if (rule.frequency === 'weekly') {
+    const dow = new Date(dayStart).getDay()
+    const days = Array.isArray(rule.dayOfWeek) ? rule.dayOfWeek : []
+    return days.length === 0 ? true : days.includes(dow)
+  }
+  if (rule.frequency === 'monthly') {
+    const anchorDay = getRuleDayOfMonth(rule)
+    if (!Number.isFinite(anchorDay as number)) return false
+    const d = new Date(dayStart)
+    const lastDay = new Date(d.getFullYear(), d.getMonth() + 1, 0).getDate()
+    const expected = Math.min(anchorDay as number, lastDay)
+    return d.getDate() === expected
+  }
+  if (rule.frequency === 'annually') {
+    const anchorKey = getRuleMonthDayKey(rule)
+    if (!anchorKey) return false
+    return monthDayKey(dayStart) === anchorKey
+  }
+  return false
+}
+
+const clampTimeOfDayMinutes = (minutes: number | undefined): number =>
+  Math.max(0, Math.min(1439, Number.isFinite(minutes as number) ? Number(minutes) : 0))
+
+const nextOccurrenceStart = (rule: RepeatingSessionRule, currentStart: number): number | null => {
+  const timeOfDayMinutes = clampTimeOfDayMinutes(rule.timeOfDayMinutes)
+  const currentDay = toLocalDayStart(currentStart)
+  if (rule.frequency === 'daily') {
+    return currentDay + DAY_MS + timeOfDayMinutes * MINUTE_MS
+  }
+  if (rule.frequency === 'weekly') {
+    const dow = new Date(currentDay).getDay()
+    const days = Array.isArray(rule.dayOfWeek) ? [...rule.dayOfWeek].sort((a, b) => a - b) : []
+    const offsets = days
+      .map((d) => (d > dow ? d - dow : d === dow ? 7 : 7 - (dow - d)))
+      .filter((v) => v > 0)
+    const offset = offsets.length > 0 ? Math.min(...offsets) : 7
+    return currentDay + offset * DAY_MS + timeOfDayMinutes * MINUTE_MS
+  }
+  if (rule.frequency === 'monthly') {
+    const anchorDay = getRuleDayOfMonth(rule) ?? new Date(currentStart).getDate()
+    return addMonthsClamped(currentStart, 1, anchorDay)
+  }
+  if (rule.frequency === 'annually') {
+    const base = new Date(currentStart)
+    base.setFullYear(base.getFullYear() + 1)
+    return base.getTime()
+  }
+  return currentStart + DAY_MS
+}
+
+const firstOccurrenceStart = (rule: RepeatingSessionRule): number | null => {
+  const anchor =
+    Number.isFinite(rule.startAtMs as number)
+      ? (rule.startAtMs as number)
+      : Number.isFinite(rule.createdAtMs as number)
+        ? (rule.createdAtMs as number)
+        : null
+  if (!Number.isFinite(anchor as number)) return null
+  const timeOfDayMinutes = clampTimeOfDayMinutes(rule.timeOfDayMinutes)
+  const anchorDay = toLocalDayStart(anchor as number)
+  let candidate = anchorDay + timeOfDayMinutes * MINUTE_MS
+  let guard = 0
+  while (guard < 800) {
+    if (candidate >= (anchor as number) && ruleMatchesDay(rule, toLocalDayStart(candidate))) {
+      return candidate
+    }
+    const next = nextOccurrenceStart(rule, candidate)
+    if (!Number.isFinite(next as number)) return null
+    candidate = next as number
+    guard += 1
+  }
+  return null
+}
+
+export const computeEndDateAfterOccurrences = (
+  rule: RepeatingSessionRule,
+  occurrences: number,
+): number | null => {
+  const count = Math.max(1, Math.floor(occurrences))
+  const first = firstOccurrenceStart(rule)
+  if (!Number.isFinite(first as number)) return null
+  let current = first as number
+  for (let i = 1; i < count; i += 1) {
+    const next = nextOccurrenceStart(rule, current)
+    if (!Number.isFinite(next as number)) return null
+    current = next as number
+  }
+  const cutoff = nextOccurrenceStart(rule, current)
+  if (Number.isFinite(cutoff as number)) {
+    return cutoff as number
+  }
+  const durationMs = Math.max(1, (Number.isFinite(rule.durationMinutes as number) ? (rule.durationMinutes as number) : 60) * MINUTE_MS)
+  return current + durationMs
 }
 
 // Update the end boundary for a rule by id. Persists locally and remotely when possible.

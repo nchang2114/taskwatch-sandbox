@@ -10930,18 +10930,48 @@ useEffect(() => {
               closeCustomRecurrence()
               return
             }
-            if (draft.unit === 'week') {
-              const weeklyDays = Array.from(draft.weeklyDays)
-              if (weeklyDays.length > 0) {
-                const created = await createRepeatingRuleForEntry(customRecurrenceEntry, 'weekly', { weeklyDays })
-                if (created) {
-                  setRepeatingRules((prev) => {
-                    const next = [...prev, created]
-                    storeRepeatingRulesLocal(next)
-                    return next
-                  })
-                }
+            const DAY_MS = 24 * 60 * 60 * 1000
+            const parseLocalDateMs = (value: string): number | null => {
+              const parts = value.split('-').map((p) => Number(p))
+              if (parts.length !== 3) return null
+              const [y, m, d] = parts
+              if (!Number.isFinite(y) || !Number.isFinite(m) || !Number.isFinite(d)) return null
+              const dt = new Date(y, m - 1, d)
+              dt.setHours(0, 0, 0, 0)
+              const ms = dt.getTime()
+              return Number.isFinite(ms) ? ms : null
+            }
+            const createOptions: {
+              weeklyDays?: number[]
+              endDateMs?: number
+              endAfterOccurrences?: number
+            } = {}
+            if (draft.ends === 'on') {
+              const endMs = parseLocalDateMs(draft.endDate)
+              if (Number.isFinite(endMs as number)) {
+                createOptions.endDateMs = (endMs as number) + DAY_MS
               }
+            } else if (draft.ends === 'after') {
+              createOptions.endAfterOccurrences = draft.occurrences
+            }
+            let frequency: 'daily' | 'weekly' | 'monthly' | 'annually' = 'daily'
+            if (draft.unit === 'week') {
+              frequency = 'weekly'
+              createOptions.weeklyDays = Array.from(draft.weeklyDays)
+            } else if (draft.unit === 'month') {
+              frequency = 'monthly'
+            } else if (draft.unit === 'year') {
+              frequency = 'annually'
+            } else {
+              frequency = 'daily'
+            }
+            const created = await createRepeatingRuleForEntry(customRecurrenceEntry, frequency, createOptions)
+            if (created) {
+              setRepeatingRules((prev) => {
+                const next = [...prev, created]
+                storeRepeatingRulesLocal(next)
+                return next
+              })
             }
             closeCustomRecurrence()
           }
