@@ -760,9 +760,9 @@ html[data-theme='light'] .task-selector__bucket-badge { background: rgba(178, 24
   padding: 4px;
   gap: 0.35rem;
   border-radius: 999px;
-  background: linear-gradient(135deg, rgba(26, 32, 58, 0.92) 0%, rgba(14, 18, 36, 0.9) 100%);
-  border: 1px solid rgba(255, 255, 255, 0.06);
-  box-shadow: 0 16px 40px rgba(6, 10, 30, 0.28), inset 0 1px 0 rgba(255, 255, 255, 0.08);
+  background: linear-gradient(135deg, rgba(10, 28, 58, 0.95) 0%, rgba(8, 22, 46, 0.94) 100%);
+  border: 1px solid rgba(100, 150, 220, 0.35);
+  box-shadow: 0 16px 40px rgba(4, 10, 26, 0.36), inset 0 1px 0 rgba(255, 255, 255, 0.1);
 }
 .time-mode-toggle__button {
   position: relative;
@@ -787,7 +787,7 @@ html[data-theme='light'] .task-selector__bucket-badge { background: rgba(178, 24
   position: absolute;
   inset: 0;
   border-radius: 999px;
-  background: linear-gradient(135deg, #3a6df0 0%, #5b4ee0 50%, #7e3af2 100%);
+  background: linear-gradient(135deg, #2b7cff 0%, #1f9bff 50%, #17b7ff 100%);
   opacity: 0;
   transition: opacity 200ms ease;
   z-index: -1;
@@ -835,14 +835,14 @@ html[data-theme='light'] .task-selector__bucket-badge { background: rgba(178, 24
 
 html[data-theme='light'] .time-mode-toggle {
   border-color: rgba(0, 0, 0, 0.06);
-  background: linear-gradient(135deg, rgba(245, 248, 255, 0.96) 0%, rgba(236, 240, 255, 0.96) 100%);
-  box-shadow: 0 12px 30px rgba(0, 0, 0, 0.06), inset 0 1px 0 rgba(255, 255, 255, 0.9);
+  background: linear-gradient(135deg, rgba(232, 240, 255, 0.98) 0%, rgba(218, 230, 248, 0.97) 100%);
+  box-shadow: 0 12px 30px rgba(0, 0, 0, 0.06), inset 0 1px 0 rgba(255, 255, 255, 0.95);
 }
 html[data-theme='light'] .time-mode-toggle__button {
   color: rgba(20, 28, 60, 0.68);
 }
 html[data-theme='light'] .time-mode-toggle__button::before {
-  background: linear-gradient(135deg, #6390ff 0%, #7e84fc 50%, #9d7efc 100%);
+  background: linear-gradient(135deg, #2b7cff 0%, #1f9bff 50%, #17b7ff 100%);
 }
 html[data-theme='light'] .time-mode-toggle__button--active {
   color: #ffffff;
