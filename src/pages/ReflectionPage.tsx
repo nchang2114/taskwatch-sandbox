@@ -2535,6 +2535,7 @@ export default function ReflectionPage() {
   const [historyOwnerSignal, setHistoryOwnerSignal] = useState(0)
   const [customRecurrenceOpen, setCustomRecurrenceOpen] = useState(false)
   const [customRecurrenceBaseMs, setCustomRecurrenceBaseMs] = useState<number | null>(null)
+  const [customRecurrenceEntry, setCustomRecurrenceEntry] = useState<HistoryEntry | null>(null)
   const [customUnitMenuOpen, setCustomUnitMenuOpen] = useState(false)
   const [customMonthlyMenuOpen, setCustomMonthlyMenuOpen] = useState(false)
   const customUnitMenuRef = useRef<HTMLDivElement | null>(null)
@@ -2553,9 +2554,11 @@ export default function ReflectionPage() {
     })(),
     occurrences: 10,
   }))
-  const openCustomRecurrence = useCallback((baseMs: number | null) => {
+  const openCustomRecurrence = useCallback((entry: HistoryEntry | null) => {
+    const baseMs = entry?.startedAt ?? null
     setCalendarPreview(null)
     setCustomRecurrenceBaseMs(baseMs)
+    setCustomRecurrenceEntry(entry)
     setCustomUnitMenuOpen(false)
     setCustomMonthlyMenuOpen(false)
     setCustomRecurrenceDraft((prev) => {
@@ -2571,7 +2574,10 @@ export default function ReflectionPage() {
     })
     setCustomRecurrenceOpen(true)
   }, [])
-  const closeCustomRecurrence = useCallback(() => setCustomRecurrenceOpen(false), [])
+  const closeCustomRecurrence = useCallback(() => {
+    setCustomRecurrenceOpen(false)
+    setCustomRecurrenceEntry(null)
+  }, [])
 
   const clearCalendarPanFallbackTimeout = useCallback(() => {
     const timeoutId = calendarPanFallbackTimeoutRef.current
@@ -6948,7 +6954,7 @@ useEffect(() => {
             if (rule.frequency === 'daily') return true
             if (rule.frequency === 'weekly') {
               const d = new Date(dayStart)
-              return rule.dayOfWeek === d.getDay()
+              return Array.isArray(rule.dayOfWeek) && rule.dayOfWeek.includes(d.getDay())
             }
             if (rule.frequency === 'monthly') {
               return matchesMonthlyDay(rule, dayStart)
@@ -7190,7 +7196,7 @@ useEffect(() => {
             if (rule.frequency === 'daily') return true
             if (rule.frequency === 'weekly') {
               const d = new Date(dayStart)
-              return rule.dayOfWeek === d.getDay()
+              return Array.isArray(rule.dayOfWeek) && rule.dayOfWeek.includes(d.getDay())
             }
             if (rule.frequency === 'monthly') {
               return matchesMonthlyDay(rule, dayStart)
@@ -9322,14 +9328,28 @@ useEffect(() => {
                 (r.taskName?.trim() || '') === (entry.taskName?.trim() || '') &&
                 (r.goalName?.trim() || null) === (entry.goalName?.trim() || null) &&
                 (r.bucketName?.trim() || null) === (entry.bucketName?.trim() || null)
-              const hasDaily = repeatingRules.some((r) => matches(r) && r.frequency === 'daily')
-              const hasWeekly = repeatingRules.some((r) => matches(r) && r.frequency === 'weekly' && r.dayOfWeek === dow)
-              const hasMonthly = repeatingRules.some((r) => matches(r) && r.frequency === 'monthly' && matchesMonthlyDay(r, dayStartMs))
-              const hasAnnual = repeatingRules.some(
-                (r) => matches(r) && r.frequency === 'annually' && ruleMonthDayKey(r) === monthDay,
+              const matchingRules = repeatingRules.filter((r) => matches(r))
+              const hasDaily = matchingRules.some((r) => r.frequency === 'daily')
+              const hasCustom = matchingRules.some(
+                (r) => r.frequency === 'weekly' && Array.isArray(r.dayOfWeek) && r.dayOfWeek.length > 1,
               )
-              const currentVal: 'none' | 'daily' | 'weekly' | 'monthly' | 'annually' =
-                hasDaily ? 'daily' : hasWeekly ? 'weekly' : hasMonthly ? 'monthly' : hasAnnual ? 'annually' : 'none'
+              const hasWeekly = matchingRules.some(
+                (r) => r.frequency === 'weekly' && Array.isArray(r.dayOfWeek) && r.dayOfWeek.includes(dow),
+              )
+              const hasMonthly = matchingRules.some((r) => r.frequency === 'monthly' && matchesMonthlyDay(r, dayStartMs))
+              const hasAnnual = matchingRules.some((r) => r.frequency === 'annually' && ruleMonthDayKey(r) === monthDay)
+              const currentVal: 'none' | 'daily' | 'weekly' | 'monthly' | 'annually' | 'custom' =
+                hasCustom
+                  ? 'custom'
+                  : hasDaily
+                    ? 'daily'
+                    : hasWeekly
+                      ? 'weekly'
+                      : hasMonthly
+                        ? 'monthly'
+                        : hasAnnual
+                          ? 'annually'
+                          : 'none'
               return (
                 <HistoryDropdown
                   id={`repeat-${entry.id}`}
@@ -9346,7 +9366,7 @@ useEffect(() => {
                   onChange={async (v) => {
                     const val = (v as 'none' | 'daily' | 'weekly' | 'monthly' | 'annually' | 'custom')
                     if (val === 'custom') {
-                      openCustomRecurrence(entry.startedAt)
+                      openCustomRecurrence(entry)
                       return
                     }
                     if (val === 'none') {
@@ -9389,7 +9409,7 @@ useEffect(() => {
                           const timeMatch = r.timeOfDayMinutes === minutes && r.durationMinutes === durMin
                           const freqMatch =
                             r.frequency === 'daily' ||
-                            (r.frequency === 'weekly' && r.dayOfWeek === dow) ||
+                            (r.frequency === 'weekly' && Array.isArray(r.dayOfWeek) && r.dayOfWeek.includes(dow)) ||
                             (r.frequency === 'monthly' && matchesMonthlyDay(r, dayStart.getTime())) ||
                             (r.frequency === 'annually' && ruleMonthDayKey(r) === monthDay)
                           const startAt = (r as any).startAtMs as number | undefined
@@ -9414,7 +9434,7 @@ useEffect(() => {
                             const timeMatch = r.timeOfDayMinutes === minutes && r.durationMinutes === durMin
                             const freqMatch =
                               r.frequency === 'daily' ||
-                              (r.frequency === 'weekly' && r.dayOfWeek === dow) ||
+                              (r.frequency === 'weekly' && Array.isArray(r.dayOfWeek) && r.dayOfWeek.includes(dow)) ||
                               (r.frequency === 'monthly' && matchesMonthlyDay(r, dayStart.getTime())) ||
                               (r.frequency === 'annually' && ruleMonthDayKey(r) === monthDay)
                             return !(labelMatch && timeMatch && freqMatch)
@@ -10328,12 +10348,27 @@ useEffect(() => {
           (r.goalName?.trim() || null) === (inspectorEntry.goalName?.trim() || null) &&
           (r.bucketName?.trim() || null) === (inspectorEntry.bucketName?.trim() || null)
         const hasDaily = repeatingRules.some((r) => matches(r) && r.frequency === 'daily')
-        const hasWeekly = repeatingRules.some((r) => matches(r) && r.frequency === 'weekly' && r.dayOfWeek === dow)
+        const hasCustom = repeatingRules.some(
+          (r) => matches(r) && r.frequency === 'weekly' && Array.isArray(r.dayOfWeek) && r.dayOfWeek.length > 1,
+        )
+        const hasWeekly = repeatingRules.some(
+          (r) => matches(r) && r.frequency === 'weekly' && Array.isArray(r.dayOfWeek) && r.dayOfWeek.includes(dow),
+        )
         const hasMonthly = repeatingRules.some((r) => matches(r) && r.frequency === 'monthly' && matchesMonthlyDay(r, dayStartMs))
         const monthDay = monthDayKey(inspectorEntry.startedAt)
         const hasAnnual = repeatingRules.some((r) => matches(r) && r.frequency === 'annually' && ruleMonthDayKey(r) === monthDay)
-        const currentVal: 'none' | 'daily' | 'weekly' | 'monthly' | 'annually' =
-          hasDaily ? 'daily' : hasWeekly ? 'weekly' : hasMonthly ? 'monthly' : hasAnnual ? 'annually' : 'none'
+        const currentVal: 'none' | 'daily' | 'weekly' | 'monthly' | 'annually' | 'custom' =
+          hasCustom
+            ? 'custom'
+            : hasDaily
+              ? 'daily'
+              : hasWeekly
+                ? 'weekly'
+                : hasMonthly
+                  ? 'monthly'
+                  : hasAnnual
+                    ? 'annually'
+                    : 'none'
         return (
           <div className="calendar-inspector__repeat" aria-label="Repeat schedule">
             <span className="calendar-inspector__repeat-label" aria-hidden>
@@ -10356,7 +10391,7 @@ useEffect(() => {
               onChange={async (v) => {
                 const val = v as 'none' | 'daily' | 'weekly' | 'monthly' | 'annually' | 'custom'
                 if (val === 'custom') {
-                  openCustomRecurrence(inspectorEntry.startedAt)
+                  openCustomRecurrence(inspectorEntry)
                   return
                 }
                 if (val === 'none') {
@@ -10373,7 +10408,7 @@ useEffect(() => {
                         const timeMatch = r.timeOfDayMinutes === minutes && r.durationMinutes === durMin
                         const freqMatch =
                           r.frequency === 'daily' ||
-                          (r.frequency === 'weekly' && r.dayOfWeek === dow) ||
+                          (r.frequency === 'weekly' && Array.isArray(r.dayOfWeek) && r.dayOfWeek.includes(dow)) ||
                           (r.frequency === 'monthly' && matchesMonthlyDay(r, dayStartMs)) ||
                           (r.frequency === 'annually' && ruleMonthDayKey(r) === monthDay)
                         return labelMatch && timeMatch && freqMatch ? { ...r, isActive: false } : r
@@ -10880,6 +10915,26 @@ useEffect(() => {
           const handleModalClick = (e: MouseEvent) => {
             e.stopPropagation()
           }
+          const handleCustomSave = async () => {
+            if (!customRecurrenceEntry) {
+              closeCustomRecurrence()
+              return
+            }
+            if (draft.unit === 'week') {
+              const weeklyDays = Array.from(draft.weeklyDays)
+              if (weeklyDays.length > 0) {
+                const created = await createRepeatingRuleForEntry(customRecurrenceEntry, 'weekly', { weeklyDays })
+                if (created) {
+                  setRepeatingRules((prev) => {
+                    const next = [...prev, created]
+                    storeRepeatingRulesLocal(next)
+                    return next
+                  })
+                }
+              }
+            }
+            closeCustomRecurrence()
+          }
           return (
             <div className="custom-recur__backdrop" role="presentation" onClick={closeCustomRecurrence}>
               <div className="custom-recur" role="dialog" aria-modal="true" aria-label="Custom recurrence" onClick={handleModalClick}>
@@ -11073,7 +11128,7 @@ useEffect(() => {
                 </div>
                 <footer className="custom-recur__footer">
                   <button type="button" className="custom-recur__ghost" onClick={closeCustomRecurrence}>Cancel</button>
-                  <button type="button" className="custom-recur__primary" onClick={closeCustomRecurrence}>Done</button>
+                  <button type="button" className="custom-recur__primary" onClick={handleCustomSave}>Done</button>
                 </footer>
               </div>
             </div>

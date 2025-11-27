@@ -1848,7 +1848,8 @@ useEffect(() => {
         // Frequency filters
         if (rule.frequency === 'weekly') {
           const d = new Date(baseStart)
-          if (rule.dayOfWeek !== null && rule.dayOfWeek !== d.getDay()) return
+          if (!Array.isArray(rule.dayOfWeek) || rule.dayOfWeek.length === 0) return
+          if (!rule.dayOfWeek.includes(d.getDay())) return
         } else if (rule.frequency === 'monthly') {
           if (!matchesMonthlyDay(rule, baseStart)) return
         } else if (rule.frequency === 'annually') {

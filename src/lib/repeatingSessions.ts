@@ -7,8 +7,8 @@ export type RepeatingSessionRule = {
   id: string
   isActive: boolean
   frequency: 'daily' | 'weekly' | 'monthly' | 'annually'
-  // 0=Sun .. 6=Sat (required for weekly)
-  dayOfWeek: number | null
+  // Array of JS weekdays: 0=Sun .. 6=Sat (required for weekly; supports multi-day)
+  dayOfWeek: number[] | null
   // Minutes from midnight 0..1439
   timeOfDayMinutes: number
   // Default to 60 if not provided
@@ -47,6 +47,44 @@ const randomRuleId = (): string => {
   } catch {}
   return `local-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
 }
+
+const toJsWeekday = (val: number): number | null => {
+  if (!Number.isFinite(val)) return null
+  const n = Math.round(val)
+  // Accept both JS (0-6) and DB (1-7, Sunday=1) encodings; normalize to JS 0-6.
+  if (n >= 0 && n <= 6) return n
+  if (n >= 1 && n <= 7) return (n + 6) % 7
+  return null
+}
+
+const normalizeWeekdays = (value: unknown): number[] | null => {
+  if (value === null || value === undefined) return null
+  const arr = Array.isArray(value)
+    ? value
+    : value instanceof Set
+      ? Array.from(value)
+      : [value]
+  const normalized = arr
+    .map((v) => toJsWeekday(Number(v)))
+    .filter((v): v is number => typeof v === 'number' && v >= 0 && v <= 6)
+  if (normalized.length === 0) return []
+  const uniq = Array.from(new Set(normalized))
+  return uniq.sort((a, b) => a - b)
+}
+
+const toDbWeekdays = (days: number[] | null | undefined): number[] | null => {
+  if (!Array.isArray(days)) return null
+  const norm = days
+    .map((d) => (Number.isFinite(d) ? Math.round(d) : NaN))
+    .filter((d) => d >= 0 && d <= 6)
+    .map((d) => d + 1) // DB stores 1-7 with Sunday=1
+  if (norm.length === 0) return null
+  const uniq = Array.from(new Set(norm))
+  return uniq.sort((a, b) => a - b)
+}
+
+const ruleIncludesWeekday = (rule: RepeatingSessionRule, jsDow: number): boolean =>
+  Array.isArray(rule.dayOfWeek) && rule.dayOfWeek.includes(jsDow)
 
 const deriveRuleTaskNameFromParts = (
   taskName?: string | null,
@@ -187,7 +225,7 @@ export const pushRepeatingRulesToSupabase = async (
   const idMap: Record<string, string> = {}
   const normalizedRules = rules.map((rule) => {
     const safeTaskName = deriveRuleTaskNameFromParts(rule.taskName, rule.bucketName, rule.goalName)
-    const baseRule = { ...rule, taskName: safeTaskName }
+    const baseRule = { ...rule, taskName: safeTaskName, dayOfWeek: normalizeWeekdays(rule.dayOfWeek) }
     const incomingId = typeof rule.id === 'string' ? rule.id : null
     if (!isRepeatingRuleId(incomingId)) {
       const newId = randomRuleId()
@@ -206,6 +244,7 @@ export const pushRepeatingRulesToSupabase = async (
     }
   }
   const payloads = normalizedRules.map((rule) => {
+    const dbDayOfWeek = toDbWeekdays(rule.dayOfWeek)
     const startIso =
       typeof rule.startAtMs === 'number'
         ? new Date(rule.startAtMs).toISOString()
@@ -218,7 +257,7 @@ export const pushRepeatingRulesToSupabase = async (
       user_id: session.user.id,
       is_active: rule.isActive,
       frequency: rule.frequency,
-      day_of_week: rule.dayOfWeek,
+      day_of_week: dbDayOfWeek,
       time_of_day_minutes: rule.timeOfDayMinutes,
       duration_minutes: rule.durationMinutes,
       task_name: rule.taskName,
@@ -292,7 +331,11 @@ const mapRowToRule = (row: any): RepeatingSessionRule | null => {
       ? row.frequency
       : 'daily'
   // Accept both snake_case (DB) and camelCase (local fallback) shapes
-  const dayOfWeek = typeof row.day_of_week === 'number' ? row.day_of_week : (typeof row.dayOfWeek === 'number' ? row.dayOfWeek : null)
+  const dayOfWeek = normalizeWeekdays(
+    Array.isArray(row.day_of_week) || typeof row.day_of_week === 'number'
+      ? row.day_of_week
+      : (Array.isArray(row.dayOfWeek) || typeof row.dayOfWeek === 'number' ? row.dayOfWeek : null),
+  )
   const timeOfDayMinutes = Number.isFinite(row.time_of_day_minutes)
     ? Number(row.time_of_day_minutes)
     : (Number.isFinite(row.timeOfDayMinutes) ? Number(row.timeOfDayMinutes) : 0)
@@ -378,6 +421,7 @@ export async function fetchRepeatingSessionRules(): Promise<RepeatingSessionRule
 export async function createRepeatingRuleForEntry(
   entry: HistoryEntry,
   frequency: 'daily' | 'weekly' | 'monthly' | 'annually',
+  options?: { weeklyDays?: number[] | Set<number> },
 ): Promise<RepeatingSessionRule | null> {
   const startLocal = new Date(entry.startedAt)
   const hours = startLocal.getHours()
@@ -385,7 +429,13 @@ export async function createRepeatingRuleForEntry(
   const timeOfDayMinutes = hours * 60 + minutes
   const durationMs = Math.max(1, entry.endedAt - entry.startedAt)
   const durationMinutes = Math.max(1, Math.round(durationMs / 60000))
-  const dayOfWeek = frequency === 'weekly' ? startLocal.getDay() : null
+  const weeklyDaysNormalized = frequency === 'weekly'
+    ? (() => {
+        const normalized = normalizeWeekdays(options?.weeklyDays ?? [startLocal.getDay()]) ?? []
+        return normalized.length > 0 ? normalized : [startLocal.getDay()]
+      })()
+    : null
+  const dayOfWeek = frequency === 'weekly' ? weeklyDaysNormalized : null
   const tz = Intl.DateTimeFormat().resolvedOptions().timeZone || null
   // Canonicalize series start to the scheduled minute (truncate seconds/ms) so it matches
   // guide occurrence timestamps exactly. This avoids start/end millisecond mismatches later.
@@ -394,8 +444,18 @@ export async function createRepeatingRuleForEntry(
   // To avoid creating a guide on top of the source entry, start the series at the
   // NEXT occurrence after this entry (next day for daily, next same weekday for weekly).
   const nextStartMs = (() => {
-    if (frequency === 'daily') return ruleStartMs + 1 * 24 * 60 * 60 * 1000
-    if (frequency === 'weekly') return ruleStartMs + 7 * 24 * 60 * 60 * 1000
+    const DAY_MS = 24 * 60 * 60 * 1000
+    if (frequency === 'daily') return ruleStartMs + DAY_MS
+    if (frequency === 'weekly') {
+      const days = Array.isArray(weeklyDaysNormalized) && weeklyDaysNormalized.length > 0
+        ? weeklyDaysNormalized
+        : [startLocal.getDay()]
+      for (let offset = 1; offset <= 7; offset += 1) {
+        const candidate = ruleStartMs + offset * DAY_MS
+        if (days.includes(new Date(candidate).getDay())) return candidate
+      }
+      return ruleStartMs + 7 * DAY_MS
+    }
     if (frequency === 'monthly') return addMonthsClamped(ruleStartMs, 1)
     // annually: same month/day next year at same time
     const base = new Date(ruleStartMs)
@@ -447,11 +507,12 @@ export async function createRepeatingRuleForEntry(
     writeLocalRules(next)
     return localRule
   }
+  const dbDayOfWeek = toDbWeekdays(dayOfWeek)
   const payload = {
     user_id: session.user.id,
     is_active: true,
     frequency,
-    day_of_week: dayOfWeek,
+    day_of_week: dbDayOfWeek,
     time_of_day_minutes: timeOfDayMinutes,
     duration_minutes: durationMinutes,
     task_name: ruleTaskName,
@@ -522,6 +583,7 @@ export async function deactivateMatchingRulesForEntry(entry: HistoryEntry): Prom
   const durationMs = Math.max(1, entry.endedAt - entry.startedAt)
   const durationMinutes = Math.max(1, Math.round(durationMs / 60000))
   const dow = startLocal.getDay()
+  const dbDowArray = toDbWeekdays([dow])
   const monthDay = monthDayKey(startLocal.getTime())
   const dayOfMonthVal = startLocal.getDate()
   const task = entry.taskName ?? ''
@@ -537,7 +599,7 @@ export async function deactivateMatchingRulesForEntry(entry: HistoryEntry): Prom
       const timeMatch = r.timeOfDayMinutes === minutes && r.durationMinutes === durationMinutes
       const freqMatch =
         r.frequency === 'daily' ||
-        (r.frequency === 'weekly' && r.dayOfWeek === dow) ||
+        (r.frequency === 'weekly' && ruleIncludesWeekday(r, dow)) ||
         (r.frequency === 'monthly' && getRuleDayOfMonth(r) === dayOfMonthVal) ||
         (r.frequency === 'annually' && getRuleMonthDayKey(r) === monthDay)
       if (r.isActive && labelMatch && timeMatch && freqMatch) {
@@ -576,20 +638,22 @@ export async function deactivateMatchingRulesForEntry(entry: HistoryEntry): Prom
   }
 
   // Weekly (same dow)
-  const { data: weeklyRows, error: weeklyErr } = await supabase
-    .from('repeating_sessions')
-    .update({ is_active: false })
-    .eq('user_id', session.user.id)
-    .eq('frequency', 'weekly')
-    .eq('day_of_week', dow)
-    .eq('time_of_day_minutes', minutes)
-    .eq('duration_minutes', durationMinutes)
-    .eq('task_name', task)
-    .eq('goal_name', goal)
-    .eq('bucket_name', bucket)
-    .select('id')
-  if (!weeklyErr && Array.isArray(weeklyRows)) {
-    ids.push(...weeklyRows.map((r: any) => String(r.id)))
+  if (dbDowArray && dbDowArray.length > 0) {
+    const { data: weeklyRows, error: weeklyErr } = await supabase
+      .from('repeating_sessions')
+      .update({ is_active: false })
+      .eq('user_id', session.user.id)
+      .eq('frequency', 'weekly')
+      .contains('day_of_week', dbDowArray)
+      .eq('time_of_day_minutes', minutes)
+      .eq('duration_minutes', durationMinutes)
+      .eq('task_name', task)
+      .eq('goal_name', goal)
+      .eq('bucket_name', bucket)
+      .select('id')
+    if (!weeklyErr && Array.isArray(weeklyRows)) {
+      ids.push(...weeklyRows.map((r: any) => String(r.id)))
+    }
   }
 
   // Monthly (same day of month)
@@ -667,6 +731,7 @@ export async function deleteMatchingRulesForEntry(entry: HistoryEntry): Promise<
   const durationMs = Math.max(1, entry.endedAt - entry.startedAt)
   const durationMinutes = Math.max(1, Math.round(durationMs / 60000))
   const dow = startLocal.getDay()
+  const dbDowArray = toDbWeekdays([dow])
   const monthDay = monthDayKey(startLocal.getTime())
   const dayOfMonthVal = startLocal.getDate()
   const task = entry.taskName ?? ''
@@ -681,7 +746,7 @@ export async function deleteMatchingRulesForEntry(entry: HistoryEntry): Promise<
       const timeMatch = r.timeOfDayMinutes === minutes && r.durationMinutes === durationMinutes
       const freqMatch =
         r.frequency === 'daily' ||
-        (r.frequency === 'weekly' && r.dayOfWeek === dow) ||
+        (r.frequency === 'weekly' && ruleIncludesWeekday(r, dow)) ||
         (r.frequency === 'monthly' && getRuleDayOfMonth(r) === dayOfMonthVal) ||
         (r.frequency === 'annually' && getRuleMonthDayKey(r) === monthDay)
       const match = labelMatch && timeMatch && freqMatch
@@ -718,20 +783,22 @@ export async function deleteMatchingRulesForEntry(entry: HistoryEntry): Promise<
   }
 
   // Weekly (same dow)
-  const { data: weeklyRows, error: weeklyErr } = await supabase
-    .from('repeating_sessions')
-    .delete()
-    .eq('user_id', session.user.id)
-    .eq('frequency', 'weekly')
-    .eq('day_of_week', dow)
-    .eq('time_of_day_minutes', minutes)
-    .eq('duration_minutes', durationMinutes)
-    .eq('task_name', task)
-    .eq('goal_name', goal)
-    .eq('bucket_name', bucket)
-    .select('id')
-  if (!weeklyErr && Array.isArray(weeklyRows)) {
-    ids.push(...weeklyRows.map((r: any) => String(r.id)))
+  if (dbDowArray && dbDowArray.length > 0) {
+    const { data: weeklyRows, error: weeklyErr } = await supabase
+      .from('repeating_sessions')
+      .delete()
+      .eq('user_id', session.user.id)
+      .eq('frequency', 'weekly')
+      .contains('day_of_week', dbDowArray)
+      .eq('time_of_day_minutes', minutes)
+      .eq('duration_minutes', durationMinutes)
+      .eq('task_name', task)
+      .eq('goal_name', goal)
+      .eq('bucket_name', bucket)
+      .select('id')
+    if (!weeklyErr && Array.isArray(weeklyRows)) {
+      ids.push(...weeklyRows.map((r: any) => String(r.id)))
+    }
   }
 
   // Monthly (same day of month)
@@ -1011,14 +1078,11 @@ export function isRuleWindowFullyResolved(
     return true
   }
   // weekly
-  const firstDow = new Date(start).getDay()
-  const targetDow = Number.isFinite(rule.dayOfWeek as number) ? (rule.dayOfWeek as number) : firstDow
-  // advance from start to the first target dow
-  let day = start
-  while (new Date(day).getDay() !== targetDow && day <= endDay) {
-    day += DAY_MS
-  }
-  for (; day <= endDay; day += 7 * DAY_MS) {
+  const dows = Array.isArray(rule.dayOfWeek) ? rule.dayOfWeek : []
+  if (dows.length === 0) return true
+  for (let day = start; day <= endDay; day += DAY_MS) {
+    const dow = new Date(day).getDay()
+    if (!dows.includes(dow)) continue
     const key = makeKey(rule.id, day)
     if (!confirmed.has(key) && !excepted.has(key)) return false
   }
