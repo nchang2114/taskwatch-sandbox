@@ -1201,6 +1201,8 @@ const historiesAreEqual = (a: HistoryEntry[], b: HistoryEntry[]): boolean => {
       left.taskId !== right.taskId ||
       left.goalSurface !== right.goalSurface ||
       left.bucketSurface !== right.bucketSurface ||
+      (left.repeatingSessionId ?? null) !== (right.repeatingSessionId ?? null) ||
+      (left.originalTime ?? null) !== (right.originalTime ?? null) ||
       Boolean((left as any).futureSession) !== Boolean((right as any).futureSession)
     ) {
       return false

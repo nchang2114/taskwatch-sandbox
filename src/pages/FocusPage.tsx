@@ -434,7 +434,9 @@ const historiesAreEqual = (a: HistoryEntry[], b: HistoryEntry[]): boolean => {
       left.bucketName !== right.bucketName ||
       left.goalId !== right.goalId ||
       left.bucketId !== right.bucketId ||
-      left.taskId !== right.taskId
+      left.taskId !== right.taskId ||
+      (left.repeatingSessionId ?? null) !== (right.repeatingSessionId ?? null) ||
+      (left.originalTime ?? null) !== (right.originalTime ?? null)
     ) {
       return false
     }

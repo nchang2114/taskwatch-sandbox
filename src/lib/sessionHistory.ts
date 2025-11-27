@@ -38,7 +38,7 @@ const parseEnvToggle = (value: unknown): boolean | null => {
   return null
 }
 const ENV_ENABLE_HISTORY_NOTES = parseEnvToggle((import.meta as any)?.env?.VITE_ENABLE_HISTORY_NOTES)
-const ENV_ENABLE_REPEAT_ORIGINAL = parseEnvToggle((import.meta as any)?.env?.VITE_ENABLE_REPEAT_ORIGINAL)
+const ENV_ENABLE_REPEAT_ORIGINAL = true
 const ENV_ENABLE_HISTORY_FUTURE_SESSION = parseEnvToggle(
   (import.meta as any)?.env?.VITE_ENABLE_HISTORY_FUTURE_SESSION,
 )
@@ -59,20 +59,8 @@ const writeFeatureFlags = (flags: FeatureFlags) => {
 }
 const envOverride = (flag: boolean | null): boolean | null => flag
 
-const isRepeatOriginalEnabled = (): boolean => {
-  const override = envOverride(ENV_ENABLE_REPEAT_ORIGINAL)
-  if (override !== null) {
-    return override
-  }
-  const flags = readFeatureFlags()
-  return flags.repeatOriginal !== false
-}
-const disableRepeatOriginal = () => {
-  const flags = readFeatureFlags()
-  if (flags.repeatOriginal === false) return
-  flags.repeatOriginal = false
-  writeFeatureFlags(flags)
-}
+const isRepeatOriginalEnabled = (): boolean => true
+const disableRepeatOriginal = () => {}
 const isHistoryFutureSessionEnabled = (): boolean => {
   const override = envOverride(ENV_ENABLE_HISTORY_FUTURE_SESSION)
   if (override !== null) {
@@ -1047,6 +1035,8 @@ const recordEqualsEntry = (record: HistoryRecord, entry: HistoryEntry): boolean 
   record.bucketSurface === entry.bucketSurface &&
   (record.entryColor ?? '') === (entry.entryColor ?? '') &&
   Boolean(record.futureSession) === Boolean(entry.futureSession) &&
+  (record.repeatingSessionId ?? null) === (entry.repeatingSessionId ?? null) &&
+  (record.originalTime ?? null) === (entry.originalTime ?? null) &&
   record.notes === entry.notes &&
   areHistorySubtasksEqual(record.subtasks, entry.subtasks)
 
