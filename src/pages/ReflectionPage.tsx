@@ -4017,6 +4017,16 @@ const [inspectorFallbackMessage, setInspectorFallbackMessage] = useState<string 
 
   useEffect(() => {
     selectedHistoryEntryRef.current = selectedHistoryEntry
+    // If we are already editing this entry and have local draft changes, don't clobber them
+    if (
+      selectedHistoryEntry &&
+      historyDraftRef.current &&
+      lastCommittedHistoryDraftRef.current &&
+      selectedHistoryEntryRef.current?.id === selectedHistoryEntry.id &&
+      !areHistoryDraftsEqual(historyDraftRef.current, lastCommittedHistoryDraftRef.current)
+    ) {
+      return
+    }
     if (!selectedHistoryEntry) {
       if (typeof window !== 'undefined' && autoCommitFrameRef.current !== null) {
         window.cancelAnimationFrame(autoCommitFrameRef.current)
@@ -6989,6 +6999,11 @@ useEffect(() => {
     }
     const handleKeyDown = (event: globalThis.KeyboardEvent) => {
       if (calendarEditorEntryId || calendarInspectorEntryId || customRecurrenceOpen) {
+        lastCalendarHotkeyRef.current = null
+        multiDayKeyboardStateRef.current = { active: false, selection: multiDayCount }
+        if (showMultiDayChooser) {
+          setShowMultiDayChooser(false)
+        }
         return
       }
       if (event.defaultPrevented) return
