@@ -2975,6 +2975,7 @@ export default function ReflectionPage() {
   const [hoveredHistoryId, setHoveredHistoryId] = useState<string | null>(null)
   const [historyDraft, setHistoryDraft] = useState<HistoryDraftState>(() => createEmptyHistoryDraft())
   const [editingHistoryId, setEditingHistoryId] = useState<string | null>(null)
+  const historyDraftRef = useRef<HistoryDraftState | null>(null)
   const pendingHistorySubtaskFocusRef = useRef<{ entryId: string; subtaskId: string } | null>(null)
   const [revealedHistoryDeleteKey, setRevealedHistoryDeleteKey] = useState<string | null>(null)
   const previousHistorySubtaskIdsRef = useRef<Set<string>>(new Set())
@@ -3411,7 +3412,17 @@ const [inspectorFallbackMessage, setInspectorFallbackMessage] = useState<string 
       if (!entry) return
       const cached = subtasksCacheRef.current.get(entry.id)
       const shouldUseCache = cached && !options?.force
-      if (shouldUseCache && options?.hydrateDraft && selectedHistoryEntryRef.current?.id === entry.id) {
+      const shouldHydrateDraft = Boolean(options?.hydrateDraft && selectedHistoryEntryRef.current?.id === entry.id)
+      const hasLocalSubtaskEdits = (): boolean => {
+        if (!shouldHydrateDraft) return false
+        const draft = historyDraftRef.current
+        const committed = lastCommittedHistoryDraftRef.current
+        return Boolean(draft && committed && !areHistoryDraftsEqual(draft, committed))
+      }
+      if (shouldUseCache && shouldHydrateDraft) {
+        if (hasLocalSubtaskEdits()) {
+          return
+        }
         setHistoryDraft((draftState) => {
           const nextDraft = { ...draftState, subtasks: cloneHistorySubtasks(cached) }
           lastCommittedHistoryDraftRef.current = {
@@ -3431,7 +3442,7 @@ const [inspectorFallbackMessage, setInspectorFallbackMessage] = useState<string 
       try {
         const subtasks = await fetchSubtasksForEntry(entry)
         cacheSubtasksForEntry(entry.id, subtasks)
-        if (options?.hydrateDraft && selectedHistoryEntryRef.current?.id === entry.id) {
+        if (shouldHydrateDraft && !hasLocalSubtaskEdits()) {
           setHistoryDraft((draftState) => {
             const nextDraft = { ...draftState, subtasks: cloneHistorySubtasks(subtasks) }
             lastCommittedHistoryDraftRef.current = {
@@ -3460,6 +3471,10 @@ const [inspectorFallbackMessage, setInspectorFallbackMessage] = useState<string 
   useEffect(() => {
     latestHistoryRef.current = history
   }, [history])
+
+  useEffect(() => {
+    historyDraftRef.current = historyDraft
+  }, [historyDraft])
 
   useEffect(() => {
     subtasksCacheRef.current = subtasksCache
