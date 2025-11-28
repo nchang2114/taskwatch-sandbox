@@ -2965,7 +2965,16 @@ export default function ReflectionPage() {
   const [history, setHistory] = useState<HistoryEntry[]>(() => readPersistedHistory())
   const [repeatingExceptions, setRepeatingExceptions] = useState<RepeatingException[]>(() => readRepeatingExceptions())
   const latestHistoryRef = useRef(history)
-  const [goalsSnapshot, setGoalsSnapshot] = useState<GoalSnapshot[]>(() => readStoredGoalsSnapshot())
+  const goalsSnapshotSignatureRef = useRef<string | null>(null)
+  const skipNextGoalsSnapshotRef = useRef(false)
+  const editorOpenRef = useRef(false)
+  const debugLogBudgetRef = useRef(50)
+  const [goalsSnapshot, setGoalsSnapshot] = useState<GoalSnapshot[]>(() => {
+    const stored = readStoredGoalsSnapshot()
+    goalsSnapshotSignatureRef.current = JSON.stringify(stored)
+    return stored
+  })
+  const taskNoteOverlayCacheRef = useRef<Map<string, { note: string; entry: HistoryEntry }>>(new Map())
   const [lifeRoutineTasks, setLifeRoutineTasks] = useState<LifeRoutineConfig[]>(() => readStoredLifeRoutines())
   const initialLifeRoutineCountRef = useRef(lifeRoutineTasks.length)
   const [activeSession, setActiveSession] = useState<ActiveSessionState | null>(() => readStoredActiveSession())
@@ -2983,6 +2992,7 @@ export default function ReflectionPage() {
   const [subtasksCache, setSubtasksCache] = useState<Map<string, HistorySubtask[]>>(() => new Map())
   const subtasksCacheRef = useRef<Map<string, HistorySubtask[]>>(subtasksCache)
   const subtaskFetchesInFlightRef = useRef<Set<string>>(new Set())
+  const cachedDraftSubtasksRef = useRef<Map<string, HistorySubtask[]>>(new Map())
   // When set, shows a modal editor for a calendar entry
   const [calendarEditorEntryId, setCalendarEditorEntryId] = useState<string | null>(null)
   const [hoveredDuringDragId, setHoveredDuringDragId] = useState<string | null>(null)
@@ -3020,7 +3030,43 @@ const [calendarViewportVersion, setCalendarViewportVersion] = useState(0)
 const [showInspectorExtras, setShowInspectorExtras] = useState(false)
 const [showEditorExtras, setShowEditorExtras] = useState(false)
 const [showInlineExtras, setShowInlineExtras] = useState(false)
-const [inspectorFallbackMessage, setInspectorFallbackMessage] = useState<string | null>(null)
+  const [inspectorFallbackMessage, setInspectorFallbackMessage] = useState<string | null>(null)
+  const debugEditor = useCallback(
+    (message: string, data?: Record<string, unknown>) => {
+      if (debugLogBudgetRef.current <= 0) return
+      if (!calendarEditorEntryId && !calendarInspectorEntryId) return
+      debugLogBudgetRef.current -= 1
+      try {
+        if (data) {
+          console.debug('[Reflection][editor]', message, data)
+        } else {
+          console.debug('[Reflection][editor]', message)
+        }
+      } catch {}
+    },
+    [calendarEditorEntryId, calendarInspectorEntryId],
+  )
+
+  const debugCore = useCallback((message: string, data?: Record<string, unknown>) => {
+    if (debugLogBudgetRef.current <= 0) return
+    debugLogBudgetRef.current -= 1
+    try {
+      if (data) {
+        console.debug('[Reflection][core]', message, data)
+      } else {
+        console.debug('[Reflection][core]', message)
+      }
+    } catch {}
+  }, [])
+
+  useEffect(() => {
+    editorOpenRef.current = Boolean(calendarEditorEntryId || calendarInspectorEntryId)
+    if (editorOpenRef.current) {
+      debugCore('editor open', { editorId: calendarEditorEntryId, inspectorId: calendarInspectorEntryId })
+    } else {
+      debugCore('editor closed')
+    }
+  }, [calendarEditorEntryId, calendarInspectorEntryId])
   const calendarTouchAction = useMemo(
     () => (calendarView === '3d' ? 'pan-x pan-y' : 'pan-y'),
     [calendarView],
@@ -3421,6 +3467,7 @@ const [inspectorFallbackMessage, setInspectorFallbackMessage] = useState<string 
       }
       if (shouldUseCache && shouldHydrateDraft) {
         if (hasLocalSubtaskEdits()) {
+          debugEditor('subtasks hydrate skipped (local edits)', { entryId: entry.id })
           return
         }
         setHistoryDraft((draftState) => {
@@ -3443,6 +3490,7 @@ const [inspectorFallbackMessage, setInspectorFallbackMessage] = useState<string 
         const subtasks = await fetchSubtasksForEntry(entry)
         cacheSubtasksForEntry(entry.id, subtasks)
         if (shouldHydrateDraft && !hasLocalSubtaskEdits()) {
+          debugEditor('subtasks hydrate apply', { entryId: entry.id, count: subtasks.length })
           setHistoryDraft((draftState) => {
             const nextDraft = { ...draftState, subtasks: cloneHistorySubtasks(subtasks) }
             lastCommittedHistoryDraftRef.current = {
@@ -4022,19 +4070,47 @@ const [inspectorFallbackMessage, setInspectorFallbackMessage] = useState<string 
   )
 
   const historyWithTaskNotes = useMemo(() => {
+    if (editorOpenRef.current) {
+      debugCore('historyWithTaskNotes skipped (editor open)')
+      return history
+    }
     if (taskNotesById.size === 0) {
       return history
     }
-    return history.map((entry) => {
+    let overlays = 0
+    const cache = taskNoteOverlayCacheRef.current
+    const mapped = history.map((entry) => {
       if (entry.taskId) {
         const taskNote = taskNotesById.get(entry.taskId)
         if (taskNote !== undefined && taskNote !== entry.notes) {
-          return { ...entry, notes: taskNote ?? '' }
+          overlays += 1
+          const cached = cache.get(entry.id)
+          if (cached && cached.note === taskNote) {
+            return cached.entry
+          }
+          if ((calendarEditorEntryId || calendarInspectorEntryId) && entry.id === selectedHistoryId) {
+            debugEditor('overlay task notes onto entry', {
+              entryId: entry.id,
+              old: entry.notes,
+              taskId: entry.taskId,
+              taskNote,
+            })
+          }
+          const overlaid = { ...entry, notes: taskNote ?? '' }
+          cache.set(entry.id, { note: taskNote ?? '', entry: overlaid })
+          return overlaid
         }
       }
       return entry
     })
-  }, [history, taskNotesById])
+    if (overlays > 0 && (calendarEditorEntryId || calendarInspectorEntryId)) {
+      debugEditor('overlay task notes batch', { overlays })
+    }
+    if (overlays === 0) {
+      cache.clear()
+    }
+    return mapped
+  }, [history, taskNotesById, calendarEditorEntryId, calendarInspectorEntryId, selectedHistoryId, debugEditor, debugCore])
 
   const selectedHistoryEntry = useMemo(() => {
     if (!selectedHistoryId) {
@@ -4055,6 +4131,9 @@ const [inspectorFallbackMessage, setInspectorFallbackMessage] = useState<string 
       selectedHistoryEntryRef.current?.id === selectedHistoryEntry.id &&
       !areHistoryDraftsEqual(historyDraftRef.current, lastCommittedHistoryDraftRef.current)
     ) {
+      debugEditor('skip draft reset (local edits present)', {
+        entryId: selectedHistoryEntry.id,
+      })
       return
     }
     if (!selectedHistoryEntry) {
@@ -4495,30 +4574,53 @@ const [inspectorFallbackMessage, setInspectorFallbackMessage] = useState<string 
     return entry.id ? { sessionId: entry.id } : null
   }, [])
 
-  const updateTaskNotesSnapshot = useCallback((taskId: string, notes: string) => {
-    if (!taskId) return
-    setGoalsSnapshot((current) => {
-      let mutated = false
-      const updated = current.map((goal) => {
-        let goalMutated = false
-        const buckets = goal.buckets.map((bucket) => {
-          const tasks = bucket.tasks.map((task) => {
-            if (task.id !== taskId) return task
-            goalMutated = true
-            mutated = true
-            return { ...task, notes }
-          })
-          return goalMutated ? { ...bucket, tasks } : bucket
-        })
-        return goalMutated ? { ...goal, buckets } : goal
-      })
-      if (mutated) {
-        publishGoalsSnapshot(updated)
-        return updated
+  const publishLocalGoalsSnapshot = useCallback(
+    (snapshot: GoalSnapshot[], reason?: string) => {
+      if (editorOpenRef.current) {
+        debugCore('publishLocalGoalsSnapshot skipped (editor open)', { reason })
+        return
       }
-      return current
-    })
-  }, [])
+      const signature = JSON.stringify(snapshot)
+      goalsSnapshotSignatureRef.current = signature
+      skipNextGoalsSnapshotRef.current = true
+      debugCore('publishLocalGoalsSnapshot', { reason, signature })
+      setGoalsSnapshot(snapshot)
+      publishGoalsSnapshot(snapshot)
+    },
+    [debugCore],
+  )
+
+  const updateTaskNotesSnapshot = useCallback(
+    (taskId: string, notes: string) => {
+      if (!taskId) return
+      setGoalsSnapshot((current) => {
+        let mutated = false
+        const updated = current.map((goal) => {
+          let goalMutated = false
+          const buckets = goal.buckets.map((bucket) => {
+            const tasks = bucket.tasks.map((task) => {
+              if (task.id !== taskId) return task
+              const existing = typeof (task as any).notes === 'string' ? ((task as any).notes as string) : ''
+              if (existing === notes) {
+                return task
+              }
+              goalMutated = true
+              mutated = true
+              return { ...task, notes }
+            })
+            return goalMutated ? { ...bucket, tasks } : bucket
+          })
+          return goalMutated ? { ...goal, buckets } : goal
+        })
+        if (mutated) {
+          publishLocalGoalsSnapshot(updated, 'subtask-upsert')
+          return updated
+        }
+        return current
+      })
+    },
+    [publishLocalGoalsSnapshot],
+  )
 
   // Keep task-linked subtasks in the goals snapshot so other tabs (Goals/Focus) reflect edits immediately.
   const mirrorSubtaskToGoalsSnapshot = useCallback(
@@ -4567,13 +4669,13 @@ const [inspectorFallbackMessage, setInspectorFallbackMessage] = useState<string 
           return goalMutated ? { ...goal, buckets } : goal
         })
         if (mutated) {
-          publishGoalsSnapshot(updated)
+          publishLocalGoalsSnapshot(updated, 'subtask-delete')
           return updated
         }
         return current
       })
     },
-    [],
+    [publishLocalGoalsSnapshot],
   )
 
   const mirrorSubtaskDeletionToGoalsSnapshot = useCallback(
@@ -4601,13 +4703,13 @@ const [inspectorFallbackMessage, setInspectorFallbackMessage] = useState<string 
           return goalMutated ? { ...goal, buckets } : goal
         })
         if (mutated) {
-          publishGoalsSnapshot(updated)
+          publishLocalGoalsSnapshot(updated)
           return updated
         }
         return current
       })
     },
-    [],
+    [publishLocalGoalsSnapshot],
   )
 
   const scheduleSubtaskPersist = useCallback(
@@ -5434,6 +5536,22 @@ useEffect(() => {
 
   useEffect(() => {
     const unsubscribe = subscribeToGoalsSnapshot((snapshot) => {
+      if (editorOpenRef.current) {
+        debugCore('goals snapshot event skipped (editor open)')
+        return
+      }
+      const signature = JSON.stringify(snapshot)
+      if (skipNextGoalsSnapshotRef.current && signature === goalsSnapshotSignatureRef.current) {
+        debugCore('goals snapshot event skipped (self)', { signature })
+        skipNextGoalsSnapshotRef.current = false
+        return
+      }
+      if (signature === goalsSnapshotSignatureRef.current) {
+        debugCore('goals snapshot event ignored (same signature)', { signature })
+        return
+      }
+      debugCore('goals snapshot event applied', { signature })
+      goalsSnapshotSignatureRef.current = signature
       setGoalsSnapshot(snapshot)
     })
     return unsubscribe
@@ -5538,7 +5656,13 @@ useEffect(() => {
 
   useEffect(() => {
     if (!selectedHistoryId) return
-    cacheSubtasksForEntry(selectedHistoryId, historyDraft.subtasks)
+    const last = cachedDraftSubtasksRef.current.get(selectedHistoryId)
+    if (last && areHistorySubtasksEqual(last, historyDraft.subtasks)) {
+      return
+    }
+    const cloned = cloneHistorySubtasks(historyDraft.subtasks)
+    cachedDraftSubtasksRef.current.set(selectedHistoryId, cloned)
+    cacheSubtasksForEntry(selectedHistoryId, cloned)
   }, [selectedHistoryId, historyDraft.subtasks, cacheSubtasksForEntry])
 
   const { segments, windowMs, loggedMs } = useMemo(
