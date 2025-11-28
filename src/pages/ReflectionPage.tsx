@@ -4524,7 +4524,7 @@ const [showInlineExtras, setShowInlineExtras] = useState(false)
           // Silenced move task warning
         }
       })()
-    },
+    }, 
     [bucketIdLookup, bucketOptionsByGoal, bucketToGoals, historyDraft.bucketName, historyDraft.goalName, historyDraft.taskName, moveTaskToBucket, taskIdLookup, taskToOwners, updateHistoryDraftField],
   )
 
