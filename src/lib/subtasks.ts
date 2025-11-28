@@ -16,9 +16,32 @@ const mapRowToSubtask = (row: any): HistorySubtask | null => {
 }
 
 export const fetchSubtasksForEntry = async (entry: HistoryEntry): Promise<HistorySubtask[]> => {
-  if (!supabase || !entry) return []
+  if (!entry) return []
+  // Guest/local fallback: pull from goals snapshot for task-linked entries, else from stored history blob
+  if (!supabase) {
+    if (entry.taskId) {
+      const goals = readStoredGoalsSnapshot()
+      for (const goal of goals) {
+        for (const bucket of goal.buckets) {
+          const task = bucket.tasks.find((t) => t.id === entry.taskId)
+          if (task && Array.isArray(task.subtasks)) {
+            return task.subtasks.map((s) => ({
+              id: s.id,
+              text: s.text,
+              completed: Boolean(s.completed),
+              sortIndex: Number.isFinite(s.sortIndex) ? s.sortIndex : 0,
+            }))
+          }
+        }
+      }
+    }
+    // Session-scoped fallback: use stored history entry
+    const stored = readStoredHistory().find((h) => h.id === entry.id)
+    if (stored?.subtasks) return stored.subtasks.map((s) => ({ ...s }))
+    return (entry.subtasks ?? []).map((s) => ({ ...s }))
+  }
   const session = await ensureSingleUserSession()
-  if (!session?.user?.id) return []
+  if (!session?.user?.id) return (entry.subtasks ?? []).map((s) => ({ ...s }))
   const userId = session.user.id
   const parentTaskId = isUuid(entry.taskId) ? entry.taskId : null
   const parentSessionId = isUuid(entry.id) ? entry.id : null
@@ -41,7 +64,49 @@ export const upsertSubtaskForParent = async (
   parent: ParentSelector,
   subtask: HistorySubtask,
 ): Promise<void> => {
-  if (!supabase) return
+  // Guest/local path
+  if (!supabase) {
+    if (parent.taskId) {
+      const goals = readStoredGoalsSnapshot()
+      let changed = false
+      goals.forEach((goal) => {
+        goal.buckets.forEach((bucket) => {
+          bucket.tasks.forEach((task) => {
+            if (task.id === parent.taskId) {
+              const subs = Array.isArray(task.subtasks) ? [...task.subtasks] : []
+              const idx = subs.findIndex((s) => s.id === subtask.id)
+              const next = {
+                id: subtask.id,
+                text: subtask.text,
+                completed: subtask.completed,
+                sortIndex: subtask.sortIndex,
+              }
+              if (idx >= 0) subs[idx] = next
+              else subs.push(next)
+              subs.sort((a, b) => a.sortIndex - b.sortIndex)
+              task.subtasks = subs
+              changed = true
+            }
+          })
+        })
+      })
+      if (changed) publishGoalsSnapshot(goals)
+    } else if (parent.sessionId) {
+      const history = readStoredHistory()
+      const nextHistory = history.map((h) => {
+        if (h.id !== parent.sessionId) return h
+        const subs = Array.isArray(h.subtasks) ? [...h.subtasks] : []
+        const idx = subs.findIndex((s) => s.id === subtask.id)
+        const next = { ...subtask }
+        if (idx >= 0) subs[idx] = next
+        else subs.push(next)
+        subs.sort((a, b) => a.sortIndex - b.sortIndex)
+        return { ...h, subtasks: subs }
+      })
+      persistHistorySnapshot(nextHistory)
+    }
+    return
+  }
   const session = await ensureSingleUserSession()
   if (!session?.user?.id) return
   const taskId = isUuid(parent.taskId ?? null) ? parent.taskId : null
@@ -64,7 +129,33 @@ export const deleteSubtaskForParent = async (
   parent: ParentSelector,
   subtaskId: string,
 ): Promise<void> => {
-  if (!supabase) return
+  if (!supabase) {
+    if (parent.taskId) {
+      const goals = readStoredGoalsSnapshot()
+      let changed = false
+      goals.forEach((goal) => {
+        goal.buckets.forEach((bucket) => {
+          bucket.tasks.forEach((task) => {
+            if (task.id === parent.taskId && Array.isArray(task.subtasks)) {
+              const before = task.subtasks.length
+              task.subtasks = task.subtasks.filter((s) => s.id !== subtaskId)
+              if (task.subtasks.length !== before) changed = true
+            }
+          })
+        })
+      })
+      if (changed) publishGoalsSnapshot(goals)
+    } else if (parent.sessionId) {
+      const history = readStoredHistory()
+      const nextHistory = history.map((h) =>
+        h.id === parent.sessionId
+          ? { ...h, subtasks: Array.isArray(h.subtasks) ? h.subtasks.filter((s) => s.id !== subtaskId) : [] }
+          : h,
+      )
+      persistHistorySnapshot(nextHistory)
+    }
+    return
+  }
   const session = await ensureSingleUserSession()
   if (!session?.user?.id) return
   const taskId = isUuid(parent.taskId ?? null) ? parent.taskId : null
@@ -115,3 +206,5 @@ export const migrateSessionSubtasksToTask = async (
   }))
   await supabase.from('task_subtasks').upsert(updates, { onConflict: 'id' })
 }
+import { readStoredGoalsSnapshot, publishGoalsSnapshot } from './goalsSync'
+import { readStoredHistory, persistHistorySnapshot } from './sessionHistory'

@@ -829,6 +829,20 @@ const parseTimestamp = (value: unknown, fallback: number): number => {
 }
 
 const sanitizeHistoryEntries = (value: unknown): HistoryEntry[] => {
+  const sanitizeSubtasks = (raw: unknown): HistorySubtask[] => {
+    if (!Array.isArray(raw)) return []
+    return raw
+      .map((item, index) => {
+        if (!item || typeof item !== 'object') return null
+        const sid = typeof (item as any).id === 'string' ? (item as any).id : `subtask-${index}`
+        const text = typeof (item as any).text === 'string' ? (item as any).text : ''
+        const completed = Boolean((item as any).completed)
+        const sort = Number((item as any).sortIndex)
+        const sortIndex = Number.isFinite(sort) ? sort : index
+        return { id: sid, text, completed, sortIndex }
+      })
+      .filter(Boolean) as HistorySubtask[]
+  }
   if (!Array.isArray(value)) {
     return []
   }
@@ -857,7 +871,7 @@ const sanitizeHistoryEntries = (value: unknown): HistoryEntry[] => {
       const bucketSurfaceRaw = sanitizeSurfaceStyle(candidate.bucketSurface)
       const entryColorRaw = typeof (candidate as any).entryColor === 'string' ? ((candidate as any).entryColor as string) : null
       const notesRaw = typeof candidate.notes === 'string' ? candidate.notes : ''
-      const subtasksRaw: HistorySubtask[] = []
+      const subtasksRaw: HistorySubtask[] = sanitizeSubtasks((candidate as any).subtasks)
       const futureSessionRaw = Boolean((candidate as any).futureSession)
       const repeatingSessionIdRaw: string | null =
         typeof (candidate as any).repeatingSessionId === 'string' ? ((candidate as any).repeatingSessionId as string) : null

@@ -3880,6 +3880,7 @@ const [inspectorFallbackMessage, setInspectorFallbackMessage] = useState<string 
   const goalDropdownLabelId = `${goalDropdownId}-label`
   const bucketDropdownLabelId = `${bucketDropdownId}-label`
   const taskDropdownLabelId = `${taskDropdownId}-label`
+  const subtaskSaveTimersRef = useRef<Map<string, number>>(new Map())
 
   const goalDropdownOptions = useMemo<HistoryDropdownOption[]>(() => {
     const normalizedLifeRoutines = LIFE_ROUTINES_NAME.toLowerCase()
@@ -3940,6 +3941,18 @@ const [inspectorFallbackMessage, setInspectorFallbackMessage] = useState<string 
     setEditingHistoryId((current) => (current === selectedHistoryEntry.id ? current : null))
     taskNameAutofilledRef.current = false
   }, [selectedHistoryEntry])
+
+  // Clear any pending subtask save timers when changing selection/unmounting
+  useEffect(() => {
+    return () => {
+      subtaskSaveTimersRef.current.forEach((timerId) => {
+        if (typeof window !== 'undefined') {
+          window.clearTimeout(timerId)
+        }
+      })
+      subtaskSaveTimersRef.current.clear()
+    }
+  }, [selectedHistoryEntry?.id])
 
   useEffect(() => {
     let cancelled = false
@@ -4341,12 +4354,36 @@ const [inspectorFallbackMessage, setInspectorFallbackMessage] = useState<string 
     [bucketIdLookup, bucketOptionsByGoal, bucketToGoals, historyDraft.bucketName, historyDraft.goalName, historyDraft.taskName, moveTaskToBucket, taskIdLookup, taskToOwners, updateHistoryDraftField],
   )
 
+  const getSubtaskParent = useCallback(() => {
+    const entry = selectedHistoryEntryRef.current
+    if (!entry) return null
+    if (entry.taskId) return { taskId: entry.taskId }
+    return entry.id ? { sessionId: entry.id } : null
+  }, [])
+
+  const scheduleSubtaskPersist = useCallback(
+    (subtask: HistorySubtask) => {
+      const parent = getSubtaskParent()
+      if (!parent) return
+      const timers = subtaskSaveTimersRef.current
+      const existing = timers.get(subtask.id)
+      if (typeof existing === 'number' && typeof window !== 'undefined') {
+        window.clearTimeout(existing)
+      }
+      const timerId =
+        typeof window !== 'undefined'
+          ? window.setTimeout(() => {
+              timers.delete(subtask.id)
+              void upsertSubtaskForParent(parent, subtask)
+            }, 150)
+          : (undefined as any)
+      timers.set(subtask.id, timerId as number)
+    },
+    [getSubtaskParent],
+  )
+
   const handleAddHistorySubtask = useCallback(() => {
-    const parent = selectedHistoryEntryRef.current?.taskId
-      ? { taskId: selectedHistoryEntryRef.current.taskId }
-      : selectedHistoryEntryRef.current?.id
-        ? { sessionId: selectedHistoryEntryRef.current.id }
-        : null
+    const parent = getSubtaskParent()
     if (!parent) return
     setHistoryDraft((draft) => {
       const sortIndex = getNextHistorySubtaskSortIndex(draft.subtasks)
@@ -4356,59 +4393,51 @@ const [inspectorFallbackMessage, setInspectorFallbackMessage] = useState<string 
         completed: false,
         sortIndex,
       }
-      void upsertSubtaskForParent(parent, newSubtask)
+      scheduleSubtaskPersist(newSubtask)
       return { ...draft, subtasks: [...draft.subtasks, newSubtask] }
     })
-  }, [])
+  }, [getSubtaskParent, scheduleSubtaskPersist])
 
   const handleUpdateHistorySubtaskText = useCallback((id: string, value: string) => {
-    const parent = selectedHistoryEntryRef.current?.taskId
-      ? { taskId: selectedHistoryEntryRef.current.taskId }
-      : selectedHistoryEntryRef.current?.id
-        ? { sessionId: selectedHistoryEntryRef.current.id }
-        : null
     setHistoryDraft((draft) => {
       const next = draft.subtasks.map((subtask) => (subtask.id === id ? { ...subtask, text: value } : subtask))
       const updated = next.find((s) => s.id === id)
-      if (parent && updated) {
-        void upsertSubtaskForParent(parent, updated)
+      if (updated) {
+        scheduleSubtaskPersist(updated)
       }
       return { ...draft, subtasks: next }
     })
-  }, [])
+  }, [scheduleSubtaskPersist])
 
   const handleToggleHistorySubtaskCompletion = useCallback((id: string) => {
-    const parent = selectedHistoryEntryRef.current?.taskId
-      ? { taskId: selectedHistoryEntryRef.current.taskId }
-      : selectedHistoryEntryRef.current?.id
-        ? { sessionId: selectedHistoryEntryRef.current.id }
-        : null
     setHistoryDraft((draft) => {
       const next = draft.subtasks.map((subtask) =>
         subtask.id === id ? { ...subtask, completed: !subtask.completed } : subtask,
       )
       const updated = next.find((s) => s.id === id)
-      if (parent && updated) {
-        void upsertSubtaskForParent(parent, updated)
+      if (updated) {
+        scheduleSubtaskPersist(updated)
       }
       return { ...draft, subtasks: next }
     })
-  }, [])
+  }, [scheduleSubtaskPersist])
 
   const handleDeleteHistorySubtask = useCallback((id: string) => {
-    const parent = selectedHistoryEntryRef.current?.taskId
-      ? { taskId: selectedHistoryEntryRef.current.taskId }
-      : selectedHistoryEntryRef.current?.id
-        ? { sessionId: selectedHistoryEntryRef.current.id }
-        : null
+    const parent = getSubtaskParent()
     setHistoryDraft((draft) => ({
       ...draft,
       subtasks: draft.subtasks.filter((subtask) => subtask.id !== id),
     }))
     if (parent) {
       void deleteSubtaskForParent(parent, id)
+      const timers = subtaskSaveTimersRef.current
+      const existing = timers.get(id)
+      if (typeof existing === 'number' && typeof window !== 'undefined') {
+        window.clearTimeout(existing)
+        timers.delete(id)
+      }
     }
-  }, [])
+  }, [getSubtaskParent])
 
   const sortedSubtasks = useMemo(
     () => historyDraft.subtasks.slice().sort((a, b) => a.sortIndex - b.sortIndex),
@@ -6512,13 +6541,21 @@ useEffect(() => {
       return options[options.length - 1]
     }
     const handleKeyDown = (event: globalThis.KeyboardEvent) => {
+      if (calendarEditorEntryId || calendarInspectorEntryId || customRecurrenceOpen) {
+        return
+      }
       if (event.defaultPrevented) return
       if (event.metaKey || event.ctrlKey || event.altKey) return
-      const target = event.target as HTMLElement | null
+      const target = (event.target as HTMLElement | null) || (typeof document !== 'undefined' ? (document.activeElement as HTMLElement | null) : null)
       if (target) {
         const tag = target.tagName
         const isEditable = target.isContentEditable
-        if (isEditable || tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') {
+        const isFormField = tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT'
+        const isSubtaskField =
+          target.classList?.contains('calendar-inspector__subtask-input') ||
+          target.closest('.calendar-inspector__subtask-input') !== null
+        const isNotesField = target.classList?.contains('calendar-inspector__notes') || target.closest('.calendar-inspector__notes') !== null
+        if (isEditable || isFormField || isSubtaskField || isNotesField) {
           return
         }
       }
@@ -6664,6 +6701,9 @@ useEffect(() => {
     handlePrevWindow,
     handleNextWindow,
     handleJumpToToday,
+    calendarEditorEntryId,
+    calendarInspectorEntryId,
+    customRecurrenceOpen,
   ])
 
   // Outside-React updater for the calendar now-line to keep UI smooth without full re-renders
