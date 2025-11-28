@@ -4565,7 +4565,7 @@ const [showInlineExtras, setShowInlineExtras] = useState(false)
           return goalMutated ? { ...goal, buckets } : goal
         })
         if (mutated) {
-          publishLocalGoalsSnapshot(updated, 'subtask-upsert')
+          publishLocalGoalsSnapshot(updated)
           return updated
         }
         return current
@@ -4621,7 +4621,7 @@ const [showInlineExtras, setShowInlineExtras] = useState(false)
           return goalMutated ? { ...goal, buckets } : goal
         })
         if (mutated) {
-          publishLocalGoalsSnapshot(updated, 'subtask-delete')
+          publishLocalGoalsSnapshot(updated)
           return updated
         }
         return current
