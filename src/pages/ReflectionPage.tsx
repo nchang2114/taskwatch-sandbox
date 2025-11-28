@@ -25,7 +25,7 @@ import './FocusPage.css'
 import './GoalsPage.css'
 import { readStoredGoalsSnapshot, subscribeToGoalsSnapshot, publishGoalsSnapshot, createGoalsSnapshot, type GoalSnapshot } from '../lib/goalsSync'
 import { SCHEDULE_EVENT_TYPE, type ScheduleBroadcastEvent } from '../lib/scheduleChannel'
-import { createTask as apiCreateTask, fetchGoalsHierarchy, moveTaskToBucket } from '../lib/goalsApi'
+import { createTask as apiCreateTask, fetchGoalsHierarchy, moveTaskToBucket, updateTaskNotes as apiUpdateTaskNotes } from '../lib/goalsApi'
 import {
   DEFAULT_SURFACE_STYLE,
   ensureSurfaceStyle,
@@ -3542,6 +3542,21 @@ const [inspectorFallbackMessage, setInspectorFallbackMessage] = useState<string 
     })
     return map
   }, [goalsSnapshot])
+  const taskNotesById = useMemo(() => {
+    const map = new Map<string, string>()
+    goalsSnapshot.forEach((goal) => {
+      goal.buckets.forEach((bucket) => {
+        bucket.tasks.forEach((task) => {
+          if (!task.id) return
+          const raw = (task as any).notes
+          if (typeof raw === 'string') {
+            map.set(task.id, raw)
+          }
+        })
+      })
+    })
+    return map
+  }, [goalsSnapshot])
   const bucketSurfaceLookup = useMemo(() => {
     const byGoal = new Map<string, SurfaceStyle>()
     const byName = new Map<string, SurfaceStyle>()
@@ -4006,13 +4021,28 @@ const [inspectorFallbackMessage, setInspectorFallbackMessage] = useState<string 
     [resolvedBucketOptions],
   )
 
+  const historyWithTaskNotes = useMemo(() => {
+    if (taskNotesById.size === 0) {
+      return history
+    }
+    return history.map((entry) => {
+      if (entry.taskId) {
+        const taskNote = taskNotesById.get(entry.taskId)
+        if (taskNote !== undefined && taskNote !== entry.notes) {
+          return { ...entry, notes: taskNote ?? '' }
+        }
+      }
+      return entry
+    })
+  }, [history, taskNotesById])
+
   const selectedHistoryEntry = useMemo(() => {
     if (!selectedHistoryId) {
       return null
     }
-    const match = history.find((entry) => entry.id === selectedHistoryId)
+    const match = historyWithTaskNotes.find((entry) => entry.id === selectedHistoryId)
     return match ?? null
-  }, [history, selectedHistoryId])
+  }, [historyWithTaskNotes, selectedHistoryId])
   const selectedHistoryEntryRef = useRef<HistoryEntry | null>(null)
 
   useEffect(() => {
@@ -4465,6 +4495,31 @@ const [inspectorFallbackMessage, setInspectorFallbackMessage] = useState<string 
     return entry.id ? { sessionId: entry.id } : null
   }, [])
 
+  const updateTaskNotesSnapshot = useCallback((taskId: string, notes: string) => {
+    if (!taskId) return
+    setGoalsSnapshot((current) => {
+      let mutated = false
+      const updated = current.map((goal) => {
+        let goalMutated = false
+        const buckets = goal.buckets.map((bucket) => {
+          const tasks = bucket.tasks.map((task) => {
+            if (task.id !== taskId) return task
+            goalMutated = true
+            mutated = true
+            return { ...task, notes }
+          })
+          return goalMutated ? { ...bucket, tasks } : bucket
+        })
+        return goalMutated ? { ...goal, buckets } : goal
+      })
+      if (mutated) {
+        publishGoalsSnapshot(updated)
+        return updated
+      }
+      return current
+    })
+  }, [])
+
   // Keep task-linked subtasks in the goals snapshot so other tabs (Goals/Focus) reflect edits immediately.
   const mirrorSubtaskToGoalsSnapshot = useCallback(
     (parent: { taskId?: string | null; sessionId?: string | null } | null, subtask: HistorySubtask) => {
@@ -4881,7 +4936,7 @@ const [inspectorFallbackMessage, setInspectorFallbackMessage] = useState<string 
     const nextTaskName = draft.taskName.trim()
     const nextGoalName = draft.goalName.trim()
     const nextBucketName = draft.bucketName.trim()
-    const nextNotes = draft.notes
+    let nextNotes = draft.notes
     const nextSubtasks = cloneHistorySubtasks(draft.subtasks)
     const draftStartedAt = draft.startedAt ?? selectedHistoryEntry.startedAt
     const draftEndedAt = draft.endedAt ?? selectedHistoryEntry.endedAt
@@ -4940,6 +4995,22 @@ const [inspectorFallbackMessage, setInspectorFallbackMessage] = useState<string 
       const fallback = bucketSurfaceLookup.byName.get(bucketKey)
       return fallback ? ensureSurfaceStyle(fallback, DEFAULT_SURFACE_STYLE) : null
     })()
+    const prevTaskId = selectedHistoryEntry.taskId
+    const prevTaskNotes = prevTaskId ? taskNotesById.get(prevTaskId) ?? '' : ''
+    const resolvedTaskId =
+      hasGoalName && hasBucketName && nextTaskName.length > 0
+        ? taskIdLookup.get(`${goalKey}::${bucketKey}::${nextTaskName.toLowerCase()}`) ?? null
+        : null
+    const justUnlinked = Boolean(prevTaskId) && !resolvedTaskId
+    if (justUnlinked && nextNotes.trim().length === 0 && prevTaskNotes.trim().length > 0) {
+      nextNotes = prevTaskNotes
+    }
+    const currentTaskNotes = resolvedTaskId ? taskNotesById.get(resolvedTaskId) ?? '' : ''
+    const taskNoteChanged = resolvedTaskId
+      ? prevTaskId !== resolvedTaskId
+        ? nextNotes.trim().length > 0 || currentTaskNotes === ''
+        : nextNotes !== currentTaskNotes
+      : false
     let didUpdateHistory = false
     updateHistory((current) => {
       const index = current.findIndex((entry) => entry.id === selectedHistoryEntry.id)
@@ -4985,12 +5056,7 @@ const [inspectorFallbackMessage, setInspectorFallbackMessage] = useState<string 
               target.bucketId ??
               null
             : null,
-        taskId:
-          normalizedGoalName.length > 0 && normalizedBucketName.length > 0 && nextTaskName.length > 0
-            ? taskIdLookup.get(
-                `${normalizedGoalName.toLowerCase()}::${normalizedBucketName.toLowerCase()}::${nextTaskName.toLowerCase()}`,
-              ) ?? target.taskId ?? null
-            : null,
+        taskId: resolvedTaskId,
       }
       didUpdateHistory = true
       return next
@@ -5012,6 +5078,12 @@ const [inspectorFallbackMessage, setInspectorFallbackMessage] = useState<string 
       ...normalizedDraft,
       subtasks: cloneHistorySubtasks(normalizedDraft.subtasks),
     }
+    if (resolvedTaskId && taskNoteChanged) {
+      updateTaskNotesSnapshot(resolvedTaskId, nextNotes)
+      void apiUpdateTaskNotes(resolvedTaskId, nextNotes).catch((error) =>
+        logWarn('[Reflection] Failed to update task notes:', error),
+      )
+    }
     if (didUpdateHistory || draftChanged) {
       if (pendingNewHistoryId && selectedHistoryId === pendingNewHistoryId) {
         setPendingNewHistoryId(null)
@@ -5026,6 +5098,9 @@ const [inspectorFallbackMessage, setInspectorFallbackMessage] = useState<string 
     historyDraft,
     lifeRoutineSurfaceLookup,
     taskIdLookup,
+    taskNotesById,
+    updateTaskNotesSnapshot,
+    apiUpdateTaskNotes,
     pendingNewHistoryId,
     selectedHistoryEntry,
     selectedHistoryId,
@@ -5377,8 +5452,9 @@ useEffect(() => {
   }, [])
 
   const effectiveHistory = useMemo(() => {
+    const baseHistory = historyWithTaskNotes
     if (!activeSession) {
-      return history
+      return baseHistory
     }
     const now = Date.now()
     const baseElapsed = Math.max(0, activeSession.baseElapsed)
@@ -5390,7 +5466,7 @@ useEffect(() => {
     const totalElapsed = baseElapsed + runningElapsed
     const effectiveElapsed = Math.max(0, totalElapsed - committedElapsed)
     if (effectiveElapsed <= 0) {
-      return history
+      return baseHistory
     }
     const defaultStart = now - effectiveElapsed
     const startCandidate =
@@ -5422,9 +5498,9 @@ useEffect(() => {
       notes: '',
       subtasks: [],
     }
-    const filteredHistory = history.filter((entry) => entry.id !== activeEntry.id)
+    const filteredHistory = baseHistory.filter((entry) => entry.id !== activeEntry.id)
     return [activeEntry, ...filteredHistory]
-  }, [history, activeSession, nowTick])
+  }, [historyWithTaskNotes, activeSession, nowTick])
 
   useEffect(() => {
     const PREFETCH_LIMIT = 20

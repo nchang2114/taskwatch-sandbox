@@ -243,8 +243,7 @@ export async function fetchGoalsHierarchy(): Promise<
   const { data: tasks, error: tErr } = bucketIds.length
     ? await supabase
         .from('tasks')
-        // Omit notes here to reduce payload; fetch lazily per-task when needed
-        .select('id, user_id, bucket_id, text, completed, difficulty, priority, sort_index')
+        .select('id, user_id, bucket_id, text, completed, difficulty, priority, sort_index, notes')
         .in('bucket_id', bucketIds)
         .order('completed', { ascending: true })
         .order('priority', { ascending: false })
@@ -307,7 +306,7 @@ export async function fetchGoalsHierarchy(): Promise<
         completed: !!t.completed,
         difficulty: (t.difficulty as any) ?? 'none',
         priority: !!(t as any).priority,
-        // Notes intentionally omitted in bulk fetch; loaded on demand
+        notes: typeof (t as any).notes === 'string' ? ((t as any).notes as string) : null,
         subtasks: subtasks.map((subtask) => ({
           id: subtask.id,
           text: subtask.text ?? '',

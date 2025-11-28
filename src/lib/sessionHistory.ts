@@ -1198,6 +1198,7 @@ const payloadFromRecord = (
         : Date.now()
   const ENABLE_REPEAT_ORIGINAL = isRepeatOriginalEnabled()
   const INCLUDE_NOTES = isHistoryNotesEnabled()
+  const includeNotesColumn = INCLUDE_NOTES && !record.taskId
   const INCLUDE_SUBTASKS = isHistorySubtasksEnabled()
   const validRepeatId = isUuid(record.repeatingSessionId)
   const includeRepeat = ENABLE_REPEAT_ORIGINAL && !!validRepeatId
@@ -1214,7 +1215,7 @@ const payloadFromRecord = (
     goal_name: record.goalName,
     bucket_name: record.bucketName,
     entry_colour: entryColor,
-    ...(INCLUDE_NOTES ? { notes: record.notes } : {}),
+    ...(includeNotesColumn ? { notes: record.notes } : {}),
     ...(INCLUDE_SUBTASKS ? { subtasks: Array.isArray(record.subtasks) ? record.subtasks : [] } : {}),
     goal_id: isUuid(record.goalId) ? record.goalId : null,
     bucket_id: isUuid(record.bucketId) ? record.bucketId : null,
