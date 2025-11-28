@@ -1153,6 +1153,43 @@ export async function upsertTaskSubtask(
   }
 }
 
+export async function replaceTaskSubtasks(
+  taskId: string,
+  subtasks: Array<{ id: string; text: string; completed: boolean; sortIndex: number; updatedAt?: string }>,
+) {
+  if (!supabase) return
+  const session = await ensureSingleUserSession()
+  if (!session?.user?.id) {
+    return
+  }
+  const userId = session.user.id
+  const STEP = 1024
+  const now = new Date().toISOString()
+  const ordered = Array.isArray(subtasks)
+    ? [...subtasks].sort((a, b) => Number(a?.sortIndex ?? 0) - Number(b?.sortIndex ?? 0))
+    : []
+  const payload = ordered.map((subtask, index) => ({
+    id: subtask.id,
+    task_id: taskId,
+    user_id: userId,
+    text: typeof subtask.text === 'string' ? subtask.text : '',
+    completed: Boolean(subtask.completed),
+    sort_index: (index + 1) * STEP,
+    updated_at: subtask.updatedAt ?? now,
+  }))
+  const { error: deleteError } = await supabase.from('task_subtasks').delete().eq('task_id', taskId).eq('user_id', userId)
+  if (deleteError) {
+    throw deleteError
+  }
+  if (payload.length === 0) {
+    return
+  }
+  const { error: insertError } = await supabase.from('task_subtasks').upsert(payload, { onConflict: 'id' })
+  if (insertError) {
+    throw insertError
+  }
+}
+
 export async function deleteTaskSubtask(taskId: string, subtaskId: string) {
   if (!supabase) return
   const session = await ensureSingleUserSession()

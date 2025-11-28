@@ -29,6 +29,7 @@ import {
   setTaskPriorityAndResort as apiSetTaskPriorityAndResort,
   upsertTaskSubtask as apiUpsertTaskSubtask,
   deleteTaskSubtask as apiDeleteTaskSubtask,
+  replaceTaskSubtasks as apiReplaceTaskSubtasks,
   fetchTaskNotes as apiFetchTaskNotes,
   fetchGoalMilestones as apiFetchGoalMilestones,
   upsertGoalMilestone as apiUpsertGoalMilestone,
@@ -6651,11 +6652,36 @@ export default function GoalsPage(): ReactElement {
     )
     setQuickListItems(stored)
   }, [quickListItems])
+  const persistQuickSubtasks = useCallback(
+    (taskId: string, subtasks: QuickSubtask[], reason: string) => {
+      if (!isUuid(taskId)) {
+        quickListWarn('skip remote subtask sync; invalid task id', { taskId, reason })
+        return
+      }
+      const normalized = Array.isArray(subtasks)
+        ? subtasks.map((subtask, index) => ({
+            ...subtask,
+            sortIndex: typeof subtask.sortIndex === 'number' ? subtask.sortIndex : index,
+            text: typeof subtask.text === 'string' ? subtask.text : '',
+          }))
+        : []
+      void (async () => {
+        quickListDebug('replacing remote subtasks', { taskId, count: normalized.length, reason })
+        try {
+          await apiReplaceTaskSubtasks(taskId, normalized)
+        } catch (error) {
+          logWarn('[QuickList] Failed to replace remote subtasks:', error)
+        }
+      })()
+    },
+    [],
+  )
   const addQuickSubtask = useCallback(
     (taskId: string) => {
       let created: QuickSubtask | undefined
+      let stored: QuickItem[] = quickListItems
       flushSync(() => {
-        const stored = writeStoredQuickList(
+        stored = writeStoredQuickList(
           quickListItems.map((it): QuickItem => {
             if (it.id !== taskId) return it
             const subs: QuickSubtask[] = Array.isArray(it.subtasks) ? it.subtasks.slice() : []
@@ -6690,27 +6716,12 @@ export default function GoalsPage(): ReactElement {
         }
       }
 
-      if (!created || !isUuid(taskId) || !isUuid(created.id)) {
-        return
+      if (created) {
+        const targetSubs = stored.find((it) => it.id === taskId)?.subtasks ?? []
+        persistQuickSubtasks(taskId, targetSubs, 'add')
       }
-      const payload: QuickSubtask = created
-      void (async () => {
-        quickListDebug('creating remote subtask', { taskId, subtaskId: payload.id })
-        try {
-          await apiUpsertTaskSubtask(taskId, {
-            id: payload.id,
-            text: payload.text,
-            completed: payload.completed,
-            sort_index: payload.sortIndex,
-            updated_at: payload.updatedAt,
-          })
-        } catch (error) {
-          logWarn('[QuickList] Failed to create remote subtask:', error)
-          refreshQuickListFromSupabase('subtask-create')
-        }
-      })()
     },
-    [quickListItems, refreshQuickListFromSupabase],
+    [persistQuickSubtasks, quickListItems],
   )
   const updateQuickSubtaskText = useCallback(
     (taskId: string, subtaskId: string, value: string) => {
@@ -6732,24 +6743,10 @@ export default function GoalsPage(): ReactElement {
       if (!updated || !isUuid(taskId) || !isUuid(updated.id)) {
         return
       }
-      const payload: QuickSubtask = updated
-      void (async () => {
-        quickListDebug('updating remote subtask text', { taskId, subtaskId, text: payload.text })
-        try {
-          await apiUpsertTaskSubtask(taskId, {
-            id: payload.id,
-            text: payload.text,
-            completed: payload.completed,
-            sort_index: payload.sortIndex,
-            updated_at: payload.updatedAt,
-          })
-        } catch (error) {
-          logWarn('[QuickList] Failed to update remote subtask text:', error)
-          refreshQuickListFromSupabase('subtask-text')
-        }
-      })()
+      const targetSubs = stored.find((it) => it.id === taskId)?.subtasks ?? []
+      persistQuickSubtasks(taskId, targetSubs, 'text')
     },
-    [quickListItems, refreshQuickListFromSupabase],
+    [persistQuickSubtasks, quickListItems],
   )
   const toggleQuickSubtaskCompleted = useCallback(
     (taskId: string, subtaskId: string) => {
@@ -6771,24 +6768,10 @@ export default function GoalsPage(): ReactElement {
       if (!updated || !isUuid(taskId) || !isUuid(updated.id)) {
         return
       }
-      const payload: QuickSubtask = updated
-      void (async () => {
-        quickListDebug('updating remote subtask completion', { taskId, subtaskId, completed: payload.completed })
-        try {
-          await apiUpsertTaskSubtask(taskId, {
-            id: payload.id,
-            text: payload.text,
-            completed: payload.completed,
-            sort_index: payload.sortIndex,
-            updated_at: payload.updatedAt,
-          })
-        } catch (error) {
-          logWarn('[QuickList] Failed to update remote subtask completion:', error)
-          refreshQuickListFromSupabase('subtask-complete')
-        }
-      })()
+      const targetSubs = stored.find((it) => it.id === taskId)?.subtasks ?? []
+      persistQuickSubtasks(taskId, targetSubs, 'complete')
     },
-    [quickListItems, refreshQuickListFromSupabase],
+    [persistQuickSubtasks, quickListItems],
   )
   const deleteQuickSubtask = useCallback(
     (taskId: string, subtaskId: string) => {
@@ -6803,19 +6786,10 @@ export default function GoalsPage(): ReactElement {
         }),
       )
       setQuickListItems(stored)
-      if (isUuid(taskId) && isUuid(subtaskId)) {
-        void (async () => {
-          quickListDebug('deleting remote subtask', { taskId, subtaskId })
-          try {
-            await apiDeleteTaskSubtask(taskId, subtaskId)
-          } catch (error) {
-            logWarn('[QuickList] Failed to delete remote subtask:', error)
-            refreshQuickListFromSupabase('subtask-delete')
-          }
-        })()
-      }
+      const targetSubs = stored.find((it) => it.id === taskId)?.subtasks ?? []
+      persistQuickSubtasks(taskId, targetSubs, 'delete')
     },
-    [quickListItems, refreshQuickListFromSupabase],
+    [persistQuickSubtasks, quickListItems],
   )
   const updateQuickItemNotes = useCallback(
     (taskId: string, notes: string) => {
