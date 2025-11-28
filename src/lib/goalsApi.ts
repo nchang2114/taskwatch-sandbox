@@ -1098,10 +1098,11 @@ export async function upsertTaskSubtask(
   if (!session?.user?.id) {
     return
   }
+  const userId = session.user.id
   const payload = {
     id: subtask.id,
     task_id: taskId,
-    user_id: session.user.id,
+    user_id: userId,
     text: subtask.text,
     completed: subtask.completed,
     sort_index: subtask.sort_index,
@@ -1109,8 +1110,46 @@ export async function upsertTaskSubtask(
     updated_at: subtask.updated_at ?? new Date().toISOString(),
   }
   const { error } = await supabase.from('task_subtasks').upsert(payload, { onConflict: 'id' })
-  if (error) {
+  if (!error) {
+    return
+  }
+  const isSortConflict =
+    error?.code === '23505' && typeof error?.message === 'string' && error.message.includes('task_subtasks_task_sort_idx')
+  if (!isSortConflict) {
     throw error
+  }
+  // Resolve unique (task_id, sort_index) collisions by rebasing all subtasks for this task with fresh gaps.
+  const { data: existing, error: fetchError } = await supabase
+    .from('task_subtasks')
+    .select('id, text, completed, sort_index, updated_at')
+    .eq('task_id', taskId)
+    .eq('user_id', userId)
+    .order('sort_index', { ascending: true })
+  if (fetchError) {
+    throw fetchError
+  }
+  const rows = Array.isArray(existing) ? existing : []
+  const merged = [...rows]
+  const incomingIndex = merged.findIndex((row) => row?.id === payload.id)
+  if (incomingIndex >= 0) {
+    merged[incomingIndex] = { ...merged[incomingIndex], ...payload }
+  } else {
+    merged.push(payload)
+  }
+  merged.sort((a, b) => (Number(a?.sort_index ?? 0) - Number(b?.sort_index ?? 0)))
+  const STEP = 1024
+  const normalized = merged.map((row, index) => ({
+    id: row?.id as string,
+    task_id: taskId,
+    user_id: userId,
+    text: typeof row?.text === 'string' ? row.text : '',
+    completed: Boolean((row as any)?.completed),
+    sort_index: (index + 1) * STEP,
+    updated_at: typeof row?.updated_at === 'string' ? row.updated_at : payload.updated_at,
+  }))
+  const { error: rebalanceError } = await supabase.from('task_subtasks').upsert(normalized, { onConflict: 'id' })
+  if (rebalanceError) {
+    throw rebalanceError
   }
 }
 
