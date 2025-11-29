@@ -10759,6 +10759,7 @@ useEffect(() => {
     handleSaveHistoryDraft,
     handleToggleHistorySubtaskCompletion,
     handleUpdateHistorySubtaskText,
+    revealedHistoryDeleteKey,
     setShowEditorExtras,
     showEditorExtras,
     sortedSubtasks,
