@@ -10297,26 +10297,30 @@ useEffect(() => {
             {editingState ? undefined : title || 'Untitled session'}
           </div>
           <div className="calendar-popover__actions">
-            <button
-              type="button"
-              className="calendar-popover__action"
-              aria-label="Edit session"
-              onPointerDown={(ev) => {
-                ev.preventDefault()
-                ev.stopPropagation()
-                setSelectedHistoryId(entry.id)
-                setHoveredHistoryId(entry.id)
-                setEditingHistoryId(entry.id)
-                taskNameAutofilledRef.current = false
-                setHistoryDraft(createHistoryDraftFromEntry(entry))
-                openCalendarInspector(entry)
-                handleCloseCalendarPreview()
-              }}
-            >
-              <IconEdit />
-            </button>
             {isGuide ? null : (
               <>
+                <button
+                  type="button"
+                  className="calendar-popover__action"
+                  aria-label="Edit session"
+                  onPointerDown={(ev) => {
+                    ev.preventDefault()
+                    ev.stopPropagation()
+                  }}
+                  onClick={(ev) => {
+                    ev.preventDefault()
+                    ev.stopPropagation()
+                    setSelectedHistoryId(entry.id)
+                    setHoveredHistoryId(entry.id)
+                    setEditingHistoryId(entry.id)
+                    taskNameAutofilledRef.current = false
+                    setHistoryDraft(createHistoryDraftFromEntry(entry))
+                    openCalendarInspector(entry)
+                    handleCloseCalendarPreview()
+                  }}
+                >
+                  <IconEdit />
+                </button>
                 <CalendarActionsKebab
                   previewRef={calendarPreviewRef}
                   onDuplicate={() => {
