@@ -2894,8 +2894,8 @@ useEffect(() => {
         return
       }
     }
-    // Preserve local notes, mirror snapshot subtasks
-    const entryFromSnapshot: NotebookEntry = { notes: localEntry.notes, subtasks: snapSubs }
+    // Mirror snapshot notes and subtasks so other tabs (Reflection/Goals) stay in sync.
+    const entryFromSnapshot: NotebookEntry = { notes: snapshotTask.notes ?? '', subtasks: snapSubs }
     notebookChangeFromSnapshotRef.current = true
     const result = updateNotebookForKey(notebookKey, (entry) =>
       areNotebookEntriesEqual(entry, entryFromSnapshot) ? entry : entryFromSnapshot,
