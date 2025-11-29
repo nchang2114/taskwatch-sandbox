@@ -5410,10 +5410,12 @@ const [showInlineExtras, setShowInlineExtras] = useState(false)
       setHistoryDraft(createEmptyHistoryDraft())
       return
     }
-    setHistoryDraft(() => (selectedHistoryEntry ? createHistoryDraftFromEntry(selectedHistoryEntry) : createEmptyHistoryDraft()))
+    // For existing entries, commit any pending draft changes (notes, etc.) before closing.
+    commitHistoryDraft()
     setCalendarInspectorEntryId(null)
     setEditingHistoryId(null)
   }, [
+    commitHistoryDraft,
     pendingNewHistoryId,
     selectedHistoryEntry,
     selectedHistoryId,
