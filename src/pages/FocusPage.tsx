@@ -4694,14 +4694,22 @@ useEffect(() => {
     } else {
       setIsRunning(false)
       setSessionStart(null)
-      lastTickRef.current = null
     }
 
+    // Hard reset stopwatch visuals/state
+    setSessionStart(null)
+    lastTickRef.current = null
     setElapsed(0)
     lastCommittedElapsedRef.current = 0
     currentSessionKeyRef.current = null
     lastLoggedSessionKeyRef.current = null
     sessionMetadataRef.current = createEmptySessionMetadata(safeTaskName)
+    if (timeDisplayRef.current) {
+      const text = formatTime(0)
+      timeDisplayRef.current.textContent = text
+      const hiddenClass = isTimeHidden ? 'time-value--hidden' : ''
+      timeDisplayRef.current.className = `time-value ${hiddenClass}`
+    }
   }
 
   const handleToggleTimeVisibility = useCallback(() => {
