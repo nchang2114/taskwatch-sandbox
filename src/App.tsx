@@ -125,6 +125,22 @@ const SYNC_STATUS_COPY: Record<SyncStatus, { icon: string; label: string }> = {
   pending: { icon: '⛁', label: 'Local changes pending upload (3)' },
 }
 
+const resolveSiteOrigin = (): string | null => {
+  const envOrigin = (import.meta.env.VITE_SITE_ORIGIN as string | undefined)?.trim()
+  if (envOrigin) {
+    return envOrigin.replace(/\/$/, '')
+  }
+  if (typeof window !== 'undefined' && window.location?.origin) {
+    return window.location.origin
+  }
+  return null
+}
+
+const buildAuthRedirectUrl = (): string | undefined => {
+  const origin = resolveSiteOrigin()
+  return origin ? `${origin}/auth/callback` : undefined
+}
+
 const createHelpIcon = (children: ReactNode): ReactNode => (
   <svg
     className="profile-help-menu__item-icon-svg"
@@ -484,11 +500,11 @@ function MainApp() {
   }, [resetAuthEmailFlow])
 
   const handleGoogleSignIn = useCallback(async (emailHint?: string): Promise<boolean> => {
-    if (!supabase) {
-      return false
-    }
-    try {
-      const queryParams: Record<string, string> = {}
+      if (!supabase) {
+        return false
+      }
+      try {
+        const queryParams: Record<string, string> = {}
       const trimmedHint = emailHint?.trim()
       if (trimmedHint) {
         queryParams.login_hint = trimmedHint
@@ -499,7 +515,7 @@ function MainApp() {
       const { error } = await supabase.auth.signInWithOAuth({
         provider: 'google',
         options: {
-          redirectTo: typeof window !== 'undefined' ? `${window.location.origin}/auth/callback` : undefined,
+          redirectTo: buildAuthRedirectUrl(),
           queryParams,
         },
       })
@@ -520,7 +536,7 @@ function MainApp() {
       const { error } = await supabase.auth.signInWithOAuth({
         provider: 'azure',
         options: {
-          redirectTo: typeof window !== 'undefined' ? `${window.location.origin}/auth/callback` : undefined,
+          redirectTo: buildAuthRedirectUrl(),
         },
       })
       if (error) {
@@ -676,7 +692,7 @@ function MainApp() {
           email: trimmedEmail,
           password: trimmedPassword,
           options: {
-            emailRedirectTo: typeof window !== 'undefined' ? `${window.location.origin}/auth/callback` : undefined,
+            emailRedirectTo: buildAuthRedirectUrl(),
           },
         })
         if (error) {
@@ -716,14 +732,14 @@ function MainApp() {
     setAuthVerifyError(null)
     setAuthVerifyStatus(null)
     setAuthVerifyResending(true)
-    try {
-      const { error } = await supabase.auth.resend({
-        type: 'signup',
-        email: trimmedEmail,
-        options: {
-          emailRedirectTo: typeof window !== 'undefined' ? `${window.location.origin}/auth/callback` : undefined,
-        },
-      })
+      try {
+        const { error } = await supabase.auth.resend({
+          type: 'signup',
+          email: trimmedEmail,
+          options: {
+            emailRedirectTo: buildAuthRedirectUrl(),
+          },
+        })
       if (error) {
         setAuthVerifyError(error.message || 'We could not resend the email. Please try again.')
         return
@@ -941,7 +957,8 @@ function MainApp() {
         window.localStorage.setItem(QUICK_LIST_EXPANDED_STORAGE_KEY, 'false')
       } catch {}
       window.setTimeout(() => {
-        window.location.replace(window.location.origin)
+        const target = resolveSiteOrigin() ?? (typeof window !== 'undefined' ? window.location.origin : '/')
+        window.location.replace(target)
       }, 10)
     }
   }, [closeProfileMenu, setActiveTab, setIsSigningOut])

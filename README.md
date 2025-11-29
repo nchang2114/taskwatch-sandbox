@@ -52,6 +52,19 @@ These changes live in:
 - `src/pages/GoalsPage.tsx` — triggers the lazy notes request when expanding a task.
 - `src/lib/sessionHistory.ts` — adds a 30‑day `updated_at` filter by default.
 
+## Auth/env setup (Supabase)
+
+Create a `.env.local` (or configure Vercel env vars) with:
+
+```
+VITE_SUPABASE_URL=your-supabase-url
+VITE_SUPABASE_ANON_KEY=your-anon-key
+# Optional: set the canonical site for auth redirects, e.g. https://taskwatch-sandbox.vercel.app
+VITE_SITE_ORIGIN=https://taskwatch-sandbox.vercel.app
+```
+
+The app builds `auth/callback` redirects from `VITE_SITE_ORIGIN` when set; otherwise it falls back to the current `window.location.origin`, so you can run the same build on multiple domains.
+
 You can tune the history window via `HISTORY_REMOTE_WINDOW_DAYS` in `sessionHistory.ts`.
 You can also install [eslint-plugin-react-x](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-x) and [eslint-plugin-react-dom](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-dom) for React-specific lint rules:
 
