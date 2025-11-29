@@ -5411,6 +5411,8 @@ const [showInlineExtras, setShowInlineExtras] = useState(false)
       return
     }
     // For existing entries, commit any pending draft changes (notes, etc.) before closing.
+    // Flip the editor flag off so goal snapshots can publish to other tabs.
+    editorOpenRef.current = false
     commitHistoryDraft()
     setCalendarInspectorEntryId(null)
     setEditingHistoryId(null)
