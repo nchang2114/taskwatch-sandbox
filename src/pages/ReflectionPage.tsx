@@ -5638,6 +5638,21 @@ useEffect(() => {
   }, [selectedHistoryId])
 
   useEffect(() => {
+    if (!revealedHistoryDeleteKey || typeof document === 'undefined') {
+      return
+    }
+    const handlePointerDown = (event: PointerEvent) => {
+      const target = event.target as HTMLElement | null
+      if (target?.closest('[data-delete-key]')) {
+        return
+      }
+      setRevealedHistoryDeleteKey(null)
+    }
+    document.addEventListener('pointerdown', handlePointerDown, true)
+    return () => document.removeEventListener('pointerdown', handlePointerDown, true)
+  }, [revealedHistoryDeleteKey])
+
+  useEffect(() => {
     if (!selectedHistoryId) return
     const last = cachedDraftSubtasksRef.current.get(selectedHistoryId)
     if (last && areHistorySubtasksEqual(last, historyDraft.subtasks)) {
