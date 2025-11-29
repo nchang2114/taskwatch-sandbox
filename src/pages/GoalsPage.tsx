@@ -7243,14 +7243,9 @@ export default function GoalsPage(): ReactElement {
                 if (pendingNotes !== undefined) {
                   mergedNotes = pendingNotes
                 } else if (typeof task.notes === 'string') {
-                  const incoming = task.notes
-                  const existing = existingTask?.notes
-                  mergedNotes = incoming.trim().length === 0 && typeof existing === 'string' && existing.trim().length > 0
-                    ? existing
-                    : incoming
+                  mergedNotes = task.notes
                 } else {
-                  const prev = existingTask?.notes
-                  mergedNotes = typeof prev === 'string' ? prev : undefined
+                  mergedNotes = existingTask?.notes
                 }
                 const remoteSubtasks = Array.isArray(task.subtasks) ? task.subtasks : []
                 const mergedSubtasks = mergeSubtasksWithSources(task.id, remoteSubtasks, [
@@ -7281,14 +7276,12 @@ export default function GoalsPage(): ReactElement {
             const editedAt = taskNotesEditedAtRef.current.get(task.id) ?? 0
             const recentlyEdited = typeof editedAt === 'number' && editedAt > 0 && Date.now() - editedAt < 4000
             let notes: string | undefined
-            if (pendingNotes !== undefined || recentlyEdited) {
+            if (pendingNotes !== undefined) {
               notes = pendingNotes
+            } else if (recentlyEdited) {
+              notes = existing?.notes
             } else if (typeof task.notes === 'string') {
-              const incoming = task.notes
-              const prevNotes = existing?.notes
-              notes = incoming.trim().length === 0 && typeof prevNotes === 'string' && prevNotes.trim().length > 0
-                ? prevNotes
-                : incoming
+              notes = task.notes
             } else {
               notes = existing?.notes
             }
