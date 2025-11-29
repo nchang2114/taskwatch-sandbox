@@ -1297,6 +1297,17 @@ const formatDuration = (ms: number) => {
   return minutes > 0 ? `${days}d ${remainingHours}h` : `${days}d ${remainingHours}h`
 }
 
+const computePieValueFontSize = (label: string): string => {
+  const length = typeof label === 'string' ? label.length : 0
+  const max = 1.75
+  const min = 1.0
+  const startShrinkAt = 6
+  const dropPerChar = 0.08
+  const drop = Math.max(0, length - startShrinkAt) * dropPerChar
+  const size = Math.max(min, max - drop)
+  return `${size}rem`
+}
+
 const formatTimeOfDay = (timestamp: number) => {
   const date = new Date(timestamp)
   const hours24 = date.getHours()
@@ -5746,6 +5757,8 @@ useEffect(() => {
   ])
   const activeRangeConfig = RANGE_DEFS[activeRange]
   const isAllTimeRange = activeRange === 'all'
+  const pieValueLabel = useMemo(() => formatDuration(loggedMs), [loggedMs])
+  const pieValueFontSize = useMemo(() => computePieValueFontSize(pieValueLabel), [pieValueLabel])
   const overviewBlockedMessage = useMemo(() => {
     if (!isAllTimeRange) {
       return null
@@ -12998,7 +13011,7 @@ useEffect(() => {
                 )}
                 <div className="reflection-pie__center">
                   <span className="reflection-pie__range">{activeRangeConfig.shortLabel}</span>
-                  <span className="reflection-pie__value">{formatDuration(loggedMs)}</span>
+                  <span className="reflection-pie__value" style={{ fontSize: pieValueFontSize }}>{pieValueLabel}</span>
                   <span className="reflection-pie__caption">logged</span>
                 </div>
               </div>
