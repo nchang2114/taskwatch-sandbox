@@ -138,7 +138,9 @@ const resolveSiteOrigin = (): string | null => {
 
 const buildAuthRedirectUrl = (): string | undefined => {
   const origin = resolveSiteOrigin()
-  return origin ? `${origin}/auth/callback` : undefined
+  const path =
+    (import.meta.env.VITE_AUTH_CALLBACK_PATH as string | undefined)?.trim() || '/auth/callback'
+  return origin ? `${origin}${path.startsWith('/') ? path : `/${path}`}` : undefined
 }
 
 const createHelpIcon = (children: ReactNode): ReactNode => (
@@ -351,6 +353,7 @@ function MainApp() {
   const [authVerifyError, setAuthVerifyError] = useState<string | null>(null)
   const [authVerifyResending, setAuthVerifyResending] = useState(false)
   const [authVerifyStatus, setAuthVerifyStatus] = useState<string | null>(null)
+  const [authProviderError, setAuthProviderError] = useState<string | null>(null)
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [isSigningOut, setIsSigningOut] = useState(false)
   const [activeSettingsSection, setActiveSettingsSection] = useState(SETTINGS_SECTIONS[0]?.id ?? 'general')
@@ -377,6 +380,7 @@ function MainApp() {
   const authEmailLookupReqIdRef = useRef(0)
   const lastAlignedUserIdRef = useRef<string | null | undefined>(undefined)
   const isSignedIn = Boolean(userProfile)
+  const authProvidersEnabled = Boolean(supabase)
   const userInitials = useMemo(() => {
     if (!userProfile?.name) {
       return 'U'
@@ -497,14 +501,17 @@ function MainApp() {
   const closeAuthModal = useCallback(() => {
     resetAuthEmailFlow()
     setAuthModalOpen(false)
+    setAuthProviderError(null)
   }, [resetAuthEmailFlow])
 
   const handleGoogleSignIn = useCallback(async (emailHint?: string): Promise<boolean> => {
-      if (!supabase) {
-        return false
-      }
-      try {
-        const queryParams: Record<string, string> = {}
+    setAuthProviderError(null)
+    if (!supabase) {
+      setAuthProviderError('Sign-in is unavailable: Supabase env vars are not configured.')
+      return false
+    }
+    try {
+      const queryParams: Record<string, string> = {}
       const trimmedHint = emailHint?.trim()
       if (trimmedHint) {
         queryParams.login_hint = trimmedHint
@@ -520,16 +527,20 @@ function MainApp() {
         },
       })
       if (error) {
+        setAuthProviderError(error.message || 'Unable to start Google sign-in.')
         return false
       }
       return true
-    } catch {
+    } catch (err) {
+      setAuthProviderError((err as Error)?.message || 'Unable to start Google sign-in.')
       return false
     }
   }, [])
 
   const handleMicrosoftSignIn = useCallback(async () => {
+    setAuthProviderError(null)
     if (!supabase) {
+      setAuthProviderError('Sign-in is unavailable: Supabase env vars are not configured.')
       return
     }
     try {
@@ -540,9 +551,12 @@ function MainApp() {
         },
       })
       if (error) {
+        setAuthProviderError(error.message || 'Unable to start Microsoft sign-in.')
         return
       }
-    } catch {}
+    } catch (err) {
+      setAuthProviderError((err as Error)?.message || 'Unable to start Microsoft sign-in.')
+    }
   }, [])
 
   const isAuthEmailValid = useMemo(() => EMAIL_PATTERN.test(authEmailValue.trim()), [authEmailValue])
@@ -1969,8 +1983,18 @@ const nextThemeLabel = theme === 'dark' ? 'light' : 'dark'
                     ✕
                   </button>
                 </div>
+                {authProviderError ? (
+                  <p className="auth-provider__error" role="alert">{authProviderError}</p>
+                ) : null}
                 <div className="auth-modal__providers" role="group" aria-label="Sign-in options">
-                  <button type="button" className="auth-provider auth-provider--google" onClick={() => handleGoogleSignIn()}>
+                  <button
+                    type="button"
+                    className="auth-provider auth-provider--google"
+                    onClick={() => handleGoogleSignIn()}
+                    disabled={!authProvidersEnabled}
+                    aria-disabled={!authProvidersEnabled}
+                    title={!authProvidersEnabled ? 'Supabase auth is not configured' : undefined}
+                  >
                     <span className="auth-provider__icon" aria-hidden="true">
                       <svg viewBox="0 0 24 24" focusable="false">
                         <path d="M21.6 12.227c0-.68-.057-1.362-.179-2.027H12v3.84h5.44c-.227 1.243-.934 2.352-1.987 3.07v2.553h3.208c1.882-1.733 2.938-4.29 2.938-7.436z" fill="#4285F4" />
@@ -1989,7 +2013,14 @@ const nextThemeLabel = theme === 'dark' ? 'light' : 'dark'
                     </span>
                     Continue with Apple
                   </button>
-                  <button type="button" className="auth-provider auth-provider--microsoft" onClick={handleMicrosoftSignIn}>
+                  <button
+                    type="button"
+                    className="auth-provider auth-provider--microsoft"
+                    onClick={handleMicrosoftSignIn}
+                    disabled={!authProvidersEnabled}
+                    aria-disabled={!authProvidersEnabled}
+                    title={!authProvidersEnabled ? 'Supabase auth is not configured' : undefined}
+                  >
                     <span className="auth-provider__icon" aria-hidden="true">
                       <svg viewBox="0 0 24 24" focusable="false">
                         <path d="M3 3h8.5v8.5H3Z" fill="#f25022" />

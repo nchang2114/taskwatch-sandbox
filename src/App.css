@@ -1747,6 +1747,12 @@ html[data-theme='light'] .settings-panel__group {
   height: 100%;
 }
 
+.auth-provider__error {
+  margin: 0 0 0.35rem;
+  color: #fca5a5;
+  font-size: 0.92rem;
+}
+
 .auth-modal__divider {
   border: none;
   border-top: 1px solid rgba(148, 164, 255, 0.2);
