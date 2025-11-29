@@ -3710,7 +3710,7 @@ const [showInlineExtras, setShowInlineExtras] = useState(false)
     })
     return { byGoal, byName }
   }, [goalsSnapshot])
-  
+   
   // Respond to schedule requests from Goals page: switch to week view and create a future session 1 hour from now for 1 hour.
   useEffect(() => {
     if (typeof window === 'undefined') return
