@@ -5233,8 +5233,8 @@ const [showInlineExtras, setShowInlineExtras] = useState(false)
         bucketSurface: resolvedBucketSurface,
         notes: nextNotes,
         subtasks: nextSubtasks,
-        // Keep the flag in sync with time edits: anything in the future is planned
-        futureSession: nextStartedAt > Date.now(),
+        // Preserve planned flag unless explicitly confirmed elsewhere; promote to planned if moved into the future
+        futureSession: Boolean(target.futureSession) || nextStartedAt > Date.now(),
         goalId:
           normalizedGoalName.length > 0
             ? goalIdLookup.get(normalizedGoalName.toLowerCase()) ?? target.goalId ?? null
@@ -8593,7 +8593,7 @@ useEffect(() => {
           const showLabel = durationMinutes >= 8
           const showTime = durationMinutes >= 20
           const isGuide = info.entry.id.startsWith('repeat:')
-          const isPlanned = !!(info.entry as any).futureSession || info.previewStart > nowMs
+          const isPlanned = !!(info.entry as any).futureSession
 
           return {
             entry: info.entry,
@@ -8693,6 +8693,7 @@ useEffect(() => {
                 id: makeHistoryId(),
                 repeatingSessionId: ruleId,
                 originalTime: entry.startedAt,
+                futureSession: true,
               }
               updateHistory((current) => {
                 const next = [...current, realEntry]
@@ -10526,12 +10527,13 @@ useEffect(() => {
                   className="history-timeline__action-button history-timeline__action-button--primary"
                   onClick={() => {
                     if (!parsedGuide) return
-                    const newEntry: HistoryEntry = {
-                      ...entry,
-                      id: makeHistoryId(),
-                      repeatingSessionId: parsedGuide.ruleId,
-                      originalTime: entry.startedAt,
-                    }
+                  const newEntry: HistoryEntry = {
+                    ...entry,
+                    id: makeHistoryId(),
+                    repeatingSessionId: parsedGuide.ruleId,
+                    originalTime: entry.startedAt,
+                    futureSession: false,
+                  }
                     updateHistory((current) => {
                       const next = [...current, newEntry]
                       next.sort((a, b) => a.startedAt - b.startedAt)
@@ -10634,7 +10636,31 @@ useEffect(() => {
                   type="button"
                   className="history-timeline__action-button history-timeline__action-button--primary"
                   onClick={() => {
-                    // Start now: launch as focus task and switch to the Focus page (App listens to focus events).
+                    // Confirm future session without changing its scheduled time.
+                    updateHistory((current) => {
+                      const idx = current.findIndex((e) => e.id === entry.id)
+                      if (idx === -1) return current
+                      const next = [...current]
+                      next[idx] = { ...next[idx], futureSession: false }
+                      return next
+                    })
+                    handleCloseCalendarPreview()
+                  }}
+                >
+                  Confirm
+                </button>
+                <button
+                  type="button"
+                  className="history-timeline__action-button"
+                  onClick={() => {
+                    // Start now: convert to a real session and launch focus immediately.
+                    updateHistory((current) => {
+                      const idx = current.findIndex((e) => e.id === entry.id)
+                      if (idx === -1) return current
+                      const next = [...current]
+                      next[idx] = { ...next[idx], futureSession: false }
+                      return next
+                    })
                     const taskLabel = deriveEntryTaskName(entry)
                     const broadcastSubtasks = (entry.subtasks || []).map((s) => ({
                       id: s.id,
@@ -12561,7 +12587,7 @@ useEffect(() => {
                 isDragging ? 'history-timeline__block--dragging' : '',
                 isDragHover ? 'history-timeline__block--drag-hover' : '',
                 // Treat anything scheduled in the future as a planned session, regardless of stored flag
-                (segment.entry.futureSession || resolvedStartedAt > nowTick) ? 'history-timeline__block--future' : '',
+                segment.entry.futureSession ? 'history-timeline__block--future' : '',
               ]
                 .filter(Boolean)
                 .join(' ')
