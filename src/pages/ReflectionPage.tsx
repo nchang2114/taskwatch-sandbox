@@ -3050,9 +3050,10 @@ export default function ReflectionPage() {
         return { snap, targetOffset }
       }
 
-      const quickTouchFling = Boolean(state.isTouch) && state.mode === 'hdrag' && (elapsedMs < 450 || absRaw > 0.2)
+      // For 3d view: fast gesture always advances at least one chunk; slow controlled drag snaps based on halfway threshold
+      const quickFling = state.mode === 'hdrag' && (elapsedMs < 450 || absRaw > 0.2)
       let snapUnits: number
-      if (quickTouchFling) {
+      if (quickFling) {
         // Fast swipe: always advance at least one chunk in the swipe direction (no snap-back on fling)
         const steps = Math.max(1, Math.round(absRaw + 0.2))
         snapUnits = direction * steps
@@ -12572,82 +12573,42 @@ useEffect(() => {
                 })
               }
               const handleBlockPointerDown = (event: ReactPointerEvent<HTMLDivElement>) => {
-                const isTouch = (event as any).pointerType === 'touch'
-                if (isTouch) {
-                  // Enable long-press to move on touch; short tap will select (handled by onClick)
-                  event.persist?.()
+                // Enable long-press to move for all input types; short press will select (handled by onClick)
+                event.persist?.()
+                clearLongPressWatch()
+                longPressPointerIdRef.current = event.pointerId
+                longPressStartRef.current = { x: event.clientX, y: event.clientY }
+
+                const threshold = 8
+                const handleMove = (e: PointerEvent) => {
+                  if (e.pointerId !== longPressPointerIdRef.current || !longPressStartRef.current) return
+                  const dx = e.clientX - longPressStartRef.current.x
+                  const dy = e.clientY - longPressStartRef.current.y
+                  if (Math.hypot(dx, dy) > threshold) {
+                    clearLongPressWatch()
+                  }
+                }
+                const handleUpOrCancel = (e: PointerEvent) => {
+                  if (e.pointerId !== longPressPointerIdRef.current) return
                   clearLongPressWatch()
-                  longPressPointerIdRef.current = event.pointerId
-                  longPressStartRef.current = { x: event.clientX, y: event.clientY }
-
-                  const threshold = 8
-                  const handleMove = (e: PointerEvent) => {
-                    if (e.pointerId !== longPressPointerIdRef.current || !longPressStartRef.current) return
-                    const dx = e.clientX - longPressStartRef.current.x
-                    const dy = e.clientY - longPressStartRef.current.y
-                    if (Math.hypot(dx, dy) > threshold) {
-                      clearLongPressWatch()
-                    }
-                  }
-                  const handleUpOrCancel = (e: PointerEvent) => {
-                    if (e.pointerId !== longPressPointerIdRef.current) return
-                    clearLongPressWatch()
-                  }
-
-                  window.addEventListener('pointermove', handleMove, { passive: true })
-                  window.addEventListener('pointerup', handleUpOrCancel, { passive: true })
-                  window.addEventListener('pointercancel', handleUpOrCancel, { passive: true })
-                  longPressCancelHandlersRef.current = { move: handleMove, up: handleUpOrCancel, cancel: handleUpOrCancel }
-
-                  longPressTimerRef.current = window.setTimeout(() => {
-                    // Start move-drag after long press
-                    try {
-                      if (typeof (event as any).preventDefault === 'function') {
-                        (event as any).preventDefault()
-                      }
-                      ;(event.currentTarget as any)?.setPointerCapture?.(event.pointerId)
-                    } catch {}
-                    clearLongPressWatch()
-                    startDrag(event, segment, 'move')
-                  }, 360)
-                  return
                 }
-                // For mouse/pen: defer starting drag until movement exceeds threshold to preserve click/dblclick
-                if ((event as any).pointerType === 'mouse' || (event as any).pointerType === 'pen') {
-                  mousePreDragRef.current = { pointerId: event.pointerId, startX: event.clientX, segment }
-                  const handleMove = (e: PointerEvent) => {
-                    const pending = mousePreDragRef.current
-                    if (!pending || e.pointerId !== pending.pointerId) return
-                    const dx = e.clientX - pending.startX
-                    if (Math.abs(dx) >= DRAG_DETECTION_THRESHOLD_PX) {
-                      // Begin drag and stop pre-drag listeners
-                      mousePreDragRef.current = null
-                      if (mousePreDragHandlersRef.current) {
-                        window.removeEventListener('pointermove', mousePreDragHandlersRef.current.move)
-                        window.removeEventListener('pointerup', mousePreDragHandlersRef.current.up)
-                        mousePreDragHandlersRef.current = null
-                      }
-                      startDragFromPointer(e, segment, 'move')
+
+                window.addEventListener('pointermove', handleMove, { passive: true })
+                window.addEventListener('pointerup', handleUpOrCancel, { passive: true })
+                window.addEventListener('pointercancel', handleUpOrCancel, { passive: true })
+                longPressCancelHandlersRef.current = { move: handleMove, up: handleUpOrCancel, cancel: handleUpOrCancel }
+
+                longPressTimerRef.current = window.setTimeout(() => {
+                  // Start move-drag after long press
+                  try {
+                    if (typeof (event as any).preventDefault === 'function') {
+                      (event as any).preventDefault()
                     }
-                  }
-                  const handleUp = (e: PointerEvent) => {
-                    const pending = mousePreDragRef.current
-                    if (pending && e.pointerId === pending.pointerId) {
-                      mousePreDragRef.current = null
-                      if (mousePreDragHandlersRef.current) {
-                        window.removeEventListener('pointermove', mousePreDragHandlersRef.current.move)
-                        window.removeEventListener('pointerup', mousePreDragHandlersRef.current.up)
-                        mousePreDragHandlersRef.current = null
-                      }
-                    }
-                  }
-                  mousePreDragHandlersRef.current = { move: handleMove, up: handleUp }
-                  window.addEventListener('pointermove', handleMove, { passive: true })
-                  window.addEventListener('pointerup', handleUp, { passive: true })
-                  return
-                }
-                // Fallback: start drag immediately
-                startDrag(event, segment, 'move')
+                    ;(event.currentTarget as any)?.setPointerCapture?.(event.pointerId)
+                  } catch {}
+                  clearLongPressWatch()
+                  startDrag(event, segment, 'move')
+                }, DRAG_HOLD_DURATION_MS)
               }
               const handleResizeStartPointerDown = (event: ReactPointerEvent<HTMLDivElement>) => {
                 startDrag(event, segment, 'resize-start')
@@ -12656,10 +12617,6 @@ useEffect(() => {
                 startDrag(event, segment, 'resize-end')
               }
               const handleBlockPointerUp = (event: ReactPointerEvent<HTMLDivElement>) => {
-                const isTouch = (event as any).pointerType === 'touch'
-                if (!isTouch) {
-                  return
-                }
                 // If a drag is active, ignore
                 if (dragStateRef.current && dragStateRef.current.entryId === segment.entry.id) {
                   return
