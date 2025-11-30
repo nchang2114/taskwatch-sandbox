@@ -2743,7 +2743,6 @@ export default function ReflectionPage() {
     baseOffset: number
     mode: 'pending' | 'hdrag'
     lastAppliedDx: number
-    isTouch?: boolean
   } | null>(null)
   const calendarPanCleanupRef = useRef<((shouldCommit: boolean) => void) | null>(null)
   const calendarPanFallbackTimeoutRef = useRef<number | null>(null)
@@ -3017,7 +3016,7 @@ export default function ReflectionPage() {
 
   const resolvePanSnap = useCallback(
     (
-      state: { baseOffset: number; startTime: number; dayCount: number; isTouch?: boolean; mode?: 'pending' | 'hdrag' },
+      state: { baseOffset: number; startTime: number; dayCount: number; mode?: 'pending' | 'hdrag' },
       dx: number,
       dayWidth: number,
       view: CalendarViewMode,
@@ -3251,17 +3250,9 @@ const [showInlineExtras, setShowInlineExtras] = useState(false)
       
       // Also prevent wheel and touchmove for completeness
       const wheelPreventer: EventListener = (e: Event) => {
-        if ((e.target as HTMLElement)?.closest('.calendar-days-area, .calendar-allday-wrapper')) {
-          // Allow events within calendar to be handled normally
-          return
-        }
         try { e.preventDefault() } catch {}
       }
       const touchPreventer: EventListener = (e: Event) => {
-        if ((e.target as HTMLElement)?.closest('.calendar-days-area, .calendar-allday-wrapper')) {
-          // Allow events within calendar to be handled normally
-          return
-        }
         try { e.preventDefault() } catch {}
       }
       ;(window as any).__scrollLockWheelPreventer = wheelPreventer
@@ -7705,7 +7696,6 @@ useEffect(() => {
       return
     }
     if (event.button !== 0) return
-    const isTouch = (event as any).pointerType === 'touch'
     let scrollLocked = false
     let prevTouchAction: string | null = null
     const target = event.target as HTMLElement | null
@@ -7744,7 +7734,6 @@ useEffect(() => {
       baseOffset,
       mode: 'pending',
       lastAppliedDx: 0,
-      isTouch,
     }
     // Don't capture or preventDefault yet; wait until we detect horizontal intent
     const handleMove = (e: PointerEvent) => {
@@ -8718,8 +8707,7 @@ useEffect(() => {
       ) => (ev: ReactPointerEvent<HTMLDivElement>) => {
         if (entry.id === 'active-session') return
         if (ev.button !== 0) return
-        const isTouch = (ev as any).pointerType === 'touch'
-  const daysRoot = calendarDaysRef.current
+        const daysRoot = calendarDaysRef.current
         if (!daysRoot) return
         const columnEls = Array.from(daysRoot.querySelectorAll<HTMLDivElement>('.calendar-day-column'))
         if (columnEls.length === 0) return
@@ -8861,7 +8849,6 @@ useEffect(() => {
                         dayCount,
                         baseOffset,
                         mode: 'hdrag',
-                        isTouch,
                         lastAppliedDx: 0,
                       }
                       try { area.setPointerCapture?.(s.pointerId) } catch {}
