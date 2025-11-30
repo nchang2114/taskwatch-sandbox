@@ -259,7 +259,7 @@
   --surface-shadow: 0 18px 32px -24px rgba(158, 92, 28, 0.2);
   --surface-bg-hover: linear-gradient(135deg, rgba(255, 214, 170, 0.26), rgba(255, 233, 192, 0.16));
   --surface-border-hover: rgba(255, 211, 168, 0.32);
-} 
+}
 
 .surface-goal--frost {
   --surface-bg: linear-gradient(135deg, rgba(174, 233, 255, 0.24), rgba(142, 210, 255, 0.14));
@@ -1747,12 +1747,6 @@ html[data-theme='light'] .settings-panel__group {
   height: 100%;
 }
 
-.auth-provider__error {
-  margin: 0 0 0.35rem;
-  color: #fca5a5;
-  font-size: 0.92rem;
-}
-
 .auth-modal__divider {
   border: none;
   border-top: 1px solid rgba(148, 164, 255, 0.2);
@@ -2774,6 +2768,11 @@ html[data-theme='light'] .settings-panel__group {
   gap: 0.2rem;
   font-size: clamp(0.7rem, 1.3vw, 0.82rem);
   color: rgba(226, 234, 255, 0.85);
+  /* Prevent label container clicks from forwarding to nested controls */
+  pointer-events: none;
+}
+.history-timeline__field > * {
+  pointer-events: auto;
 }
 
 .history-timeline__field-text {
