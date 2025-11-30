@@ -3240,7 +3240,16 @@ const [showInlineExtras, setShowInlineExtras] = useState(false)
       // If already locked, no-op
       if (body.dataset.scrollLockActive === '1') return
       body.dataset.scrollLockActive = '1'
-      // Simple approach: just prevent wheel and touch events from scrolling
+      
+      // Use touch-action CSS to prevent scrolling (works with pointer events)
+      const originalTouchAction = body.style.touchAction
+      const originalOverscrollBehavior = body.style.overscrollBehavior
+      ;(window as any).__scrollLockOriginalTouchAction = originalTouchAction
+      ;(window as any).__scrollLockOriginalOverscrollBehavior = originalOverscrollBehavior
+      body.style.touchAction = 'none'
+      body.style.overscrollBehavior = 'none'
+      
+      // Also prevent wheel and touchmove for completeness
       const wheelPreventer: EventListener = (e: Event) => {
         if ((e.target as HTMLElement)?.closest('.calendar-days-area, .calendar-allday-wrapper')) {
           // Allow events within calendar to be handled normally
@@ -3265,6 +3274,23 @@ const [showInlineExtras, setShowInlineExtras] = useState(false)
       // If not locked, no-op
       if (body.dataset.scrollLockActive !== '1') return
       delete body.dataset.scrollLockActive
+      
+      // Restore original touch-action and overscroll-behavior
+      const originalTouchAction = (window as any).__scrollLockOriginalTouchAction
+      const originalOverscrollBehavior = (window as any).__scrollLockOriginalOverscrollBehavior
+      if (typeof originalTouchAction === 'string') {
+        body.style.touchAction = originalTouchAction
+      } else {
+        body.style.touchAction = ''
+      }
+      if (typeof originalOverscrollBehavior === 'string') {
+        body.style.overscrollBehavior = originalOverscrollBehavior
+      } else {
+        body.style.overscrollBehavior = ''
+      }
+      delete (window as any).__scrollLockOriginalTouchAction
+      delete (window as any).__scrollLockOriginalOverscrollBehavior
+      
       // Remove event preventers
       const wheelPreventer = (window as any).__scrollLockWheelPreventer as EventListener | undefined
       const touchPreventer = (window as any).__scrollLockTouchPreventer as EventListener | undefined
@@ -11281,6 +11307,8 @@ useEffect(() => {
       setDragPreview(null)
       dragPreventClickRef.current = state.hasMoved
       setHoveredDuringDragId(null)
+      // Release scroll lock
+      setPageScrollLock(false)
     },
     [handleWindowPointerMove, setHistoryDraft, updateHistory],
   )
@@ -11315,6 +11343,8 @@ useEffect(() => {
       } catch {}
       // Close any open calendar popover when starting a drag from timeline blocks
       handleCloseCalendarPreview()
+      // Lock page scroll while dragging (for all input types)
+      setPageScrollLock(true)
       const rect = bar.getBoundingClientRect()
       if (!rect || rect.width <= 0) {
         return
