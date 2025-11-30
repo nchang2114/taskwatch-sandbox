@@ -3234,7 +3234,6 @@ const [showInlineExtras, setShowInlineExtras] = useState(false)
   // Helper: toggle global scroll lock (prevents page scroll on touch during active event drags)
   const setPageScrollLock = (locked: boolean) => {
     if (typeof document === 'undefined') return
-    const root = document.documentElement
     const body = document.body as HTMLBodyElement & { dataset: DOMStringMap }
     if (locked) {
       // If already locked, no-op
@@ -9268,7 +9267,6 @@ useEffect(() => {
                   const startY = ev.clientY
                   let startedCreate = false
                   let startedPan = false
-                  const isTouch = (ev as any).pointerType === 'touch'
                   let touchHoldTimer: number | null = null
 
                   const startCreate = () => {
