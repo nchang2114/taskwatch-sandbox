@@ -2174,177 +2174,107 @@ const applyAlphaToHex = (hex: string, alpha: number) => {
 }
 
 const PRESET_GOAL_GRADIENTS: Record<string, string> = {
-  'from-fuchsia-500 to-purple-500': 'linear-gradient(135deg, #f471b5 0%, #a855f7 50%, #6b21a8 100%)',
-  'from-emerald-500 to-cyan-500': 'linear-gradient(135deg, #34d399 0%, #10b981 45%, #0ea5e9 100%)',
-  'from-lime-400 to-emerald-500': 'linear-gradient(135deg, #bef264 0%, #4ade80 45%, #22c55e 100%)',
-  'from-sky-500 to-indigo-500': 'linear-gradient(135deg, #38bdf8 0%, #60a5fa 50%, #6366f1 100%)',
-  'from-amber-400 to-orange-500': 'linear-gradient(135deg, #fbbf24 0%, #fb923c 45%, #f97316 100%)',
+  purple: 'linear-gradient(135deg, #5A00B8 0%, #C66BFF 100%)',
+  green: 'linear-gradient(135deg, #34d399 0%, #10b981 45%, #0ea5e9 100%)',
+  magenta: 'linear-gradient(-225deg, #A445B2 0%, #D41872 52%, #FF0066 100%)',
+  blue: 'linear-gradient(135deg, #005bea 0%, #00c6fb 100%)',
+  orange: 'linear-gradient(135deg, #ff5b14 0%, #ffc64d 100%)',
 }
 
-const splitGradientArgs = (value: string): string[] => {
-  const result: string[] = []
-  let current = ''
-  let depth = 0
-  for (let index = 0; index < value.length; index += 1) {
-    const char = value[index]
-    if (char === '(') {
-      depth += 1
-      current += char
-    } else if (char === ')') {
-      depth = Math.max(0, depth - 1)
-      current += char
-    } else if (char === ',' && depth === 0) {
-      if (current.trim().length > 0) {
-        result.push(current.trim())
+const cssColorRegex = /(#(?:[0-9a-fA-F]{3}){1,2}|rgba?\([^)]+\)|hsla?\([^)]+\))/gi
+
+const parseCssColor = (value: string): { r: number; g: number; b: number } | null => {
+  const trimmed = value.trim()
+  if (!trimmed) return null
+  if (trimmed.startsWith('#')) {
+    const normalized = normalizeHexColor(trimmed)
+    return normalized ? hexToRgb(normalized) : null
+  }
+  const rgbMatch = trimmed.match(/^rgba?\(\s*([^)]+)\s*\)$/i)
+  if (rgbMatch) {
+    const parts = rgbMatch[1].split(',').map((p) => p.trim())
+    if (parts.length >= 3) {
+      const [r, g, b] = parts.slice(0, 3).map((p) => Number(p))
+      if ([r, g, b].every((n) => Number.isFinite(n))) {
+        return { r, g, b }
       }
-      current = ''
-    } else {
-      current += char
     }
   }
-  if (current.trim().length > 0) {
-    result.push(current.trim())
-  }
-  return result
-}
-
-type PartialGradientStop = {
-  color: string
-  position?: number
-}
-
-const parseGradientStopToken = (token: string): PartialGradientStop | null => {
-  const trimmed = token.trim()
-  if (trimmed.length === 0) {
-    return null
-  }
-  const parts = trimmed.split(/\s+/)
-  if (parts.length === 0) {
-    return null
-  }
-  const color = normalizeHexColor(parts[0])
-  if (!color) {
-    return null
-  }
-  let position: number | undefined
-  for (let index = 1; index < parts.length; index += 1) {
-    const part = parts[index]
-    const match = part.match(/^(-?\d+(?:\.\d+)?)%$/)
-    if (match) {
-      position = clamp01(Number.parseFloat(match[1]) / 100)
-      break
-    }
-  }
-  return { color, position }
-}
-
-const normalizeGradientStops = (stops: PartialGradientStop[]): GradientStop[] => {
-  if (stops.length < 2) {
-    return []
-  }
-  const working = stops.map((stop) => ({ ...stop }))
-  if (working[0].position === undefined) {
-    working[0].position = 0
-  }
-  if (working[working.length - 1].position === undefined) {
-    working[working.length - 1].position = 1
-  }
-  let lastDefinedIndex = 0
-  for (let index = 1; index < working.length; index += 1) {
-    const stop = working[index]
-    if (stop.position !== undefined) {
-      const startPos = clamp01(working[lastDefinedIndex].position ?? 0)
-      const endPos = clamp01(stop.position)
-      const gap = index - lastDefinedIndex
-      if (gap > 1) {
-        const step = (endPos - startPos) / gap
-        for (let offset = 1; offset < gap; offset += 1) {
-          const target = working[lastDefinedIndex + offset]
-          target.position = clamp01(startPos + step * offset)
+  const hslMatch = trimmed.match(/^hsla?\(\s*([^)]+)\s*\)$/i)
+  if (hslMatch) {
+    const parts = hslMatch[1].split(',').map((p) => p.trim())
+    if (parts.length >= 3) {
+      const h = Number(parts[0])
+      const s = Number(parts[1].replace('%', '')) / 100
+      const l = Number(parts[2].replace('%', '')) / 100
+      if ([h, s, l].every((n) => Number.isFinite(n))) {
+        const c = (1 - Math.abs(2 * l - 1)) * s
+        const x = c * (1 - Math.abs(((h / 60) % 2) - 1))
+        const m = l - c / 2
+        let r1 = 0
+        let g1 = 0
+        let b1 = 0
+        if (h >= 0 && h < 60) {
+          r1 = c
+          g1 = x
+        } else if (h >= 60 && h < 120) {
+          r1 = x
+          g1 = c
+        } else if (h >= 120 && h < 180) {
+          g1 = c
+          b1 = x
+        } else if (h >= 180 && h < 240) {
+          g1 = x
+          b1 = c
+        } else if (h >= 240 && h < 300) {
+          r1 = x
+          b1 = c
+        } else if (h >= 300 && h < 360) {
+          r1 = c
+          b1 = x
+        }
+        return {
+          r: (r1 + m) * 255,
+          g: (g1 + m) * 255,
+          b: (b1 + m) * 255,
         }
       }
-      stop.position = endPos
-      lastDefinedIndex = index
     }
   }
-  for (let index = 0; index < working.length; index += 1) {
-    if (working[index].position !== undefined) {
-      continue
-    }
-    const prevIndex = Math.max(0, index - 1)
-    let nextIndex = index + 1
-    while (nextIndex < working.length && working[nextIndex].position === undefined) {
-      nextIndex += 1
-    }
-    const prevPos = clamp01(working[prevIndex].position ?? 0)
-    const nextPos = nextIndex < working.length ? clamp01(working[nextIndex].position ?? prevPos) : prevPos
-    const span = nextIndex - prevIndex
-    if (span <= 0) {
-      working[index].position = prevPos
-    } else {
-      const relativeIndex = index - prevIndex
-      working[index].position = clamp01(prevPos + ((nextPos - prevPos) * relativeIndex) / span)
-    }
-  }
-  return working
-    .map<GradientStop>((stop) => ({
-      color: stop.color,
-      position: clamp01(stop.position ?? 0),
-    }))
-    .sort((a, b) => a.position - b.position)
+  return null
 }
 
 const parseGoalGradient = (gradient: string): GoalGradientInfo | null => {
   const trimmed = gradient.trim()
-  if (!trimmed.toLowerCase().startsWith('linear-gradient')) {
+  if (!trimmed.includes('gradient(')) {
     return null
   }
-  const openIndex = trimmed.indexOf('(')
-  const closeIndex = trimmed.lastIndexOf(')')
-  if (openIndex === -1 || closeIndex === -1 || closeIndex <= openIndex + 1) {
+  const colorMatches = Array.from(trimmed.matchAll(cssColorRegex)).map((m) => m[0])
+  const pctMatches = Array.from(trimmed.matchAll(/(\d+(?:\.\d+)?)%/g)).map((m) => Number(m[1]))
+  if (colorMatches.length === 0) {
     return null
   }
-  const inner = trimmed.slice(openIndex + 1, closeIndex)
-  const args = splitGradientArgs(inner)
-  if (args.length < 2) {
-    return null
+  const stops: GradientStop[] = []
+  for (let i = 0; i < colorMatches.length; i += 1) {
+    const rgb = parseCssColor(colorMatches[i])
+    if (!rgb) continue
+    const pct =
+      pctMatches.length === colorMatches.length
+        ? pctMatches[i] / 100
+        : i / Math.max(1, colorMatches.length - 1)
+    stops.push({ color: rgbToHex(rgb.r, rgb.g, rgb.b), position: clamp01(pct) })
   }
-  let angle: number | undefined
-  let stopStartIndex = 0
-  const angleMatch = args[0].match(/^(-?\d+(?:\.\d+)?)deg$/i)
-  if (angleMatch) {
-    angle = Number.parseFloat(angleMatch[1])
-    stopStartIndex = 1
-  }
-  const stopTokens = args.slice(stopStartIndex)
-  const partialStops = stopTokens
-    .map((token) => parseGradientStopToken(token))
-    .filter((stop): stop is PartialGradientStop => Boolean(stop))
-  const stops = normalizeGradientStops(partialStops)
   if (stops.length < 2) {
     return null
   }
+  stops.sort((a, b) => (a.position ?? 0) - (b.position ?? 0))
+  const angleMatch = trimmed.match(/(-?\d+(?:\.\d+)?)deg/)
   return {
     css: gradient,
     start: stops[0].color,
     end: stops[stops.length - 1].color,
-    angle,
-    stops,
-  }
-}
-
-const extractGradientColors = (gradient: string): { start: string; end: string; angle?: number } | null => {
-  const matches = gradient.match(/#(?:[0-9a-fA-F]{3}){1,2}/g)
-  if (!matches || matches.length === 0) {
-    return null
-  }
-  const start = normalizeHexColor(matches[0]) ?? matches[0]
-  const end = normalizeHexColor(matches[matches.length - 1]) ?? matches[matches.length - 1]
-  const angleMatch = gradient.match(/(-?\d+(?:\.\d+)?)deg/)
-  return {
-    start,
-    end,
     angle: angleMatch ? Number.parseFloat(angleMatch[1]) : undefined,
+    stops,
   }
 }
 
@@ -2379,23 +2309,8 @@ const resolveGoalColorInfo = (value: string | undefined): GoalColorInfo | undefi
     }
   }
 
-  const fallback = extractGradientColors(gradientString)
-  if (!fallback) {
-    return undefined
-  }
-
-  return {
-    gradient: {
-      css: gradientString,
-      start: fallback.start,
-      end: fallback.end,
-      angle: fallback.angle,
-      stops: [
-        { color: fallback.start, position: 0 },
-        { color: fallback.end, position: 1 },
-      ],
-    },
-  }
+  // If we can't parse colors, return undefined so surfaces can fall back gracefully.
+  return undefined
 }
 
 const describeFullDonut = () => {

@@ -832,13 +832,7 @@ type GoalAppearanceUpdate = {
 
 // Default data
 const DEFAULT_GOALS: Goal[] = DEMO_GOALS as Goal[]
-const GOAL_GRADIENTS = [
-  'from-fuchsia-500 to-purple-500',
-  'from-emerald-500 to-cyan-500',
-  'from-lime-400 to-emerald-500',
-  'from-sky-500 to-indigo-500',
-  'from-amber-400 to-orange-500',
-]
+const GOAL_GRADIENTS = ['purple', 'green', 'magenta', 'blue', 'orange']
 
 const FALLBACK_GOAL_COLOR = GOAL_GRADIENTS[0]
 
@@ -911,11 +905,11 @@ function reconcileGoalsWithSnapshot(snapshot: GoalSnapshot[], current: Goal[]): 
 }
 
 const BASE_GRADIENT_PREVIEW: Record<string, string> = {
-  'from-fuchsia-500 to-purple-500': 'linear-gradient(135deg, #f471b5 0%, #a855f7 50%, #6b21a8 100%)',
-  'from-emerald-500 to-cyan-500': 'linear-gradient(135deg, #34d399 0%, #10b981 45%, #0ea5e9 100%)',
-  'from-lime-400 to-emerald-500': 'linear-gradient(135deg, #bef264 0%, #4ade80 45%, #22c55e 100%)',
-  'from-sky-500 to-indigo-500': 'linear-gradient(135deg, #38bdf8 0%, #60a5fa 50%, #6366f1 100%)',
-  'from-amber-400 to-orange-500': 'linear-gradient(135deg, #fbbf24 0%, #fb923c 45%, #f97316 100%)',
+  purple: 'linear-gradient(135deg, #5A00B8 0%, #C66BFF 100%)',
+  green: 'linear-gradient(135deg, #34d399 0%, #10b981 45%, #0ea5e9 100%)',
+  magenta: 'linear-gradient(-225deg, #A445B2 0%, #D41872 52%, #FF0066 100%)',
+  blue: 'linear-gradient(135deg, #005bea 0%, #00c6fb 100%)',
+  orange: 'linear-gradient(135deg, #ff5b14 0%, #ffc64d 100%)',
 }
 
 const presetGradientForToken = (token: string): string | undefined => BASE_GRADIENT_PREVIEW[token]
@@ -955,16 +949,85 @@ const extractStopsFromGradient = (value: string): { from: string; to: string } |
 // --- Gradient sampling helpers for node ring/fill ---
 type ColorStop = { color: string; pct: number }
 
+const parseCssColor = (value: string): { r: number; g: number; b: number } | null => {
+  const trimmed = value.trim()
+  if (!trimmed) return null
+  if (trimmed.startsWith('#')) {
+    return hexToRgb(trimmed)
+  }
+  const rgbMatch = trimmed.match(/^rgba?\(\s*([^\)]+)\s*\)$/i)
+  if (rgbMatch) {
+    const parts = rgbMatch[1].split(',').map((p) => p.trim())
+    if (parts.length >= 3) {
+      const [r, g, b] = parts.slice(0, 3).map((p) => Number(p))
+      if ([r, g, b].every((n) => Number.isFinite(n))) {
+        return { r, g, b }
+      }
+    }
+  }
+  const hslMatch = trimmed.match(/^hsla?\(\s*([^\)]+)\s*\)$/i)
+  if (hslMatch) {
+    const parts = hslMatch[1].split(',').map((p) => p.trim())
+    if (parts.length >= 3) {
+      const h = Number(parts[0])
+      const s = Number(parts[1].replace('%', '')) / 100
+      const l = Number(parts[2].replace('%', '')) / 100
+      if ([h, s, l].every((n) => Number.isFinite(n))) {
+        const c = (1 - Math.abs(2 * l - 1)) * s
+        const x = c * (1 - Math.abs(((h / 60) % 2) - 1))
+        const m = l - c / 2
+        let r1 = 0
+        let g1 = 0
+        let b1 = 0
+        if (h >= 0 && h < 60) {
+          r1 = c
+          g1 = x
+        } else if (h >= 60 && h < 120) {
+          r1 = x
+          g1 = c
+        } else if (h >= 120 && h < 180) {
+          g1 = c
+          b1 = x
+        } else if (h >= 180 && h < 240) {
+          g1 = x
+          b1 = c
+        } else if (h >= 240 && h < 300) {
+          r1 = x
+          b1 = c
+        } else if (h >= 300 && h < 360) {
+          r1 = c
+          b1 = x
+        }
+        return {
+          r: (r1 + m) * 255,
+          g: (g1 + m) * 255,
+          b: (b1 + m) * 255,
+        }
+      }
+    }
+  }
+  return null
+}
+
+const COLOR_TOKEN_REGEX = /(#(?:[0-9a-fA-F]{3}){1,2}|rgba?\([^)]+\)|hsla?\([^)]+\))/gi
+
 const parseGradientStops = (gradient: string): ColorStop[] => {
-  const colorMatches = gradient.match(/#(?:[0-9a-fA-F]{3}){1,2}/g) || []
+  const colorMatches = Array.from(gradient.matchAll(COLOR_TOKEN_REGEX)).map((m) => m[0])
   const pctMatches = Array.from(gradient.matchAll(/(\d+(?:\.\d+)?)%/g)).map((m) => Number(m[1]))
   if (colorMatches.length === 0) return []
   const n = colorMatches.length
   const stops: ColorStop[] = []
-  if (pctMatches.length === n) {
-    for (let i = 0; i < n; i += 1) stops.push({ color: colorMatches[i], pct: pctMatches[i] })
-  } else {
-    for (let i = 0; i < n; i += 1) stops.push({ color: colorMatches[i], pct: (i / Math.max(1, n - 1)) * 100 })
+  for (let i = 0; i < n; i += 1) {
+    const color = colorMatches[i]
+    const rgb = parseCssColor(color)
+    if (!rgb) {
+      continue
+    }
+    const pct =
+      pctMatches.length === n
+        ? pctMatches[i]
+        : (i / Math.max(1, n - 1)) * 100
+    stops.push({ color: rgbToHex(rgb), pct })
   }
   stops.sort((a, b) => a.pct - b.pct)
   return stops
@@ -1071,8 +1134,11 @@ const getBucketStyleLabel = (style: BucketSurfaceStyle): string =>
 
 // Components
 const ThinProgress: React.FC<{ value: number; gradient: string; className?: string }> = ({ value, gradient, className }) => {
+  const trimmed = (gradient ?? '').trim()
+  const preset = trimmed ? BASE_GRADIENT_PREVIEW[trimmed] : undefined
   const resolvedGradient =
-    (gradient.toLowerCase().startsWith('linear-gradient(') ? gradient : BASE_GRADIENT_PREVIEW[gradient]) ||
+    preset ||
+    (trimmed.length > 0 ? trimmed : null) ||
     'linear-gradient(135deg, #6366f1 0%, #ec4899 100%)'
   return (
     <div className={classNames('h-2 w-full rounded-full bg-white/10 overflow-hidden', className)}>
@@ -1163,7 +1229,7 @@ const GoalCustomizer = React.forwardRef<HTMLDivElement, GoalCustomizerProps>(({ 
       </div>
 
       <div className="goal-customizer__section">
-        <p className="goal-customizer__label">Progress gradient</p>
+        <p className="goal-customizer__label">Gradient Theme</p>
         <div className="goal-customizer__swatches">
           {gradientSwatches.map((value) => {
             const isCustom = value === 'custom'
@@ -2158,6 +2224,12 @@ const MilestoneLayer: React.FC<{
             }
             if (goal.goalColour && BASE_GRADIENT_PREVIEW[goal.goalColour]) {
               return parseGradientStops(BASE_GRADIENT_PREVIEW[goal.goalColour])
+            }
+            if (goal.goalColour) {
+              const parsed = parseGradientStops(goal.goalColour)
+              if (parsed.length > 0) {
+                return parsed
+              }
             }
             return [
               { color: '#9fc2ff', pct: 0 },
