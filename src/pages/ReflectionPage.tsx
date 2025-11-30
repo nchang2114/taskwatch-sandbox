@@ -3041,8 +3041,6 @@ export default function ReflectionPage() {
           ? 1
           : chunkSize
       const effectiveRaw = snapUnitSpan === 1 ? rawDays : rawDays / snapUnitSpan
-      const now = typeof performance !== 'undefined' ? performance.now() : Date.now()
-      const elapsedMs = Math.max(now - state.startTime, 1)
       const absRaw = Math.abs(effectiveRaw)
       const direction = effectiveRaw >= 0 ? 1 : -1
 
