@@ -1378,6 +1378,7 @@ const isAllDayRangeTs = (start: number, end: number): boolean => {
 }
 const DRAG_DETECTION_THRESHOLD_PX = 3
 const MIN_SESSION_DURATION_DRAG_MS = MINUTE_MS
+const DRAG_HOLD_DURATION_MS = 300 // Hold duration required to start dragging/extending sessions
 // Double-tap (touch) detection settings
 // Double-tap (touch) detection thresholds (tighter to reduce accidental triggers)
 const DOUBLE_TAP_DELAY_MS = 220
@@ -3235,59 +3236,46 @@ const [showInlineExtras, setShowInlineExtras] = useState(false)
     if (typeof document === 'undefined') return
     const root = document.documentElement
     const body = document.body as HTMLBodyElement & { dataset: DOMStringMap }
-    const ua = navigator.userAgent || ''
-    const isIOS = /iP(ad|hone|od)/.test(ua) || (navigator.platform === 'MacIntel' && (navigator as any).maxTouchPoints > 1)
     if (locked) {
       // If already locked, no-op
       if (body.dataset.scrollLockActive === '1') return
       body.dataset.scrollLockActive = '1'
-      const y = (window.scrollY || root.scrollTop || (document.scrollingElement?.scrollTop ?? 0) || 0)
-      body.dataset.scrollLockY = String(y)
-      if (isIOS) {
-        // iOS Safari: avoid position:fixed to prevent address bar/UI jumps; block scrolling via global touchmove preventer
-        const preventer: EventListener = (e: Event) => {
-          try { e.preventDefault() } catch {}
+      // Simple approach: just prevent wheel and touch events from scrolling
+      const wheelPreventer: EventListener = (e: Event) => {
+        if ((e.target as HTMLElement)?.closest('.calendar-days-area, .calendar-allday-wrapper')) {
+          // Allow events within calendar to be handled normally
+          return
         }
-        ;(window as any).__scrollLockTouchPreventer = preventer
-        try { window.addEventListener('touchmove', preventer, { passive: false }) } catch {}
-      } else {
-        root.classList.add('scroll-lock')
-        body.classList.add('scroll-lock')
-        // Non-iOS fallback: freeze body to prevent any viewport scroll reliably
-        body.style.position = 'fixed'
-        body.style.top = `-${y}px`
-        body.style.left = '0'
-        body.style.right = '0'
-        body.style.width = '100%'
-        body.style.overflow = 'hidden'
+        try { e.preventDefault() } catch {}
       }
+      const touchPreventer: EventListener = (e: Event) => {
+        if ((e.target as HTMLElement)?.closest('.calendar-days-area, .calendar-allday-wrapper')) {
+          // Allow events within calendar to be handled normally
+          return
+        }
+        try { e.preventDefault() } catch {}
+      }
+      ;(window as any).__scrollLockWheelPreventer = wheelPreventer
+      ;(window as any).__scrollLockTouchPreventer = touchPreventer
+      try { 
+        window.addEventListener('wheel', wheelPreventer, { passive: false })
+        window.addEventListener('touchmove', touchPreventer, { passive: false })
+      } catch {}
     } else {
       // If not locked, no-op
       if (body.dataset.scrollLockActive !== '1') return
       delete body.dataset.scrollLockActive
-      const yStr = body.dataset.scrollLockY || root.dataset.scrollLockY
-      delete body.dataset.scrollLockY
-      delete root.dataset.scrollLockY
-      // Remove iOS touchmove preventer if present
-      const preventer = (window as any).__scrollLockTouchPreventer as EventListener | undefined
-      if (preventer) {
-        try { window.removeEventListener('touchmove', preventer) } catch {}
+      // Remove event preventers
+      const wheelPreventer = (window as any).__scrollLockWheelPreventer as EventListener | undefined
+      const touchPreventer = (window as any).__scrollLockTouchPreventer as EventListener | undefined
+      if (wheelPreventer) {
+        try { window.removeEventListener('wheel', wheelPreventer) } catch {}
+        delete (window as any).__scrollLockWheelPreventer
+      }
+      if (touchPreventer) {
+        try { window.removeEventListener('touchmove', touchPreventer) } catch {}
         delete (window as any).__scrollLockTouchPreventer
       }
-      // Restore body styles (for non-iOS fallback)
-      if (body.style.position === 'fixed') {
-        body.style.position = ''
-        body.style.top = ''
-        body.style.left = ''
-        body.style.right = ''
-        body.style.width = ''
-        body.style.overflow = ''
-        root.classList.remove('scroll-lock')
-        body.classList.remove('scroll-lock')
-      }
-      // Restore scroll position
-      const y = yStr ? parseInt(yStr, 10) : (window.scrollY || 0)
-      try { window.scrollTo(0, y) } catch {}
     }
   }
 
@@ -7695,7 +7683,9 @@ useEffect(() => {
     let scrollLocked = false
     let prevTouchAction: string | null = null
     const target = event.target as HTMLElement | null
-    if (target && (target.closest('.calendar-event') || target.closest('.calendar-allday-event') || target.closest('button'))) {
+    // Allow panning from anywhere, including over events
+    // Events have their own handlers that will set up drag after hold detection
+    if (target && target.closest('button')) {
       return
     }
     const area = calendarDaysAreaRef.current
@@ -7732,6 +7722,9 @@ useEffect(() => {
     }
     // Don't capture or preventDefault yet; wait until we detect horizontal intent
     const handleMove = (e: PointerEvent) => {
+      // Don't pan if an event drag is active
+      const eventDragState = calendarEventDragRef.current
+      if (eventDragState && eventDragState.activated) return
       const state = calendarDragRef.current
       if (!state || e.pointerId !== state.pointerId) return
       const dy = e.clientY - state.startY
@@ -8740,19 +8733,17 @@ useEffect(() => {
           activated: false,
         }
         calendarEventDragRef.current = state
-        // For mouse/pen: capture immediately. For touch: defer capture until long-press activates drag.
-        if (!isTouch) {
-          try {
-            targetEl.setPointerCapture?.(ev.pointerId)
-          } catch {}
-        }
+        // Defer capture until long-press activates drag for all devices (mouse/pen/touch)
         // For touch, require a short hold before activating drag to prevent accidental drags while scrolling
   let touchHoldTimer: number | null = null
   let panningFromEvent = false
+  let holdCancelled = false
         const activateDrag = () => {
           const s = calendarEventDragRef.current
           if (!s || s.activated) return
           s.activated = true
+          // Clear any calendar pan state to prevent panning while dragging
+          calendarDragRef.current = null
           // If dragging a guide (repeating) entry, materialize it now so all drag/resize semantics match real entries
           if (entry.id.startsWith('repeat:')) {
             try {
@@ -8793,8 +8784,8 @@ useEffect(() => {
           }
           // Close any open calendar popover as soon as a drag is activated
           handleCloseCalendarPreview()
-          // Lock page scroll on touch while dragging an event
-          if (isTouch) setPageScrollLock(true)
+          // Lock page scroll while dragging an event (for all input types)
+          setPageScrollLock(true)
           try { targetEl.setPointerCapture?.(ev.pointerId) } catch {}
         }
         const onMove = (e: PointerEvent) => {
@@ -8805,14 +8796,16 @@ useEffect(() => {
           const dy = e.clientY - s.startY
           const threshold = 6
           if (!s.activated) {
-            if (isTouch) {
-              // If finger moves before hold completes, cancel the long-press activation
-              if (Math.hypot(dx, dy) > threshold) {
-                if (touchHoldTimer !== null) {
-                  try { window.clearTimeout(touchHoldTimer) } catch {}
-                  touchHoldTimer = null
-                }
-                // If horizontal intent, treat this as a calendar pan even though we started on an event
+            // If pointer moves before hold completes, cancel the long-press activation
+            if (Math.hypot(dx, dy) > threshold) {
+              if (touchHoldTimer !== null) {
+                try { window.clearTimeout(touchHoldTimer) } catch {}
+                touchHoldTimer = null
+                holdCancelled = true
+              }
+              // Only allow transitioning to pan if hold was cancelled (not completed)
+              // If horizontal intent, treat this as a calendar pan for all input types
+              if (holdCancelled) {
                 const intent = detectPanIntent(dx, dy, { threshold: 8, horizontalDominance: 0.65 })
                 if (intent === 'horizontal' && area) {
                   if (!panningFromEvent) {
@@ -8871,18 +8864,11 @@ useEffect(() => {
                   }
                   return
                 }
-                return
               }
-              // Not activated yet, and not moved enough — keep waiting for hold
               return
-            } else {
-              if (Math.hypot(dx, dy) <= threshold) {
-                return
-              }
-              // For mouse/pen, activate the drag using the same path as touch
-              // so guide entries materialize consistently on drag start.
-              activateDrag()
             }
+            // Not activated yet, and not moved enough — keep waiting for hold
+            return
           }
           // Prevent page/area scrolling while dragging an event
           try { e.preventDefault() } catch {}
@@ -9020,15 +9006,13 @@ useEffect(() => {
           // Clear drag kind marker so cursor returns to default/hover affordances
           delete targetEl.dataset.dragKind
           // Always release scroll lock at the end of a drag (noop if not locked)
-          if (isTouch) setPageScrollLock(false)
+          setPageScrollLock(false)
         }
-        // For touch, arm the hold timer to activate dragging
-        if (isTouch) {
-          touchHoldTimer = window.setTimeout(() => {
-            touchHoldTimer = null
-            activateDrag()
-          }, 360)
-        }
+        // Arm the hold timer to activate dragging for all input types (mouse/pen/touch)
+        touchHoldTimer = window.setTimeout(() => {
+          touchHoldTimer = null
+          activateDrag()
+        }, DRAG_HOLD_DURATION_MS)
         window.addEventListener('pointermove', onMove)
         window.addEventListener('pointerup', onUp)
         window.addEventListener('pointercancel', onUp)
@@ -9113,7 +9097,7 @@ useEffect(() => {
                   }}
                   onPointerDown={(pev) => {
                     if (pev.button !== 0) return
-                    // Start horizontal drag to move all-day block across days
+                    // Start horizontal drag to move all-day block across days (after hold)
                     pev.preventDefault(); pev.stopPropagation(); handleCloseCalendarPreview()
                     const track = calendarAllDayRef.current
                     if (!track) return
@@ -9121,7 +9105,9 @@ useEffect(() => {
                     if (!(Number.isFinite(rect.width) && rect.width > 0 && dayStarts.length > 0)) return
                     const pointerId = pev.pointerId
                     let moved = false
+                    let activated = false
                     const startX = pev.clientX
+                    const startY = pev.clientY
                     const dayWidth = rect.width / Math.max(1, dayStarts.length)
                     const trackLeft = rect.left
                     const clampColumnIndex = (value: number) =>
@@ -9129,9 +9115,25 @@ useEffect(() => {
                     const pointerStartIndex = clampColumnIndex(Math.floor((startX - trackLeft) / dayWidth))
                     const initialStart = bar.entry.startedAt
                     const initialEnd = bar.entry.endedAt
+                    let holdTimer: number | null = null
+                    const activateDrag = () => {
+                      if (activated) return
+                      activated = true
+                      try { (pev.currentTarget as any).setPointerCapture?.(pointerId) } catch {}
+                    }
                     const onMove = (e: PointerEvent) => {
                       if (e.pointerId !== pointerId) return
                       const dx = e.clientX - startX
+                      const dy = e.clientY - startY
+                      // Cancel hold timer if movement exceeds threshold before activation
+                      if (!activated && Math.hypot(dx, dy) > 6) {
+                        if (holdTimer !== null) {
+                          try { window.clearTimeout(holdTimer) } catch {}
+                          holdTimer = null
+                        }
+                        return
+                      }
+                      if (!activated) return
                       const rawPointerIndex = Math.floor((e.clientX - trackLeft) / dayWidth)
                       const pointerIndex = clampColumnIndex(rawPointerIndex)
                       const deltaDays = pointerIndex - pointerStartIndex
@@ -9148,6 +9150,10 @@ useEffect(() => {
                     }
                     const onUp = (e: PointerEvent) => {
                       if (e.pointerId !== pointerId) return
+                      if (holdTimer !== null) {
+                        try { window.clearTimeout(holdTimer) } catch {}
+                        holdTimer = null
+                      }
                       window.removeEventListener('pointermove', onMove)
                       window.removeEventListener('pointerup', onUp)
                       window.removeEventListener('pointercancel', onUp)
@@ -9166,7 +9172,10 @@ useEffect(() => {
                       dragPreviewRef.current = null
                       setDragPreview(null)
                     }
-                    try { (pev.currentTarget as any).setPointerCapture?.(pointerId) } catch {}
+                    holdTimer = window.setTimeout(() => {
+                      holdTimer = null
+                      activateDrag()
+                    }, DRAG_HOLD_DURATION_MS)
                     window.addEventListener('pointermove', onMove)
                     window.addEventListener('pointerup', onUp)
                     window.addEventListener('pointercancel', onUp)
