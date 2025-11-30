@@ -4076,6 +4076,12 @@ const GoalRow: React.FC<GoalRowProps> = ({
                                     draggingRowRef.current = row
                                     row.classList.add('dragging')
                                     
+                                    // Collapse the dragged task's expanded state BEFORE creating drag image
+                                    const wasExpanded = isDetailsOpen
+                                    if (wasExpanded) {
+                                      handleToggleTaskDetails(task.id)
+                                    }
+                                    
                                     // Temporarily hide details div to capture collapsed drag image
                                     const detailsDiv = row.querySelector('.goal-task-details') as HTMLElement | null
                                     let originalDisplay: string | null = null
@@ -4119,29 +4125,45 @@ const GoalRow: React.FC<GoalRowProps> = ({
                                       detailsDiv.style.display = originalDisplay || ''
                                     }
                                     
-                                    // Use setTimeout(0) to add collapsed class after drag initializes
-                                    setTimeout(() => {
-                                      if (draggingRowRef.current) {
-                                        draggingRowRef.current.classList.add('goal-task-row--collapsed')
-                                      }
-                                    }, 0)
+                                    // Store whether this task was expanded for restoration
+                                    ;(window as any).__dragTaskInfo = { 
+                                      goalId: goal.id, 
+                                      bucketId: b.id, 
+                                      section: 'active', 
+                                      index,
+                                      wasExpanded 
+                                    }
                                     
-                                    // Defer state collapse to avoid interfering with drag start
+                                    // Defer visual collapse and other task collapses to avoid interfering with drag start
                                     window.requestAnimationFrame(() => {
-                                      onCollapseTaskDetailsForDrag(task.id, b.id, goal.id)
+                                      window.requestAnimationFrame(() => {
+                                        // Add visual collapse class to make row leave the list
+                                        if (draggingRowRef.current) {
+                                          draggingRowRef.current.classList.add('goal-task-row--collapsed')
+                                        }
+                                        // Collapse OTHER tasks in the bucket
+                                        onCollapseTaskDetailsForDrag(task.id, b.id, goal.id)
+                                      })
                                     })
-                                    
-                                    ;(window as any).__dragTaskInfo = { goalId: goal.id, bucketId: b.id, section: 'active', index }
                                   }}
-  onDragEnd={() => {
+  onDragEnd={()=> {
     const row = draggingRowRef.current
     if (row) {
       row.classList.remove('dragging', 'goal-task-row--collapsed')
     }
+    const dragInfo = (window as any).__dragTaskInfo as { wasExpanded?: boolean } | null
     ;(window as any).__dragTaskInfo = null
     setDragHover(null)
     setDragLine(null)
+    
+    // Restore other tasks
     onRestoreTaskDetailsAfterDrag(task.id)
+    
+    // Restore the dragged task's expanded state if it was originally expanded
+    if (dragInfo?.wasExpanded) {
+      handleToggleTaskDetails(task.id)
+    }
+    
     draggingRowRef.current = null
     const ghost = dragCloneRef.current
     if (ghost && ghost.parentNode) ghost.parentNode.removeChild(ghost)
@@ -4846,7 +4868,7 @@ const GoalRow: React.FC<GoalRowProps> = ({
                                     aria-hidden
                                   />
                                 ) : null}
-                                {completedTasks.map((task, cIndex) => {
+                                {completedTasks.map((task) => {
                                   const isEditing = editingTasks[task.id] !== undefined
                                   const diffClass =
                                     task.difficulty === 'green'
@@ -4908,6 +4930,12 @@ const GoalRow: React.FC<GoalRowProps> = ({
                                           draggingRowRef.current = row
                                           row.classList.add('dragging')
                                           
+                                          // Collapse the dragged task's expanded state BEFORE creating drag image
+                                          const wasExpanded = isDetailsOpen
+                                          if (wasExpanded) {
+                                            handleToggleTaskDetails(task.id)
+                                          }
+                                          
                                           // Temporarily hide details div to capture collapsed drag image
                                           const detailsDiv = row.querySelector('.goal-task-details') as HTMLElement | null
                                           let originalDisplay: string | null = null
@@ -4944,29 +4972,45 @@ const GoalRow: React.FC<GoalRowProps> = ({
                                             detailsDiv.style.display = originalDisplay || ''
                                           }
                                           
-                                          // Use setTimeout(0) to add collapsed class after drag initializes
-                                          setTimeout(() => {
-                                            if (draggingRowRef.current) {
-                                              draggingRowRef.current.classList.add('goal-task-row--collapsed')
-                                            }
-                                          }, 0)
+                                          // Store whether this task was expanded for restoration
+                                          ;(window as any).__dragTaskInfo = { 
+                                            goalId: goal.id, 
+                                            bucketId: b.id, 
+                                            section: 'completed', 
+                                            index,
+                                            wasExpanded 
+                                          }
                                           
-                                          // Defer state collapse to avoid interfering with drag start
+                                          // Defer visual collapse and other task collapses to avoid interfering with drag start
                                           window.requestAnimationFrame(() => {
-                                            onCollapseTaskDetailsForDrag(task.id, b.id, goal.id)
+                                            window.requestAnimationFrame(() => {
+                                              // Add visual collapse class to make row leave the list
+                                              if (draggingRowRef.current) {
+                                                draggingRowRef.current.classList.add('goal-task-row--collapsed')
+                                              }
+                                              // Collapse OTHER tasks in the bucket
+                                              onCollapseTaskDetailsForDrag(task.id, b.id, goal.id)
+                                            })
                                           })
-                                          
-                                          ;(window as any).__dragTaskInfo = { goalId: goal.id, bucketId: b.id, section: 'completed', index: cIndex }
                                         }}
   onDragEnd={() => {
     const row = draggingRowRef.current
     if (row) {
       row.classList.remove('dragging', 'goal-task-row--collapsed')
     }
+    const dragInfo = (window as any).__dragTaskInfo as { wasExpanded?: boolean } | null
     ;(window as any).__dragTaskInfo = null
     setDragHover(null)
     setDragLine(null)
+    
+    // Restore other tasks
     onRestoreTaskDetailsAfterDrag(task.id)
+    
+    // Restore the dragged task's expanded state if it was originally expanded
+    if (dragInfo?.wasExpanded) {
+      handleToggleTaskDetails(task.id)
+    }
+    
     draggingRowRef.current = null
     const ghost = dragCloneRef.current
     if (ghost && ghost.parentNode) ghost.parentNode.removeChild(ghost)
@@ -9351,6 +9395,16 @@ const normalizedSearch = searchTerm.trim().toLowerCase()
                                       quickDraggingRowRef.current = row
                                       row.classList.add('dragging')
                                       
+                                      // Collapse the dragged item's expanded state BEFORE creating drag image
+                                      const wasExpanded = isDetailsOpen
+                                      if (wasExpanded) {
+                                        setQuickListItems((current) => 
+                                          current.map((it) => 
+                                            it.id === item.id ? { ...it, expanded: false } : it
+                                          )
+                                        )
+                                      }
+                                      
                                       // Temporarily hide details div to capture collapsed drag image
                                       const detailsDiv = row.querySelector('.goal-task-details') as HTMLElement | null
                                       let originalDisplay: string | null = null
@@ -9394,29 +9448,43 @@ const normalizedSearch = searchTerm.trim().toLowerCase()
                                         detailsDiv.style.display = originalDisplay || ''
                                       }
                                       
-                                      // Use setTimeout(0) to add collapsed class after drag initializes
-                                      setTimeout(() => {
-                                        if (quickDraggingRowRef.current) {
-                                          quickDraggingRowRef.current.classList.add('goal-task-row--collapsed')
-                                        }
-                                      }, 0)
+                                      // Store whether this item was expanded for restoration
+                                      ;(window as any).__quickDragInfo = { section: 'active', index, wasExpanded }
                                       
-                                      // Defer state collapse to avoid interfering with drag start
+                                      // Defer visual collapse and other item collapses to avoid interfering with drag start
                                       window.requestAnimationFrame(() => {
-                                        collapseQuickListDetailsForDrag(item.id)
+                                        window.requestAnimationFrame(() => {
+                                          // Add visual collapse class to make row leave the list
+                                          if (quickDraggingRowRef.current) {
+                                            quickDraggingRowRef.current.classList.add('goal-task-row--collapsed')
+                                          }
+                                          // Collapse OTHER items in the quick list
+                                          collapseQuickListDetailsForDrag(item.id)
+                                        })
                                       })
-                                      
-                                      ;(window as any).__quickDragInfo = { section: 'active', index }
                                     }}
                                     onDragEnd={() => {
                                       const row = quickDraggingRowRef.current
                                       if (row) {
                                         row.classList.remove('dragging', 'goal-task-row--collapsed')
                                       }
+                                      const dragInfo = (window as any).__quickDragInfo as { wasExpanded?: boolean } | null
                                       ;(window as any).__quickDragInfo = null
                                       setQuickDragHover(null)
                                       setQuickDragLine(null)
+                                      
+                                      // Restore other items
                                       restoreTaskDetailsAfterDrag(item.id)
+                                      
+                                      // Restore the dragged item's expanded state if it was originally expanded
+                                      if (dragInfo?.wasExpanded) {
+                                        setQuickListItems((current) => 
+                                          current.map((it) => 
+                                            it.id === item.id ? { ...it, expanded: true } : it
+                                          )
+                                        )
+                                      }
+                                      
                                       quickDraggingRowRef.current = null
                                       const ghost = quickDragCloneRef.current
                                       if (ghost && ghost.parentNode) ghost.parentNode.removeChild(ghost)
@@ -9924,6 +9992,16 @@ const normalizedSearch = searchTerm.trim().toLowerCase()
                                           quickDraggingRowRef.current = row
                                           row.classList.add('dragging')
                                           
+                                          // Collapse the dragged item's expanded state BEFORE creating drag image
+                                          const wasExpanded = isDetailsOpen
+                                          if (wasExpanded) {
+                                            setQuickListItems((current) => 
+                                              current.map((it) => 
+                                                it.id === item.id ? { ...it, expanded: false } : it
+                                              )
+                                            )
+                                          }
+                                          
                                           // Temporarily hide details div to capture collapsed drag image
                                           const detailsDiv = row.querySelector('.goal-task-details') as HTMLElement | null
                                           let originalDisplay: string | null = null
@@ -9951,7 +10029,7 @@ const normalizedSearch = searchTerm.trim().toLowerCase()
                                             const el = node as HTMLElement
                                             // Remove explicit <br> or block children that would force new lines
                                             el.querySelectorAll('br').forEach((br) => br.parentNode?.removeChild(br))
-                                            const oneLine = (el.innerText || el.textContent || '').replace(/\\s+/g, ' ').trim()
+                                            const oneLine = (el.innerText || el.textContent || '').replace(/\\\\s+/g, ' ').trim()
                                             el.textContent = oneLine
                                           })
                                           clone.querySelectorAll('.goal-task-details').forEach((node) => node.parentNode?.removeChild(node))
@@ -9967,29 +10045,43 @@ const normalizedSearch = searchTerm.trim().toLowerCase()
                                             detailsDiv.style.display = originalDisplay || ''
                                           }
                                           
-                                          // Use setTimeout(0) to add collapsed class after drag initializes
-                                          setTimeout(() => {
-                                            if (quickDraggingRowRef.current) {
-                                              quickDraggingRowRef.current.classList.add('goal-task-row--collapsed')
-                                            }
-                                          }, 0)
+                                          // Store whether this item was expanded for restoration
+                                          ;(window as any).__quickDragInfo = { section: 'completed', index, wasExpanded }
                                           
-                                          // Defer state collapse to avoid interfering with drag start
+                                          // Defer visual collapse and other item collapses to avoid interfering with drag start
                                           window.requestAnimationFrame(() => {
-                                            collapseQuickListDetailsForDrag(item.id)
+                                            window.requestAnimationFrame(() => {
+                                              // Add visual collapse class to make row leave the list
+                                              if (quickDraggingRowRef.current) {
+                                                quickDraggingRowRef.current.classList.add('goal-task-row--collapsed')
+                                              }
+                                              // Collapse OTHER items in the quick list
+                                              collapseQuickListDetailsForDrag(item.id)
+                                            })
                                           })
-                                          
-                                          ;(window as any).__quickDragInfo = { section: 'completed', index }
                                         }}
                                         onDragEnd={() => {
                                           const row = quickDraggingRowRef.current
                                           if (row) {
                                             row.classList.remove('dragging', 'goal-task-row--collapsed')
                                           }
+                                          const dragInfo = (window as any).__quickDragInfo as { wasExpanded?: boolean } | null
                                           ;(window as any).__quickDragInfo = null
                                           setQuickDragHover(null)
                                           setQuickDragLine(null)
+                                          
+                                          // Restore other items
                                           restoreTaskDetailsAfterDrag(item.id)
+                                          
+                                          // Restore the dragged item's expanded state if it was originally expanded
+                                          if (dragInfo?.wasExpanded) {
+                                            setQuickListItems((current) => 
+                                              current.map((it) => 
+                                                it.id === item.id ? { ...it, expanded: true } : it
+                                              )
+                                            )
+                                          }
+                                          
                                           quickDraggingRowRef.current = null
                                           const ghost = quickDragCloneRef.current
                                           if (ghost && ghost.parentNode) ghost.parentNode.removeChild(ghost)
