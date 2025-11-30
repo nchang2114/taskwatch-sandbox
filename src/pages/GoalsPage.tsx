@@ -2489,7 +2489,7 @@ interface GoalRowProps {
   handleToggleNotesSection: (taskId: string) => void
   handleToggleSubtaskCompleted: (taskId: string, subtaskId: string) => void
   handleRemoveSubtask: (taskId: string, subtaskId: string) => void
-  onCollapseTaskDetailsForDrag: (taskId: string) => void
+  onCollapseTaskDetailsForDrag: (taskId: string, bucketId: string, goalId: string) => void
   onRestoreTaskDetailsAfterDrag: (taskId: string) => void
   draggingRowRef: React.MutableRefObject<HTMLElement | null>
   dragCloneRef: React.MutableRefObject<HTMLElement | null>
@@ -2688,12 +2688,19 @@ const computeInsertMetrics = (listEl: HTMLElement, y: number) => {
   // Calculate line position
   const listRect = listEl.getBoundingClientRect()
   let rawTop = 0
-  if (candidates.length === 0 || index <= 0) {
-    // With 8px container padding, place line 3.5px from the top edge
+  if (candidates.length === 0) {
+    // Empty list: place line near the top
     rawTop = 3.5
+  } else if (index <= 0) {
+    // Before first element: place line above it
+    const first = candidates[0]
+    const firstRect = first.getBoundingClientRect()
+    rawTop = firstRect.top - listRect.top - 2 // 2px above the first element
   } else if (index >= candidates.length) {
-    // With 8px container padding, place line 3.5px from the bottom edge
-    rawTop = listRect.height - 4.5 // (3.5px space + 1px line)
+    // After last element: place line below it
+    const last = candidates[candidates.length - 1]
+    const lastRect = last.getBoundingClientRect()
+    rawTop = lastRect.bottom - listRect.top + 2 // 2px below the last element
   } else {
     const prev = candidates[index - 1]
     const next = candidates[index]
@@ -4068,6 +4075,17 @@ const GoalRow: React.FC<GoalRowProps> = ({
                                     const row = e.currentTarget as HTMLElement
                                     draggingRowRef.current = row
                                     row.classList.add('dragging')
+                                    
+                                    // Temporarily hide details div to capture collapsed drag image
+                                    const detailsDiv = row.querySelector('.goal-task-details') as HTMLElement | null
+                                    let originalDisplay: string | null = null
+                                    if (detailsDiv) {
+                                      originalDisplay = detailsDiv.style.display
+                                      detailsDiv.style.display = 'none'
+                                      // Force reflow so browser applies display:none before cloning
+                                      void row.offsetHeight
+                                    }
+                                    
                                     // Clone current row as drag image, keep it in DOM until drag ends
                                     const clone = row.cloneNode(true) as HTMLElement
                                     // Preserve task modifiers so difficulty/priority visuals stay intact
@@ -4095,16 +4113,24 @@ const GoalRow: React.FC<GoalRowProps> = ({
                                     try {
                                       e.dataTransfer.setDragImage(clone, 16, 0)
                                     } catch {}
-                                    // Collapse the original row AFTER drag image is captured (double RAF for safety)
+                                    
+                                    // Restore details display
+                                    if (detailsDiv) {
+                                      detailsDiv.style.display = originalDisplay || ''
+                                    }
+                                    
+                                    // Use setTimeout(0) to add collapsed class after drag initializes
+                                    setTimeout(() => {
+                                      if (draggingRowRef.current) {
+                                        draggingRowRef.current.classList.add('goal-task-row--collapsed')
+                                      }
+                                    }, 0)
+                                    
+                                    // Defer state collapse to avoid interfering with drag start
                                     window.requestAnimationFrame(() => {
-                                      window.requestAnimationFrame(() => {
-                                        if (draggingRowRef.current) {
-                                          draggingRowRef.current.classList.add('goal-task-row--collapsed')
-                                        }
-                                      })
+                                      onCollapseTaskDetailsForDrag(task.id, b.id, goal.id)
                                     })
-                                    // Defer state update to avoid interfering with drag initialization
-                                    setTimeout(() => onCollapseTaskDetailsForDrag(task.id), 0)
+                                    
                                     ;(window as any).__dragTaskInfo = { goalId: goal.id, bucketId: b.id, section: 'active', index }
                                   }}
   onDragEnd={() => {
@@ -4881,6 +4907,15 @@ const GoalRow: React.FC<GoalRowProps> = ({
                                           const row = e.currentTarget as HTMLElement
                                           draggingRowRef.current = row
                                           row.classList.add('dragging')
+                                          
+                                          // Temporarily hide details div to capture collapsed drag image
+                                          const detailsDiv = row.querySelector('.goal-task-details') as HTMLElement | null
+                                          let originalDisplay: string | null = null
+                                          if (detailsDiv) {
+                                            originalDisplay = detailsDiv.style.display
+                                            detailsDiv.style.display = 'none'
+                                          }
+                                          
                                           const clone = row.cloneNode(true) as HTMLElement
                                           clone.className = `${row.className} goal-drag-clone`
                                           clone.classList.remove('dragging', 'goal-task-row--collapsed', 'goal-task-row--expanded')
@@ -4903,16 +4938,24 @@ const GoalRow: React.FC<GoalRowProps> = ({
                                           try {
                                             e.dataTransfer.setDragImage(clone, 16, 0)
                                           } catch {}
-                                          // Collapse the original row AFTER drag image is captured (double RAF for safety)
+                                          
+                                          // Restore details display
+                                          if (detailsDiv) {
+                                            detailsDiv.style.display = originalDisplay || ''
+                                          }
+                                          
+                                          // Use setTimeout(0) to add collapsed class after drag initializes
+                                          setTimeout(() => {
+                                            if (draggingRowRef.current) {
+                                              draggingRowRef.current.classList.add('goal-task-row--collapsed')
+                                            }
+                                          }, 0)
+                                          
+                                          // Defer state collapse to avoid interfering with drag start
                                           window.requestAnimationFrame(() => {
-                                            window.requestAnimationFrame(() => {
-                                              if (draggingRowRef.current) {
-                                                draggingRowRef.current.classList.add('goal-task-row--collapsed')
-                                              }
-                                            })
+                                            onCollapseTaskDetailsForDrag(task.id, b.id, goal.id)
                                           })
-                                          // Defer state update to avoid interfering with drag initialization
-                                          setTimeout(() => onCollapseTaskDetailsForDrag(task.id), 0)
+                                          
                                           ;(window as any).__dragTaskInfo = { goalId: goal.id, bucketId: b.id, section: 'completed', index: cIndex }
                                         }}
   onDragEnd={() => {
@@ -7840,17 +7883,23 @@ export default function GoalsPage(): ReactElement {
     [updateTaskDetails],
   )
   const collapseAllTaskDetailsForDrag = useCallback(
-    (draggingTaskId: string) => {
+    (draggingTaskId: string, bucketId: string, goalId: string) => {
       if (draggingTaskIdRef.current === draggingTaskId) {
         return
       }
       draggingTaskIdRef.current = draggingTaskId
-      // Collapse bucket tasks
+      
+      // Get task IDs for this specific bucket
+      const bucket = goals.find((g) => g.id === goalId)?.buckets.find((b) => b.id === bucketId)
+      const bucketTaskIds = new Set(bucket?.tasks.map(t => t.id) ?? [])
+      
+      // Collapse only bucket tasks in this specific bucket
       setTaskDetails((current) => {
         const snapshot = new Map<string, { expanded: boolean; subtasksCollapsed: boolean; notesCollapsed: boolean }>()
         let mutated: TaskDetailsState | null = null
         Object.entries(current).forEach(([taskId, details]) => {
-          if (details.expanded || !details.subtasksCollapsed) {
+          // Only collapse if task is in this bucket
+          if (bucketTaskIds.has(taskId) && (details.expanded || !details.subtasksCollapsed)) {
             snapshot.set(taskId, {
               expanded: details.expanded,
               subtasksCollapsed: details.subtasksCollapsed,
@@ -7874,7 +7923,19 @@ export default function GoalsPage(): ReactElement {
         taskDetailsRef.current = mutated
         return mutated
       })
-      // Collapse quick list items
+      // Note: Quick list items not collapsed since they're in a different section
+    },
+    [setTaskDetails, goals],
+  )
+
+  const collapseQuickListDetailsForDrag = useCallback(
+    (draggingTaskId: string) => {
+      if (draggingTaskIdRef.current === draggingTaskId) {
+        return
+      }
+      draggingTaskIdRef.current = draggingTaskId
+      
+      // Collapse all quick list items
       setQuickListItems((current) => {
         const snapshot = new Map<string, { expanded: boolean; subtasksCollapsed: boolean; notesCollapsed: boolean }>()
         let mutated: QuickItem[] | null = null
@@ -7900,7 +7961,7 @@ export default function GoalsPage(): ReactElement {
         return mutated ?? current
       })
     },
-    [setTaskDetails, setQuickListItems],
+    [setQuickListItems],
   )
 
   const restoreTaskDetailsAfterDrag = useCallback(
@@ -9289,6 +9350,17 @@ const normalizedSearch = searchTerm.trim().toLowerCase()
                                       const row = e.currentTarget as HTMLElement
                                       quickDraggingRowRef.current = row
                                       row.classList.add('dragging')
+                                      
+                                      // Temporarily hide details div to capture collapsed drag image
+                                      const detailsDiv = row.querySelector('.goal-task-details') as HTMLElement | null
+                                      let originalDisplay: string | null = null
+                                      if (detailsDiv) {
+                                        originalDisplay = detailsDiv.style.display
+                                        detailsDiv.style.display = 'none'
+                                        // Force reflow so browser applies display:none before cloning
+                                        void row.offsetHeight
+                                      }
+                                      
                                       // Clone current row as drag image, keep it in DOM until drag ends
                                       const clone = row.cloneNode(true) as HTMLElement
                                       // Preserve task modifiers so difficulty/priority visuals stay intact
@@ -9316,16 +9388,24 @@ const normalizedSearch = searchTerm.trim().toLowerCase()
                                       try {
                                         e.dataTransfer.setDragImage(clone, 16, 0)
                                       } catch {}
-                                      // Collapse the original row AFTER drag image is captured (double RAF for safety)
+                                      
+                                      // Restore details display
+                                      if (detailsDiv) {
+                                        detailsDiv.style.display = originalDisplay || ''
+                                      }
+                                      
+                                      // Use setTimeout(0) to add collapsed class after drag initializes
+                                      setTimeout(() => {
+                                        if (quickDraggingRowRef.current) {
+                                          quickDraggingRowRef.current.classList.add('goal-task-row--collapsed')
+                                        }
+                                      }, 0)
+                                      
+                                      // Defer state collapse to avoid interfering with drag start
                                       window.requestAnimationFrame(() => {
-                                        window.requestAnimationFrame(() => {
-                                          if (quickDraggingRowRef.current) {
-                                            quickDraggingRowRef.current.classList.add('goal-task-row--collapsed')
-                                          }
-                                        })
+                                        collapseQuickListDetailsForDrag(item.id)
                                       })
-                                      // Defer state update to avoid interfering with drag initialization
-                                      setTimeout(() => collapseAllTaskDetailsForDrag(item.id), 0)
+                                      
                                       ;(window as any).__quickDragInfo = { section: 'active', index }
                                     }}
                                     onDragEnd={() => {
@@ -9843,6 +9923,17 @@ const normalizedSearch = searchTerm.trim().toLowerCase()
                                           const row = e.currentTarget as HTMLElement
                                           quickDraggingRowRef.current = row
                                           row.classList.add('dragging')
+                                          
+                                          // Temporarily hide details div to capture collapsed drag image
+                                          const detailsDiv = row.querySelector('.goal-task-details') as HTMLElement | null
+                                          let originalDisplay: string | null = null
+                                          if (detailsDiv) {
+                                            originalDisplay = detailsDiv.style.display
+                                            detailsDiv.style.display = 'none'
+                                            // Force reflow so browser applies display:none before cloning
+                                            void row.offsetHeight
+                                          }
+                                          
                                           // Clone current row as drag image, keep it in DOM until drag ends
                                           const clone = row.cloneNode(true) as HTMLElement
                                           // Preserve task modifiers so difficulty/priority visuals stay intact
@@ -9870,16 +9961,24 @@ const normalizedSearch = searchTerm.trim().toLowerCase()
                                           try {
                                             e.dataTransfer.setDragImage(clone, 16, 0)
                                           } catch {}
-                                          // Collapse the original row AFTER drag image is captured (double RAF for safety)
+                                          
+                                          // Restore details display
+                                          if (detailsDiv) {
+                                            detailsDiv.style.display = originalDisplay || ''
+                                          }
+                                          
+                                          // Use setTimeout(0) to add collapsed class after drag initializes
+                                          setTimeout(() => {
+                                            if (quickDraggingRowRef.current) {
+                                              quickDraggingRowRef.current.classList.add('goal-task-row--collapsed')
+                                            }
+                                          }, 0)
+                                          
+                                          // Defer state collapse to avoid interfering with drag start
                                           window.requestAnimationFrame(() => {
-                                            window.requestAnimationFrame(() => {
-                                              if (quickDraggingRowRef.current) {
-                                                quickDraggingRowRef.current.classList.add('goal-task-row--collapsed')
-                                              }
-                                            })
+                                            collapseQuickListDetailsForDrag(item.id)
                                           })
-                                          // Defer state update to avoid interfering with drag initialization
-                                          setTimeout(() => collapseAllTaskDetailsForDrag(item.id), 0)
+                                          
                                           ;(window as any).__quickDragInfo = { section: 'completed', index }
                                         }}
                                         onDragEnd={() => {
