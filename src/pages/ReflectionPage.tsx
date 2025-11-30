@@ -2712,6 +2712,11 @@ const computeRangeOverview = (
 export default function ReflectionPage() {
   type CalendarViewMode = 'day' | '3d' | 'week' | 'month' | 'year'
   const [calendarView, setCalendarView] = useState<CalendarViewMode>('3d')
+  const calendarViewRef = useRef<CalendarViewMode>(calendarView)
+  
+  useEffect(() => {
+    calendarViewRef.current = calendarView
+  }, [calendarView])
   // No explicit visibility gating; transforms are guarded until measured
   const [multiDayCount, setMultiDayCount] = useState<number>(6)
   const [showMultiDayChooser, setShowMultiDayChooser] = useState(false)
@@ -3049,19 +3054,10 @@ export default function ReflectionPage() {
         return { snap, targetOffset }
       }
 
-      // For 3d view: fast gesture always advances at least one chunk; slow controlled drag snaps based on halfway threshold
-      const quickFling = state.mode === 'hdrag' && (elapsedMs < 450 || absRaw > 0.2)
-      let snapUnits: number
-      if (quickFling) {
-        // Fast swipe: always advance at least one chunk in the swipe direction (no snap-back on fling)
-        const steps = Math.max(1, Math.round(absRaw + 0.2))
-        snapUnits = direction * steps
-      } else {
-        // Controlled drag: snap only if past halfway into the next chunk
-        snapUnits = absRaw >= 0.5 ? direction * Math.max(1, Math.round(absRaw)) : 0
-      }
-
-      const snap = snapUnits * snapUnitSpan
+      // For 3d (X day) view: free-form panning with no minimum snap
+      // Just snap to the nearest day based on where the user dragged
+      const snapUnits = Math.round(rawDays)
+      const snap = snapUnits
       const targetOffset = state.baseOffset - snap
       return { snap, targetOffset }
     },
@@ -3231,8 +3227,9 @@ const [showInlineExtras, setShowInlineExtras] = useState(false)
     }
     longPressCancelHandlersRef.current = null
   }, [])
-  // Helper: toggle global scroll lock (prevents page scroll on touch during active event drags)
-  const setPageScrollLock = (locked: boolean) => {
+  // Helper: toggle global scroll lock (prevents page scroll during active event drags)
+  // mode: 'full' = block all scrolling (for event drag), 'vertical' = block only vertical (for calendar pan)
+  const setPageScrollLock = (locked: boolean, mode: 'full' | 'vertical' = 'full') => {
     if (typeof document === 'undefined') return
     const body = document.body as HTMLBodyElement & { dataset: DOMStringMap }
     if (locked) {
@@ -3240,26 +3237,30 @@ const [showInlineExtras, setShowInlineExtras] = useState(false)
       if (body.dataset.scrollLockActive === '1') return
       body.dataset.scrollLockActive = '1'
       
-      // Use touch-action CSS to prevent scrolling (works with pointer events)
+      // Use touch-action based on mode
       const originalTouchAction = body.style.touchAction
       const originalOverscrollBehavior = body.style.overscrollBehavior
       ;(window as any).__scrollLockOriginalTouchAction = originalTouchAction
       ;(window as any).__scrollLockOriginalOverscrollBehavior = originalOverscrollBehavior
-      body.style.touchAction = 'none'
+      body.style.touchAction = mode === 'full' ? 'none' : 'pan-x'
       body.style.overscrollBehavior = 'none'
       
-      // Also prevent wheel and touchmove for completeness
+      // Prevent wheel events based on mode
       const wheelPreventer: EventListener = (e: Event) => {
-        try { e.preventDefault() } catch {}
-      }
-      const touchPreventer: EventListener = (e: Event) => {
-        try { e.preventDefault() } catch {}
+        const wheelEvent = e as WheelEvent
+        if (mode === 'full') {
+          // Block all wheel scrolling
+          try { e.preventDefault() } catch {}
+        } else {
+          // Only prevent vertical scrolling, allow horizontal
+          if (Math.abs(wheelEvent.deltaY) > Math.abs(wheelEvent.deltaX)) {
+            try { e.preventDefault() } catch {}
+          }
+        }
       }
       ;(window as any).__scrollLockWheelPreventer = wheelPreventer
-      ;(window as any).__scrollLockTouchPreventer = touchPreventer
       try { 
         window.addEventListener('wheel', wheelPreventer, { passive: false })
-        window.addEventListener('touchmove', touchPreventer, { passive: false })
       } catch {}
     } else {
       // If not locked, no-op
@@ -3284,14 +3285,9 @@ const [showInlineExtras, setShowInlineExtras] = useState(false)
       
       // Remove event preventers
       const wheelPreventer = (window as any).__scrollLockWheelPreventer as EventListener | undefined
-      const touchPreventer = (window as any).__scrollLockTouchPreventer as EventListener | undefined
       if (wheelPreventer) {
         try { window.removeEventListener('wheel', wheelPreventer) } catch {}
         delete (window as any).__scrollLockWheelPreventer
-      }
-      if (touchPreventer) {
-        try { window.removeEventListener('touchmove', touchPreventer) } catch {}
-        delete (window as any).__scrollLockTouchPreventer
       }
     }
   }
@@ -7692,7 +7688,8 @@ useEffect(() => {
   }, [multiDayCount, setView])
 
   const handleCalendarAreaPointerDown = useCallback((event: ReactPointerEvent<HTMLDivElement>) => {
-    if (!(calendarView === 'day' || calendarView === '3d' || calendarView === 'week')) {
+    const currentView = calendarViewRef.current
+    if (!(currentView === 'day' || currentView === '3d' || currentView === 'week')) {
       return
     }
     if (event.button !== 0) return
@@ -7722,7 +7719,7 @@ useEffect(() => {
       allDayEl.style.transition = ''
     }
     resetCalendarPanTransform()
-    const dayCount = calendarView === '3d' ? Math.max(2, Math.min(multiDayCount, 14)) : calendarView === 'week' ? 7 : 1
+    const dayCount = currentView === '3d' ? Math.max(2, Math.min(multiDayCount, 14)) : currentView === 'week' ? 7 : 1
     const baseOffset = calendarPanDesiredOffsetRef.current
     calendarDragRef.current = {
       pointerId: event.pointerId,
@@ -7818,7 +7815,7 @@ useEffect(() => {
         if (allDayEl) {
           allDayEl.style.transform = `translateX(${totalPx}px)`
         }
-        const { snap } = resolvePanSnap(state, dx, dayWidth, calendarView, appliedDx)
+        const { snap } = resolvePanSnap(state, dx, dayWidth, calendarViewRef.current, appliedDx)
         if (snap !== 0) {
           animateCalendarPan(snap, dayWidth, state.baseOffset)
           resetImmediately = false
@@ -7853,7 +7850,7 @@ useEffect(() => {
     window.addEventListener('pointermove', handleMove)
     window.addEventListener('pointerup', handleUp)
     window.addEventListener('pointercancel', handleUp)
-  }, [calendarView, multiDayCount, resetCalendarPanTransform, stopCalendarPanAnimation, resolvePanSnap, animateCalendarPan])
+  }, [multiDayCount, resetCalendarPanTransform, stopCalendarPanAnimation, resolvePanSnap, animateCalendarPan])
 
   // Build minimal calendar content for non-day views
   const renderCalendarContent = useCallback(() => {
@@ -8799,7 +8796,7 @@ useEffect(() => {
           // Close any open calendar popover as soon as a drag is activated
           handleCloseCalendarPreview()
           // Lock page scroll while dragging an event (for all input types)
-          setPageScrollLock(true)
+          setPageScrollLock(true, 'full')
           try { targetEl.setPointerCapture?.(ev.pointerId) } catch {}
         }
         const onMove = (e: PointerEvent) => {
@@ -8852,7 +8849,7 @@ useEffect(() => {
                         lastAppliedDx: 0,
                       }
                       try { area.setPointerCapture?.(s.pointerId) } catch {}
-                      setPageScrollLock(true)
+                      setPageScrollLock(true, 'vertical')
                       panningFromEvent = true
                     }
                   }
@@ -11331,7 +11328,7 @@ useEffect(() => {
       // Close any open calendar popover when starting a drag from timeline blocks
       handleCloseCalendarPreview()
       // Lock page scroll while dragging (for all input types)
-      setPageScrollLock(true)
+      setPageScrollLock(true, 'full')
       const rect = bar.getBoundingClientRect()
       if (!rect || rect.width <= 0) {
         return
