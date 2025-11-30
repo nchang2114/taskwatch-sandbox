@@ -11344,57 +11344,6 @@ useEffect(() => {
     [dayStart, dayEnd, handleWindowPointerMove, handleWindowPointerUp],
   )
 
-  // Start drag from native pointer event (used after mouse moves beyond threshold)
-  const startDragFromPointer = useCallback(
-    (nativeEvent: PointerEvent, segment: TimelineSegment, type: DragKind) => {
-      if (segment.entry.id === 'active-session') {
-        return
-      }
-      // Ensure primary button is pressed for mouse
-      if (nativeEvent.pointerType === 'mouse' && (nativeEvent.buttons & 1) !== 1) {
-        return
-      }
-      if (dragStateRef.current) {
-        return
-      }
-      const bar = timelineBarRef.current
-      if (!bar) {
-        return
-      }
-      const rect = bar.getBoundingClientRect()
-      if (!rect || rect.width <= 0) {
-        return
-      }
-      try {
-        nativeEvent.preventDefault()
-        bar.setPointerCapture?.(nativeEvent.pointerId)
-      } catch {}
-      // Close any open calendar popover when starting a drag via native pointer (timeline)
-      handleCloseCalendarPreview()
-      dragStateRef.current = {
-        entryId: segment.entry.id,
-        type,
-        pointerId: nativeEvent.pointerId,
-        rectWidth: rect.width,
-        startX: nativeEvent.clientX,
-        initialStart: segment.entry.startedAt,
-        initialEnd: segment.entry.endedAt,
-        dayStart,
-        dayEnd,
-        minDurationMs: MIN_SESSION_DURATION_DRAG_MS,
-        hasMoved: false,
-      }
-      dragPreventClickRef.current = false
-      dragPreviewRef.current = null
-      setDragPreview(null)
-      setHoveredDuringDragId(segment.entry.id)
-      window.addEventListener('pointermove', handleWindowPointerMove)
-      window.addEventListener('pointerup', handleWindowPointerUp)
-      window.addEventListener('pointercancel', handleWindowPointerUp)
-    },
-    [dayStart, dayEnd, handleWindowPointerMove, handleWindowPointerUp],
-  )
-
   const startCreateDrag = useCallback(
     (event: ReactPointerEvent<HTMLDivElement>, startTimestamp: number) => {
       if (event.button !== 0) {
