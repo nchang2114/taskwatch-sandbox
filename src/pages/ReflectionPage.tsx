@@ -11541,6 +11541,18 @@ useEffect(() => {
       const endBase = inspectorEntry.endedAt
       const resolvedStart = resolveTimestamp(historyDraft.startedAt, startBase)
       const resolvedEnd = resolveTimestamp(historyDraft.endedAt, endBase)
+      const shiftStartAndPreserveDuration = (nextStart: number) => {
+        setHistoryDraft((draft) => {
+          const prevStart = resolveTimestamp(draft.startedAt, startBase)
+          const prevEnd = resolveTimestamp(draft.endedAt, endBase)
+          const delta = nextStart - prevStart
+          return { ...draft, startedAt: nextStart, endedAt: prevEnd + delta }
+        })
+      }
+      const startMinutesOfDay = (() => {
+        const d = new Date(resolvedStart)
+        return d.getHours() * 60 + d.getMinutes()
+      })()
       const inspectorDateLabel = (() => {
         const startD = new Date(resolvedStart)
         const endD = new Date(resolvedEnd)

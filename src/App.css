@@ -2768,11 +2768,6 @@ html[data-theme='light'] .settings-panel__group {
   gap: 0.2rem;
   font-size: clamp(0.7rem, 1.3vw, 0.82rem);
   color: rgba(226, 234, 255, 0.85);
-  /* Prevent label container clicks from forwarding to nested controls */
-  pointer-events: none;
-}
-.history-timeline__field > * {
-  pointer-events: auto;
 }
 
 .history-timeline__field-text {
