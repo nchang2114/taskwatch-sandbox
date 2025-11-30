@@ -3234,7 +3234,6 @@ const [showInlineExtras, setShowInlineExtras] = useState(false)
   // Helper: toggle global scroll lock (prevents page scroll on touch during active event drags)
   const setPageScrollLock = (locked: boolean) => {
     if (typeof document === 'undefined') return
-    const root = document.documentElement
     const body = document.body as HTMLBodyElement & { dataset: DOMStringMap }
     if (locked) {
       // If already locked, no-op
@@ -7753,7 +7752,7 @@ useEffect(() => {
           prevTouchAction = area.style.touchAction
           area.style.touchAction = 'none'
         }
-        if (isTouch && !scrollLocked) {
+        if (!scrollLocked) {
           setPageScrollLock(true)
           scrollLocked = true
         }
@@ -8839,9 +8838,7 @@ useEffect(() => {
                         lastAppliedDx: 0,
                       }
                       try { area.setPointerCapture?.(s.pointerId) } catch {}
-                      if (isTouch) {
-                        setPageScrollLock(true)
-                      }
+                      setPageScrollLock(true)
                       panningFromEvent = true
                     }
                   }
@@ -8962,9 +8959,7 @@ useEffect(() => {
                 if (allDayEl) allDayEl.style.transform = `translateX(${base}px)`
               }
             }
-            if (isTouch) {
-              setPageScrollLock(false)
-            }
+            setPageScrollLock(false)
             calendarDragRef.current = null
             // Suppress click opening preview after a pan
             dragPreventClickRef.current = true
@@ -9293,8 +9288,8 @@ useEffect(() => {
                     calendarEventDragRef.current = state
                     dragPreviewRef.current = { entryId: 'new-entry', startedAt: state.initialStart, endedAt: state.initialEnd }
                     setDragPreview(dragPreviewRef.current)
-                    // Lock page scroll while dragging to create (touch only)
-                    if (isTouch) setPageScrollLock(true)
+                    // Lock page scroll while dragging to create
+                    setPageScrollLock(true)
                     try { targetEl.setPointerCapture?.(pointerId) } catch {}
                   }
 
@@ -9328,9 +9323,7 @@ useEffect(() => {
                       lastAppliedDx: 0,
                     }
                     try { area.setPointerCapture?.(pointerId) } catch {}
-                    if (isTouch) {
-                      setPageScrollLock(true)
-                    }
+                    setPageScrollLock(true)
                   }
 
                   const onMove = (e: PointerEvent) => {
@@ -9339,25 +9332,15 @@ useEffect(() => {
                     const dy = e.clientY - startY
                     const intent = detectPanIntent(dx, dy, { threshold: 8, horizontalDominance: 0.65 })
                     if (!startedCreate && !startedPan) {
-                      if (isTouch) {
-                        // On touch, require a hold before creating; allow horizontal pan if user slides before hold
-                        if (intent === 'horizontal') {
-                          if (touchHoldTimer !== null) { try { window.clearTimeout(touchHoldTimer) } catch {} ; touchHoldTimer = null }
-                          startPan()
-                          try { e.preventDefault() } catch {}
-                          return
-                        }
-                        // Vertical movement before hold — do nothing (avoid accidental create)
+                      // Require a hold before creating; allow horizontal pan if user slides before hold
+                      if (intent === 'horizontal') {
+                        if (touchHoldTimer !== null) { try { window.clearTimeout(touchHoldTimer) } catch {} ; touchHoldTimer = null }
+                        startPan()
+                        try { e.preventDefault() } catch {}
                         return
-                      } else {
-                        if (intent === 'horizontal') {
-                          startPan()
-                        } else if (intent === 'vertical') {
-                          startCreate()
-                        } else {
-                          return
-                        }
                       }
+                      // Vertical movement before hold — do nothing (avoid accidental create)
+                      return
                     }
                     if (startedPan) {
                       // Mirror handleCalendarAreaPointerDown's move behavior
@@ -9445,15 +9428,13 @@ useEffect(() => {
                         }
                       }
                       calendarDragRef.current = null
-                      if (isTouch) {
-                        setPageScrollLock(false)
-                      }
+                      setPageScrollLock(false)
                       return
                     }
 
                     if (startedCreate) {
                       // Release page scroll lock at the end of create drag (noop if not locked)
-                      if (isTouch) setPageScrollLock(false)
+                      setPageScrollLock(false)
                       try { targetEl.releasePointerCapture?.(pointerId) } catch {}
                       const preview = dragPreviewRef.current
                       if (preview && preview.entryId === 'new-entry') {
@@ -9497,13 +9478,11 @@ useEffect(() => {
                   window.addEventListener('pointermove', onMove)
                   window.addEventListener('pointerup', onUp)
                   window.addEventListener('pointercancel', onUp)
-                  // For touch, require a brief hold to start creation; allow pan to start immediately
-                  if (isTouch) {
-                    touchHoldTimer = window.setTimeout(() => {
-                      touchHoldTimer = null
-                      startCreate()
-                    }, 360)
-                  }
+                  // Require a hold timer to start creation for all input types
+                  touchHoldTimer = window.setTimeout(() => {
+                    touchHoldTimer = null
+                    startCreate()
+                  }, DRAG_HOLD_DURATION_MS)
                 }
                 return (
                   <div key={`col-${di}`} className="calendar-day-column" onPointerDown={handleCalendarColumnPointerDown}>
