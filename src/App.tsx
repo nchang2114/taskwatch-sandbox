@@ -8,7 +8,8 @@ import ReflectionPage from './pages/ReflectionPage'
 import FocusPage from './pages/FocusPage'
 import { FOCUS_EVENT_TYPE } from './lib/focusChannel'
 import { SCHEDULE_EVENT_TYPE } from './lib/scheduleChannel'
-import { supabase } from './lib/supabaseClient'
+import { supabase, ensureSingleUserSession } from './lib/supabaseClient'
+import { AUTH_SESSION_STORAGE_KEY } from './lib/authStorage'
 import { clearCachedSupabaseSession, readCachedSessionTokens } from './lib/authStorage'
 import { ensureQuickListUser } from './lib/quickList'
 import { ensureLifeRoutineUser } from './lib/lifeRoutines'
@@ -609,8 +610,24 @@ function MainApp() {
           exists = await checkAuthEmailExists(trimmed)
         }
         if (exists === true) {
-          const started = await handleGoogleSignIn(trimmed)
-          redirecting = started
+          if (!supabase) {
+            setAuthEmailError('Unable to sign in right now. Please try again later.')
+            return
+          }
+          const { error } = await supabase.auth.signInWithOtp({
+            email: trimmed,
+            options: {
+              emailRedirectTo: typeof window !== 'undefined' ? `${window.location.origin}/auth/callback` : undefined,
+            },
+          })
+          if (error) {
+            setAuthEmailError(error.message || 'We could not send a sign-in link. Please try again.')
+            return
+          }
+          setAuthEmailValue(trimmed)
+          setAuthEmailStage('verify')
+          setAuthVerifyError(null)
+          setAuthVerifyStatus('Check your email for a sign-in link to continue.')
           return
         }
         if (exists === false) {
@@ -812,6 +829,11 @@ function MainApp() {
     const alignLocalStoresForUser = async (userId: string | null): Promise<void> => {
       const previousUserId = lastAlignedUserIdRef.current
       const userChanged = previousUserId !== userId
+      // Do not attempt to bootstrap/sync without a valid Supabase session
+      const session = await ensureSingleUserSession()
+      if (!session && userId) {
+        return
+      }
       let migrated = false
       try {
         migrated = await bootstrapGuestDataIfNeeded(userId)
@@ -928,9 +950,10 @@ function MainApp() {
     ensureRepeatingRulesUser(null)
     setUserProfile(null)
     if (typeof window !== 'undefined') {
+      // Preserve user data; only clear auth-related keys so other tabs don't lose local state
       const preservedTheme = window.localStorage.getItem(THEME_STORAGE_KEY)
       try {
-        window.localStorage.clear()
+        window.localStorage.removeItem(AUTH_SESSION_STORAGE_KEY)
       } catch {}
       if (preservedTheme) {
         try {
