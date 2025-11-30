@@ -9267,7 +9267,6 @@ useEffect(() => {
                   const startY = ev.clientY
                   let startedCreate = false
                   let startedPan = false
-                  const isTouch = (ev as any).pointerType === 'touch'
                   let touchHoldTimer: number | null = null
 
                   const startCreate = () => {
