@@ -238,6 +238,27 @@ const storeLifeRoutinesLocal = (routines: LifeRoutineConfig[], userId?: string |
   return clones
 }
 
+// Set up cross-tab sync via storage events
+if (typeof window !== 'undefined') {
+  const handleStorageChange = (event: StorageEvent) => {
+    // Check if the change is for a life routines key
+    if (event.key && event.key.startsWith(LIFE_ROUTINE_STORAGE_KEY)) {
+      try {
+        const newValue = event.newValue
+        if (newValue) {
+          const routines = JSON.parse(newValue) as LifeRoutineConfig[]
+          // Dispatch custom event so all listeners in this tab get updated
+          window.dispatchEvent(new CustomEvent(LIFE_ROUTINE_UPDATE_EVENT, { detail: routines }))
+        }
+      } catch {
+        // ignore parse errors
+      }
+    }
+  }
+  
+  window.addEventListener('storage', handleStorageChange)
+}
+
 const readStoredLifeRoutineUserId = (): string | null => {
   if (typeof window === 'undefined') return null
   try {
@@ -543,6 +564,13 @@ export const syncLifeRoutinesWithSupabase = async (): Promise<LifeRoutineConfig[
     return storeLifeRoutinesLocal(localSanitized, session.user.id)
   }
 
-  // Both empty: persist empty locally
-  return storeLifeRoutinesLocal([], session.user.id)
+  // Both empty: check for guest data to migrate, otherwise use defaults
+  const guestRoutines = readRawLifeRoutinesLocal(LIFE_ROUTINE_GUEST_USER_ID)
+  const routinesToUse = Array.isArray(guestRoutines) && guestRoutines.length > 0
+    ? sanitizeLifeRoutineList(guestRoutines)
+    : getDefaultLifeRoutines()
+  
+  const stored = storeLifeRoutinesLocal(routinesToUse, session.user.id)
+  void pushLifeRoutinesToSupabase(stored)
+  return stored
 }

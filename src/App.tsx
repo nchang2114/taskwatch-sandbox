@@ -820,42 +820,99 @@ function MainApp() {
 
     const resetLocalStoresToGuest = (options?: { suppressGoalsSnapshot?: boolean }) => {
       ensureQuickListUser(null)
-      ensureLifeRoutineUser(null, { suppressGuestDefaults: true })
+      // Don't suppress guest defaults when signing out - user should see guest data
+      ensureLifeRoutineUser(null, { suppressGuestDefaults: false })
       ensureHistoryUser(null)
       ensureGoalsUser(null, options?.suppressGoalsSnapshot ? { suppressGuestSnapshot: true } : undefined)
       ensureRepeatingRulesUser(null)
     }
 
+    // Track pending alignment operations to prevent race conditions across tabs
+    const ALIGN_LOCK_KEY = 'nc-taskwatch-align-lock'
+    const ALIGN_LOCK_TTL_MS = 10000 // 10 seconds
+
+    const acquireAlignLock = (userId: string): boolean => {
+      if (typeof window === 'undefined') return true
+      try {
+        const raw = window.localStorage.getItem(ALIGN_LOCK_KEY)
+        const now = Date.now()
+        if (raw) {
+          try {
+            const parsed = JSON.parse(raw) as { userId: string; expiresAt: number }
+            // If lock is for same user and still valid, another tab is aligning
+            if (parsed.userId === userId && parsed.expiresAt > now) {
+              return false
+            }
+          } catch {}
+        }
+        // Acquire lock
+        const expiresAt = now + ALIGN_LOCK_TTL_MS
+        window.localStorage.setItem(ALIGN_LOCK_KEY, JSON.stringify({ userId, expiresAt }))
+        return true
+      } catch {
+        return true
+      }
+    }
+
+    const releaseAlignLock = (): void => {
+      if (typeof window === 'undefined') return
+      try {
+        window.localStorage.removeItem(ALIGN_LOCK_KEY)
+      } catch {}
+    }
+
     const alignLocalStoresForUser = async (userId: string | null): Promise<void> => {
       const previousUserId = lastAlignedUserIdRef.current
       const userChanged = previousUserId !== userId
+      
       // Do not attempt to bootstrap/sync without a valid Supabase session
       const session = await ensureSingleUserSession()
       if (!session && userId) {
         return
       }
-      let migrated = false
-      try {
-        migrated = await bootstrapGuestDataIfNeeded(userId)
-      } catch (error) {
-        console.error('[bootstrap] failed during alignLocalStoresForUser', error)
-      }
-      if (!userChanged && !migrated) {
+
+      // If user hasn't changed and no migration needed, skip alignment
+      if (!userChanged) {
         return
       }
-      if (userId) {
-        if (!migrated) {
-          resetLocalStoresToGuest({ suppressGoalsSnapshot: true })
-        }
-        ensureQuickListUser(userId)
-        ensureLifeRoutineUser(userId)
-        ensureHistoryUser(userId)
-        ensureGoalsUser(userId)
-        ensureRepeatingRulesUser(userId)
-      } else {
-        resetLocalStoresToGuest()
+
+      // Acquire lock to prevent multiple tabs from aligning simultaneously
+      if (userId && !acquireAlignLock(userId)) {
+        // Another tab is handling alignment, just update local tracking
+        lastAlignedUserIdRef.current = userId
+        return
       }
-      lastAlignedUserIdRef.current = userId
+
+      try {
+        let migrated = false
+        try {
+          migrated = await bootstrapGuestDataIfNeeded(userId)
+        } catch (error) {
+          console.error('[bootstrap] failed during alignLocalStoresForUser', error)
+        }
+
+        if (userId) {
+          if (!migrated) {
+            // Only reset and ensure if we didn't just migrate
+            // (migration already set up all data correctly)
+            resetLocalStoresToGuest({ suppressGoalsSnapshot: true })
+            ensureQuickListUser(userId)
+            ensureLifeRoutineUser(userId)
+            ensureHistoryUser(userId)
+            ensureGoalsUser(userId)
+            ensureRepeatingRulesUser(userId)
+          }
+          // If migrated=true, skip ensure calls - bootstrap already set up everything
+        } else {
+          resetLocalStoresToGuest()
+        }
+        
+        lastAlignedUserIdRef.current = userId
+      } finally {
+        if (userId) {
+          releaseAlignLock()
+        }
+      }
     }
 
     const applySessionUser = async (user: User | null | undefined): Promise<void> => {
@@ -905,13 +962,86 @@ function MainApp() {
       } catch {}
     }
 
+    // Track last session check to debounce rapid auth changes
+    let lastSessionCheckTime = 0
+    const SESSION_CHECK_DEBOUNCE_MS = 500
+
+    const recheckSession = async (options?: { skipDebounce?: boolean }) => {
+      const now = Date.now()
+      if (!options?.skipDebounce && now - lastSessionCheckTime < SESSION_CHECK_DEBOUNCE_MS) {
+        return
+      }
+      lastSessionCheckTime = now
+
+      let session: Session | null = null
+      try {
+        const { data } = await client.auth.getSession()
+        session = data.session ?? null
+      } catch {}
+      
+      if (mounted) {
+        await applySessionUser(session?.user ?? null)
+      }
+    }
+
     void bootstrapSession()
+
+    // Listen to auth state changes within this tab
     const { data: listener } = client.auth.onAuthStateChange((_event, session) => {
       void applySessionUser(session?.user ?? null)
     })
+
+    // Listen to auth changes from other tabs via storage events
+    const handleStorageChange = (event: StorageEvent) => {
+      if (event.key === AUTH_SESSION_STORAGE_KEY) {
+        // Skip debounce for sign-out events to ensure immediate response
+        const newValue = event.newValue
+        const isSignOut = !newValue || newValue === 'null' || newValue === ''
+        void recheckSession({ skipDebounce: isSignOut })
+      } else if (event.key === AUTH_PROFILE_STORAGE_KEY) {
+        // Profile was cleared from another tab (sign-out), update immediately
+        const newValue = event.newValue
+        if (!newValue || newValue === 'null' || newValue === '') {
+          void recheckSession({ skipDebounce: true })
+        }
+      } else if (event.key === THEME_STORAGE_KEY) {
+        // Theme changed in another tab
+        const newValue = event.newValue
+        if (newValue === 'light' || newValue === 'dark') {
+          setTheme(newValue)
+        }
+      }
+    }
+
+    // Validate session when tab regains focus or becomes visible
+    const handleFocus = () => {
+      void recheckSession({ skipDebounce: true })
+    }
+
+    const handleVisibilityChange = () => {
+      if (typeof document !== 'undefined' && document.visibilityState === 'visible') {
+        void recheckSession({ skipDebounce: true })
+      }
+    }
+
+    if (typeof window !== 'undefined') {
+      window.addEventListener('storage', handleStorageChange)
+      window.addEventListener('focus', handleFocus)
+      if (typeof document !== 'undefined') {
+        document.addEventListener('visibilitychange', handleVisibilityChange)
+      }
+    }
+
     return () => {
       mounted = false
       listener?.subscription.unsubscribe()
+      if (typeof window !== 'undefined') {
+        window.removeEventListener('storage', handleStorageChange)
+        window.removeEventListener('focus', handleFocus)
+        if (typeof document !== 'undefined') {
+          document.removeEventListener('visibilitychange', handleVisibilityChange)
+        }
+      }
     }
   }, [])
 
@@ -934,14 +1064,27 @@ function MainApp() {
     setIsSigningOut(true)
     setActiveTab('focus')
     closeProfileMenu()
+    
+    // Push pending history BEFORE signing out to ensure session is still valid
     if (supabase) {
       try {
         await pushPendingHistoryToSupabase()
-      } catch {}
+      } catch (err) {
+        // Silently ignore if push fails - data is still local
+        console.warn('[logout] Failed to push pending history:', err)
+      }
+    }
+    
+    // Sign out from Supabase
+    if (supabase) {
       try {
         await supabase.auth.signOut()
-      } catch {}
+      } catch (err) {
+        console.warn('[logout] Sign out error:', err)
+      }
     }
+    
+    // Clear all local state
     clearCachedSupabaseSession()
     ensureQuickListUser(null)
     ensureLifeRoutineUser(null)
@@ -954,6 +1097,10 @@ function MainApp() {
       const preservedTheme = window.localStorage.getItem(THEME_STORAGE_KEY)
       try {
         window.localStorage.removeItem(AUTH_SESSION_STORAGE_KEY)
+      } catch {}
+      try {
+        // Remove profile key to signal sign-out to other tabs
+        window.localStorage.removeItem(AUTH_PROFILE_STORAGE_KEY)
       } catch {}
       if (preservedTheme) {
         try {
@@ -1017,6 +1164,11 @@ function MainApp() {
       }
       if (typeof window !== 'undefined') {
         window.localStorage.setItem(THEME_STORAGE_KEY, value)
+        // Dispatch custom event for same-tab listeners (storage event doesn't fire in same tab)
+        try {
+          const event = new CustomEvent('nc-taskwatch:theme-update', { detail: value })
+          window.dispatchEvent(event)
+        } catch {}
       }
     },
     [],
