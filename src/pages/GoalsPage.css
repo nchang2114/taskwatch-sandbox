@@ -3931,6 +3931,9 @@ html[data-theme='light'] .goal-bucket-item--surface-neutral-grey-blue {
   overflow: hidden;
   width: max-content;
   max-width: 600px;
+  /* Force single-line height to match normal tasks - accounts for padding + line height */
+  height: auto;
+  min-height: 0;
 }
 
 /* Force any multi-line text inside the drag clone to a single line with ellipsis */
@@ -3944,6 +3947,8 @@ html[data-theme='light'] .goal-bucket-item--surface-neutral-grey-blue {
   flex: 1 1 auto;
   min-width: 0;
   display: inline-block;
+  /* Single line text */
+  line-height: normal;
 }
 
 .goal-drag-clone .goal-task-marker,
