@@ -1,6 +1,4 @@
 import { supabase, ensureSingleUserSession } from './supabaseClient'
-import { readStoredHistory, pushAllHistoryToSupabase } from './sessionHistory'
-import { readLocalRepeatingRules, pushRepeatingRulesToSupabase } from './repeatingSessions'
 import { readStoredQuickList, type QuickItem } from './quickList'
 import { ensureQuickListRemoteStructures, generateUuid } from './quickListRemote'
 import {
@@ -333,16 +331,30 @@ const migrateGoalsSnapshot = async (): Promise<void> => {
  * Multi-tab: Only the tab doing sign-up bootstraps. Other tabs skip (bootstrap_completed=true)
  */
 const migrateGuestData = async (): Promise<void> => {
-  const rules = readLocalRepeatingRules()
-  const ruleIdMap =
-    rules.length > 0 ? await pushRepeatingRulesToSupabase(rules, { strict: true }) : ({} as Record<string, string>)
+  // Skip repeating rules - they have stale references like session history
+  // const rules = readLocalRepeatingRules()
+  // if (rules.length > 0) {
+  //   await pushRepeatingRulesToSupabase(rules, { strict: true })
+  // }
 
   await migrateGoalsSnapshot()
-
-  const history = readStoredHistory()
-  if (history.length > 0) {
-    await pushAllHistoryToSupabase(ruleIdMap, undefined, { skipRemoteCheck: true, strict: true })
+  
+  // CRITICAL: Clear goals snapshot immediately after migration
+  // The snapshot has demo IDs that will cause 400 errors if used
+  if (typeof window !== 'undefined') {
+    try {
+      window.localStorage.removeItem('nc-taskwatch-goals-snapshot')
+      window.localStorage.removeItem('nc-taskwatch-goals-snapshot::__guest__')
+      window.localStorage.removeItem('nc-taskwatch-bootstrap-snapshot::goals')
+    } catch {}
   }
+
+  // Skip migrating session history - it has stale goal/bucket/task IDs
+  // that would need complex remapping. Fresh account = fresh history.
+  // const history = readStoredHistory()
+  // if (history.length > 0) {
+  //   await pushAllHistoryToSupabase(ruleIdMap, undefined, { skipRemoteCheck: true, strict: true })
+  // }
 
   // Read from snapshot first (created at sign-up), fall back to guest key
   const snapshotRoutinesRaw = typeof window !== 'undefined'
