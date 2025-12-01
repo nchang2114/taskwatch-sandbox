@@ -365,7 +365,7 @@ const migrateGuestData = async (): Promise<void> => {
     : null
   const routinesRaw = snapshotRoutinesRaw || guestRoutinesRaw
   
-  console.log('[bootstrap] Life routines migration:', {
+  console.log('[bootstrap] Daily life routines migration:', {
     hasSnapshot: !!snapshotRoutinesRaw,
     hasGuestData: !!guestRoutinesRaw,
     usingSource: snapshotRoutinesRaw ? 'snapshot' : guestRoutinesRaw ? 'guest' : 'none',
@@ -378,10 +378,10 @@ const migrateGuestData = async (): Promise<void> => {
       const parsed = JSON.parse(routinesRaw)
       if (Array.isArray(parsed) && parsed.length > 0) {
         routines = parsed
-        console.log('[bootstrap] Migrating', routines.length, 'life routines')
+        console.log('[bootstrap] Migrating', routines.length, 'daily life routines')
       }
     } catch (e) {
-      console.warn('[bootstrap] Could not parse life routines:', e)
+      console.warn('[bootstrap] Could not parse daily life routines:', e)
     }
   }
   

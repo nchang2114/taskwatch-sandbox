@@ -54,6 +54,7 @@ import {
   LIFE_ROUTINE_USER_STORAGE_KEY,
   LIFE_ROUTINE_GUEST_USER_ID,
   LIFE_ROUTINE_USER_EVENT,
+  LIFE_ROUTINES_NAME,
   type LifeRoutineConfig,
 } from '../lib/lifeRoutines'
 import {
@@ -235,7 +236,6 @@ const createTaskDetails = (overrides?: Partial<TaskDetails>): TaskDetails => ({
 
 const TASK_DETAILS_STORAGE_KEY = 'nc-taskwatch-task-details-v1'
 const QUICK_LIST_EXPANDED_STORAGE_KEY = 'nc-taskwatch-quick-list-expanded-v1'
-const LIFE_ROUTINES_NAME = 'Daily Life'
 const LIFE_ROUTINES_GOAL_ID = 'life-routines'
 const LIFE_ROUTINES_SURFACE: GoalSurfaceStyle = 'linen'
 
@@ -1071,7 +1071,7 @@ const formatGradientLabel = (value: string) =>
     .replace(' to-', ' → ')
     .replace(/-/g, ' ')
 
-// Life routine theme choices (ordered as requested)
+// Daily life routine theme choices (ordered as requested)
 const BUCKET_STYLE_CLASS_MAP: Partial<Record<BucketSurfaceStyle, string>> = {
   glass: 'goal-bucket-item--surface-glass',
   coastal: 'goal-bucket-item--surface-coastal',
@@ -12037,7 +12037,7 @@ const normalizedSearch = searchTerm.trim().toLowerCase()
                   onClick={() => setLifeRoutinesExpanded((value) => !value)}
                   aria-expanded={lifeRoutinesExpanded}
                   aria-controls="life-routines-body"
-                  aria-label={`${lifeRoutinesExpanded ? 'Collapse' : 'Expand'} daily life`}
+                  aria-label={`${lifeRoutinesExpanded ? 'Collapse' : 'Expand'} daily life routines`}
                 >
                   <span className="life-routines-card__indicator" aria-hidden="true">
                     <svg className="life-routines-card__chevron" viewBox="0 0 24 24" fill="none">
@@ -12450,7 +12450,7 @@ const normalizedSearch = searchTerm.trim().toLowerCase()
                         onClick={() => setLifeRoutinesExpanded((value) => !value)}
                         aria-expanded={lifeRoutinesExpanded}
                         aria-controls="life-routines-body"
-                        aria-label={`${lifeRoutinesExpanded ? 'Collapse' : 'Expand'} daily life`}
+                        aria-label={`${lifeRoutinesExpanded ? 'Collapse' : 'Expand'} daily life routines`}
                       >
                         <span className="life-routines-card__indicator" aria-hidden="true">
                           <svg className="life-routines-card__chevron" viewBox="0 0 24 24" fill="none">

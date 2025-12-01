@@ -154,7 +154,7 @@ html[data-theme='light'] .goal-tile {
 html[data-theme='light'] .goal-tile__open { background: rgba(92, 91, 255, 0.12); color: rgba(26, 32, 92, 0.94); border-color: rgba(128, 146, 238, 0.28); }
 html[data-theme='light'] .goal-tile__open:hover, html[data-theme='light'] .goal-tile__open:focus-visible { background: rgba(92, 91, 255, 0.2); border-color: rgba(117, 129, 236, 0.45); }
 
-/* Life routines tile styling (system layer vibes) */
+/* Daily life routines tile styling (system layer vibes) */
 .goal-tile--life {
   border-color: rgba(255, 201, 150, 0.28);
   background: linear-gradient(135deg, rgba(255, 214, 170, 0.34), rgba(255, 233, 192, 0.24));
@@ -553,9 +553,9 @@ html[data-theme='light'] .goals-layout-toggle--active { background: rgba(31, 200
 /* Anchor inside wrapper should not add extra height */
 .goals-layer--dashboard .dashboard-details .goal-details-anchor { height: 0; margin: 0; }
 
-/* Normalize spacing above details for both Daily Life card and goal list */
+/* Normalize spacing above details for both Daily Life Routines card and goal list */
 .goals-layer--dashboard .dashboard-details .life-routines-card { margin-block: 0; }
-/* Match goal list spacing to Daily Life by removing internal padding */
+/* Match goal list spacing to Daily Life Routines by removing internal padding */
 .goals-layer--dashboard .dashboard-details .goal-list { padding-top: 0; padding-bottom: 0; }
 
 /* Goals settings overlay + panel */
@@ -678,15 +678,15 @@ html[data-theme='light'] .goals-settings__toggle input:checked + .goals-settings
   gap: clamp(0.42rem, 1.5vw, 0.6rem);
 }
 
-/* Quick List: ensure separation from Daily Life card without changing inner spacing */
+/* Quick List: ensure separation from Daily Life Routines card without changing inner spacing */
 .quick-list-card {
-  /* Create breathing room above to avoid visual overlap with the Life Routines card,
+  /* Create breathing room above to avoid visual overlap with the Daily Life Routines card,
      but do NOT modify inner paddings/margins so bucket body spacing stays identical. */
   margin-top: clamp(0.6rem, 1.8vw, 0.9rem);
   /* Reduce extra space beneath before the goals list by offsetting the page gap */
   margin-bottom: calc(-1 * clamp(1.75rem, 4vw, 2.75rem) + clamp(0.6rem, 1.6vw, 0.8rem));
   /* Give Quick List a distinct, cool indigo tone so it’s visually separate
-     from the warm Daily Life layer while keeping the same component styles. */
+     from the warm Daily Life Routines layer while keeping the same component styles. */
   /* Frost-styled palette (cool, airy blues) */
   --lr-bg: linear-gradient(135deg, rgba(174, 233, 255, 0.24), rgba(142, 210, 255, 0.14));
   --lr-border: rgba(124, 222, 255, 0.24);
@@ -697,7 +697,7 @@ html[data-theme='light'] .goals-settings__toggle input:checked + .goals-settings
   --lr-pill-text: rgba(234, 250, 255, 0.98);
   --lr-pill-muted: rgba(180, 230, 255, 0.76);
   --lr-pill-marker: linear-gradient(135deg, rgba(124, 222, 255, 0.9), rgba(59, 130, 246, 0.86));
-  /* Provide the same base structure as the life routines card */
+  /* Provide the same base structure as the daily life routines card */
   padding: clamp(0.7rem, 2vw, 0.95rem) clamp(1rem, 2.5vw, 1.35rem)
            clamp(1.25rem, 2.8vw, 1.6rem) clamp(0.85rem, 2.2vw, 1.1rem);
   border-radius: 0.75rem;
@@ -708,7 +708,7 @@ html[data-theme='light'] .goals-settings__toggle input:checked + .goals-settings
   gap: clamp(0.42rem, 1.5vw, 0.6rem);
 }
 
-/* Light theme: keep Quick List cool/indigo to contrast the warm Daily Life card */
+/* Light theme: keep Quick List cool/indigo to contrast the warm Daily Life Routines card */
 html[data-theme='light'] .quick-list-card {
   /* Frost style, slightly whiter for light theme */
   --lr-bg: linear-gradient(135deg, rgba(232, 249, 255, 0.96), rgba(216, 240, 255, 0.94));
@@ -879,7 +879,7 @@ html[data-theme='light'] .quick-list-embed .life-routines-card__eyebrow {
   height: 0.9rem;
 }
 
-/* Daily Life header: bring back the indicator pill */
+/* Daily Life Routines header: bring back the indicator pill */
 .life-routines-card__indicator {
   flex: none;
   display: inline-flex;
@@ -1137,7 +1137,7 @@ html[data-theme='light'] .life-routines-card.quick-list-embed {
   --lr-pill-marker: linear-gradient(135deg, rgba(255, 210, 170, 0.74), rgba(249, 150, 74, 0.6));
 }
 
-/* New life routine theme variables */
+/* New daily life routine theme variables */
 .life-routines-card__task--surface-deep-indigo {
   --lr-pill-bg: linear-gradient(135deg, rgba(180, 184, 255, 0.34), rgba(122, 127, 232, 0.26));
   --lr-pill-border: rgba(122, 127, 232, 0.38);
@@ -1366,7 +1366,7 @@ html[data-theme='light'] .life-routines-card__task--surface-ember {
   --lr-pill-muted: rgba(134, 76, 34, 0.7);
   --lr-pill-marker: linear-gradient(135deg, rgba(253, 186, 116, 0.95), rgba(234, 88, 12, 0.88));
 }
-/* Light theme variants for new life routine surfaces */
+/* Light theme variants for new daily life routine surfaces */
 html[data-theme='light'] .life-routines-card__task--surface-deep-indigo {
   --lr-pill-bg: rgba(233, 235, 255, 0.94);
   --lr-pill-border: rgba(99, 102, 241, 0.38);
@@ -3880,7 +3880,7 @@ html[data-theme='light'] .goal-bucket-item--surface-neutral-grey-blue {
   overflow: hidden !important;
 }
 
-/* Life routine drag visuals */
+/* Daily life routine drag visuals */
 .life-routines-card__task-inner[draggable='true'] {
   cursor: grab;
 }
@@ -4628,7 +4628,7 @@ html[data-theme='light'] .goal-task-row--diff-green {
   border-color: rgba(249, 140, 52, 0.38);
 }
 
-/* New life routine preview gradients */
+/* New daily life routine preview gradients */
 .goal-customizer--life-routine .goal-customizer__surface-preview--deep-indigo {
   background: linear-gradient(135deg, rgba(180, 184, 255, 0.34), rgba(122, 127, 232, 0.26));
   border-color: rgba(122, 127, 232, 0.38);
@@ -4709,7 +4709,7 @@ html[data-theme='light'] .goal-customizer--life-routine .goal-customizer__surfac
   border-color: rgba(249, 115, 22, 0.38);
 }
 
-/* Light theme variants for new life routine previews */
+/* Light theme variants for new daily life routine previews */
 html[data-theme='light'] .goal-customizer--life-routine .goal-customizer__surface-preview--deep-indigo {
   background: rgba(233, 235, 255, 0.94);
   border-color: rgba(99, 102, 241, 0.38);

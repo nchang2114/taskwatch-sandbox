@@ -11,6 +11,28 @@ export type LifeRoutineConfig = {
   sortIndex: number
 }
 
+export const LIFE_ROUTINES_NAME = 'Daily Life Routines'
+export const LIFE_ROUTINE_NAME_ALIASES = [LIFE_ROUTINES_NAME, 'Daily Life', 'Life Routines'] as const
+const LIFE_ROUTINE_NAME_LOOKUP = new Set<string>(
+  LIFE_ROUTINE_NAME_ALIASES.map((name) => name.toLowerCase()),
+)
+
+export const isLifeRoutineName = (value: string | null | undefined): boolean => {
+  if (typeof value !== 'string') {
+    return false
+  }
+  const normalized = value.trim().toLowerCase()
+  return normalized.length > 0 && LIFE_ROUTINE_NAME_LOOKUP.has(normalized)
+}
+
+export const normalizeLifeRoutineName = (value: string | null | undefined): string => {
+  if (typeof value !== 'string') {
+    return ''
+  }
+  const trimmed = value.trim()
+  return isLifeRoutineName(trimmed) ? LIFE_ROUTINES_NAME : trimmed
+}
+
 const SURFACE_GRADIENTS: Record<SurfaceStyle, string> = {
   glass: 'linear-gradient(135deg, #313c67 0%, #1f2952 45%, #121830 100%)',
   midnight: 'linear-gradient(135deg, #8e9bff 0%, #6c86ff 45%, #3f51b5 100%)',
@@ -246,7 +268,7 @@ const storeLifeRoutinesLocal = (routines: LifeRoutineConfig[], userId?: string |
 // Set up cross-tab sync via storage events
 if (typeof window !== 'undefined') {
   const handleStorageChange = (event: StorageEvent) => {
-    // Check if the change is for a life routines key
+    // Check if the change is for a daily life routines key
     if (event.key && event.key.startsWith(LIFE_ROUTINE_STORAGE_KEY)) {
       try {
         const newValue = event.newValue
@@ -384,7 +406,7 @@ export const pushLifeRoutinesToSupabase = async (
   }
   const session = await ensureSingleUserSession()
   if (!session) {
-    fail('No Supabase session for life routines sync')
+    fail('No Supabase session for daily life routines sync')
     return
   }
 
@@ -411,14 +433,14 @@ export const pushLifeRoutinesToSupabase = async (
     .eq('user_id', session.user.id)
 
   if (remoteIdsError) {
-    fail('Failed to load remote life routines', remoteIdsError)
+    fail('Failed to load remote daily life routines', remoteIdsError)
     return
   }
 
   if (rows.length > 0) {
     const { error: upsertError } = await supabase.from('life_routines').upsert(rows, { onConflict: 'id' })
     if (upsertError) {
-      fail('Failed to upsert life routines', upsertError)
+      fail('Failed to upsert daily life routines', upsertError)
       return
     }
   }
@@ -434,7 +456,7 @@ export const pushLifeRoutinesToSupabase = async (
   if (idsToDelete.length > 0) {
     const { error: deleteError } = await supabase.from('life_routines').delete().in('id', idsToDelete)
     if (deleteError) {
-      fail('Failed to prune remote life routines', deleteError)
+      fail('Failed to prune remote daily life routines', deleteError)
     }
   }
 }

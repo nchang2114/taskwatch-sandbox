@@ -38,6 +38,8 @@ import {
   readStoredLifeRoutines,
   sanitizeLifeRoutineList,
   syncLifeRoutinesWithSupabase,
+  LIFE_ROUTINES_NAME,
+  isLifeRoutineName,
   type LifeRoutineConfig,
 } from '../lib/lifeRoutines'
 import {
@@ -497,7 +499,6 @@ type PieArc = {
 
 const UNCATEGORISED_LABEL = 'Uncategorised'
 const CHART_COLORS = ['#6366f1', '#22d3ee', '#f97316', '#f472b6', '#a855f7', '#4ade80', '#60a5fa', '#facc15', '#38bdf8', '#fb7185']
-const LIFE_ROUTINES_NAME = 'Daily Life'
 const LIFE_ROUTINES_SURFACE: SurfaceStyle = 'linen'
 // Snapback virtual goal
 // Session History: use orange→crimson gradient
@@ -506,19 +507,18 @@ const SNAPBACK_NAME = 'Snapback'
 const SNAPBACK_SURFACE: SurfaceStyle = 'ember'
 const SNAPBACK_COLOR_INFO: GoalColorInfo = {
   gradient: {
-    css: 'linear-gradient(135deg, #fb923c 0%, #ef4444 50%, #991b1b 100%)',
-    start: '#fb923c',
-    end: '#991b1b',
-    angle: 135,
+    css: 'linear-gradient(315deg, #fc9842 0%, #fe5f75 74%)',
+    start: '#fc9842',
+    end: '#fe5f75',
+    angle: 315,
     stops: [
-      { color: '#fb923c', position: 0 },
-      { color: '#ef4444', position: 0.5 },
-      { color: '#991b1b', position: 1 },
+      { color: '#fc9842', position: 0 },
+      { color: '#fe5f75', position: 0.74 },
     ],
   },
-  solidColor: '#ef4444',
+  solidColor: '#fe5f75',
 }
-// Removed default surface lookup; life routine surfaces are derived only from user data.
+// Removed default surface lookup; daily life routine surfaces are derived only from user data.
 
 type SurfaceGradientInfo = {
   gradient: string
@@ -2501,8 +2501,7 @@ const resolveGoalMetadata = (
     return { label: SNAPBACK_NAME, colorInfo: SNAPBACK_COLOR_INFO }
   }
   const isLifeRoutineEntry =
-    (goalNameRaw && normalizedGoalName === LIFE_ROUTINES_NAME.toLowerCase()) ||
-    (bucketNameRaw && lifeRoutineSurfaceLookup.has(normalizedBucketName))
+    isLifeRoutineName(goalNameRaw) || (bucketNameRaw && lifeRoutineSurfaceLookup.has(normalizedBucketName))
 
   if (isLifeRoutineEntry) {
     const routineSurface =
@@ -3196,7 +3195,7 @@ const [showInlineExtras, setShowInlineExtras] = useState(false)
   // Double-tap (touch) to edit
   const lastTapRef = useRef<{ time: number; id: string; x: number; y: number } | null>(null)
   const lastTapTimeoutRef = useRef<number | null>(null)
-  // One-time auto-fill guard for session name when selecting Life Routine bucket
+  // One-time auto-fill guard for session name when selecting a daily life routine bucket
   const taskNameAutofilledRef = useRef(false)
   const lastCommittedHistoryDraftRef = useRef<HistoryDraftState | null>(null)
   const autoCommitFrameRef = useRef<number | null>(null)
@@ -3901,7 +3900,6 @@ const [showInlineExtras, setShowInlineExtras] = useState(false)
   }, [goalLookup, goalColorLookup, activeSession])
 
   const goalOptions = useMemo(() => {
-    const normalizedLifeRoutines = LIFE_ROUTINES_NAME.toLowerCase()
     const normalizedSnapback = SNAPBACK_NAME.toLowerCase()
     const seen = new Set<string>()
     const ordered: string[] = []
@@ -3911,7 +3909,7 @@ const [showInlineExtras, setShowInlineExtras] = useState(false)
         return
       }
       const normalized = trimmed.toLowerCase()
-      if (normalized === normalizedLifeRoutines || normalized === normalizedSnapback) {
+      if (isLifeRoutineName(trimmed) || normalized === normalizedSnapback) {
         return
       }
       if (seen.has(normalized)) {
@@ -3920,7 +3918,7 @@ const [showInlineExtras, setShowInlineExtras] = useState(false)
       seen.add(normalized)
       ordered.push(trimmed)
     })
-    // Insert Snapback option right after Life Routines
+    // Insert Snapback option right after Daily Life Routines
     return [LIFE_ROUTINES_NAME, SNAPBACK_NAME, ...ordered]
   }, [goalsSnapshot])
 
@@ -3981,7 +3979,7 @@ const [showInlineExtras, setShowInlineExtras] = useState(false)
         map.set(key, arr)
       })
     })
-    // Include Life Routine buckets mapped to the Life Routines pseudo-goal
+    // Include daily life routine buckets mapped to the Daily Life Routines pseudo-goal
     lifeRoutineBucketOptions.forEach((title) => {
       const trimmed = title.trim()
       if (!trimmed) return
@@ -4171,7 +4169,7 @@ const [showInlineExtras, setShowInlineExtras] = useState(false)
     const name = historyDraft.taskName.trim()
     const goal = historyDraft.goalName.trim()
     const bucket = historyDraft.bucketName.trim()
-    const isLifeRoutine = goal.toLowerCase() === LIFE_ROUTINES_NAME.toLowerCase()
+    const isLifeRoutine = isLifeRoutineName(goal)
     const taskExistsInBucket =
       goal.length > 0 && bucket.length > 0
         ? (tasksByGoalBucket.get(goal)?.get(bucket)?.some((t) => t.toLowerCase() === name.toLowerCase()) ?? false)
@@ -4204,20 +4202,19 @@ const [showInlineExtras, setShowInlineExtras] = useState(false)
   const subtaskSaveTimersRef = useRef<Map<string, number>>(new Map())
 
   const goalDropdownOptions = useMemo<HistoryDropdownOption[]>(() => {
-    const normalizedLifeRoutines = LIFE_ROUTINES_NAME.toLowerCase()
     const normalizedSnapback = SNAPBACK_NAME.toLowerCase()
     const optionsWithoutSpecial = resolvedGoalOptions.filter((option) => {
-      const lower = option.trim().toLowerCase()
-      return lower !== normalizedLifeRoutines && lower !== normalizedSnapback
+      const trimmed = option.trim()
+      const lower = trimmed.toLowerCase()
+      return !isLifeRoutineName(trimmed) && lower !== normalizedSnapback
     })
     const hasLifeOption =
-      resolvedGoalOptions.some((option) => option.trim().toLowerCase() === normalizedLifeRoutines) ||
-      lifeRoutineBucketOptions.length > 0
+      resolvedGoalOptions.some((option) => isLifeRoutineName(option)) || lifeRoutineBucketOptions.length > 0
     const next: HistoryDropdownOption[] = [{ value: '', label: 'No goal' }]
     if (hasLifeOption) {
       next.push({ value: LIFE_ROUTINES_NAME, label: LIFE_ROUTINES_NAME })
     }
-    // Include Snapback once, under Life Routines
+    // Include Snapback once, under Daily Life Routines
     next.push({ value: SNAPBACK_NAME, label: SNAPBACK_NAME })
     optionsWithoutSpecial.forEach((option) => {
       next.push({ value: option, label: option })
@@ -4605,9 +4602,9 @@ const [showInlineExtras, setShowInlineExtras] = useState(false)
               }
             }
           }
-          // Only auto-fill once: when choosing a Life Routine bucket, and only if name is effectively empty or default
+          // Only auto-fill once: when choosing a daily life routine bucket, and only if name is effectively empty or default
           const effectiveGoal = base.goalName.trim()
-          const isLifeRoutine = effectiveGoal.toLowerCase() === LIFE_ROUTINES_NAME.toLowerCase()
+          const isLifeRoutine = isLifeRoutineName(effectiveGoal)
           const trimmedTask = base.taskName.trim()
           const looksDefault = trimmedTask.length === 0 || /^new session$/i.test(trimmedTask)
           if (isLifeRoutine && nextBucket.length > 0 && looksDefault && !taskNameAutofilledRef.current) {
@@ -5226,13 +5223,13 @@ const [showInlineExtras, setShowInlineExtras] = useState(false)
     const bucketKey = normalizedBucketName.toLowerCase()
     const hasGoalName = normalizedGoalName.length > 0
     const hasBucketName = normalizedBucketName.length > 0
-    const lifeRoutineKey = LIFE_ROUTINES_NAME.toLowerCase()
+    const isLifeRoutine = isLifeRoutineName(normalizedGoalName)
     const resolvedGoalSurface = ensureSurfaceStyle(
       (() => {
         if (!hasGoalName) {
           return DEFAULT_SURFACE_STYLE
         }
-        if (goalKey === lifeRoutineKey) {
+        if (isLifeRoutine) {
           return LIFE_ROUTINES_SURFACE
         }
         if (goalKey === SNAPBACK_NAME.toLowerCase()) {

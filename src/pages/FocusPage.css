@@ -520,7 +520,7 @@ html[data-theme='light'] .taskwatch-layout-toggle--active { background: rgba(31,
 .task-selector__task-content { display: flex; flex-direction: column; gap: 0.45rem; min-width: 0; }
 .task-selector__task.goal-task-row .goal-task-text { display: block; color: inherit; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 100%; word-break: break-word; }
 
-/* Life routine surfaces in selector and focus */
+/* Daily life routine surfaces in selector and focus */
 .task-selector__task--life-routine { color: var(--taskwatch-life-text, var(--text-primary)); }
 .task-selector__task--life-routine .goal-task-text,
 .task-selector__task--life-routine .goal-task-text__inner { color: inherit; }
