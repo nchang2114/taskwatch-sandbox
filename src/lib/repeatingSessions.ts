@@ -136,11 +136,17 @@ const storageKeyForUser = (userId: string | null | undefined): string =>
 export const readLocalRepeatingRules = (): RepeatingSessionRule[] => {
   if (typeof window === 'undefined') return getSampleRepeatingRules()
   try {
-    const raw = window.localStorage.getItem(storageKeyForUser(readStoredRepeatingRuleUserId()))
+    const currentUserId = readStoredRepeatingRuleUserId()
+    const isGuest = !currentUserId || currentUserId === REPEATING_RULES_GUEST_USER_ID
+    const raw = window.localStorage.getItem(storageKeyForUser(currentUserId))
     if (!raw) {
-      const sample = getSampleRepeatingRules()
-      writeLocalRules(sample)
-      return sample
+      // Only auto-populate samples for guest users, not real users
+      if (isGuest) {
+        const sample = getSampleRepeatingRules()
+        writeLocalRules(sample)
+        return sample
+      }
+      return []
     }
     const arr = JSON.parse(raw)
     if (!Array.isArray(arr)) return []
@@ -148,15 +154,25 @@ export const readLocalRepeatingRules = (): RepeatingSessionRule[] => {
       .map((row) => mapRowToRule(row))
       .filter(Boolean) as RepeatingSessionRule[]
     if (mapped.length === 0) {
+      // Only auto-populate samples for guest users, not real users
+      if (isGuest) {
+        const sample = getSampleRepeatingRules()
+        writeLocalRules(sample)
+        return sample
+      }
+      return []
+    }
+    return mapped
+  } catch {
+    // Only auto-populate samples on error for guest users
+    const currentUserId = readStoredRepeatingRuleUserId()
+    const isGuest = !currentUserId || currentUserId === REPEATING_RULES_GUEST_USER_ID
+    if (isGuest) {
       const sample = getSampleRepeatingRules()
       writeLocalRules(sample)
       return sample
     }
-    return mapped
-  } catch {
-    const sample = getSampleRepeatingRules()
-    writeLocalRules(sample)
-    return sample
+    return []
   }
 }
 
@@ -358,7 +374,7 @@ const setStoredRepeatingRuleUserId = (userId: string | null): void => {
 const normalizeRepeatingRuleUserId = (userId: string | null | undefined): string =>
   typeof userId === 'string' && userId.trim().length > 0 ? userId.trim() : REPEATING_RULES_GUEST_USER_ID
 
-export const ensureRepeatingRulesUser = (userId: string | null): void => {
+export const ensureRepeatingRulesUser = async (userId: string | null): Promise<void> => {
   if (typeof window === 'undefined') return
   const normalized = normalizeRepeatingRuleUserId(userId)
   const current = readStoredRepeatingRuleUserId()
@@ -369,10 +385,47 @@ export const ensureRepeatingRulesUser = (userId: string | null): void => {
   if (normalized === REPEATING_RULES_GUEST_USER_ID) {
     writeLocalRules(getSampleRepeatingRules())
   } else {
+    // Clear old data immediately to prevent showing stale guest rules
     writeLocalRules([])
     writeActivationMap({})
     writeEndMap({})
+    
+    // Fetch from database
+    try {
+      await syncRepeatingRulesFromSupabase()
+    } catch (err) {
+      console.error('[repeatingSessions] Failed to sync from DB:', err)
+    }
   }
+}
+
+export const syncRepeatingRulesFromSupabase = async (): Promise<RepeatingSessionRule[]> => {
+  if (!supabase) {
+    return []
+  }
+  const session = await ensureSingleUserSession()
+  if (!session?.user?.id) {
+    return []
+  }
+  
+  const { data, error } = await supabase
+    .from('repeating_sessions')
+    .select('*')
+    .eq('user_id', session.user.id)
+    .order('created_at', { ascending: true })
+  
+  if (error) {
+    console.error('[repeatingSessions] Fetch error:', error)
+    return []
+  }
+  
+  if (!Array.isArray(data)) {
+    return []
+  }
+  
+  const rules = data.map(mapRowToRule).filter(Boolean) as RepeatingSessionRule[]
+  writeLocalRules(rules)
+  return rules
 }
 
 const mapRowToRule = (row: any): RepeatingSessionRule | null => {
@@ -627,6 +680,12 @@ export async function createRepeatingRuleForEntry(
     const act = readActivationMap()
     act[merged.id] = activationMs
     writeActivationMap(act)
+    
+    // Update local cache so other tabs see it via storage events
+    const current = readLocalRepeatingRules()
+    const next = [...current, merged]
+    writeLocalRules(next)
+    
     return merged
   }
   return rule
