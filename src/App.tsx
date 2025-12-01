@@ -10,10 +10,10 @@ import { FOCUS_EVENT_TYPE } from './lib/focusChannel'
 import { SCHEDULE_EVENT_TYPE } from './lib/scheduleChannel'
 import { supabase, ensureSingleUserSession } from './lib/supabaseClient'
 import { AUTH_SESSION_STORAGE_KEY } from './lib/authStorage'
-import { clearCachedSupabaseSession, readCachedSessionTokens } from './lib/authStorage'
+import { readCachedSessionTokens } from './lib/authStorage'
 import { ensureQuickListUser } from './lib/quickList'
 import { ensureLifeRoutineUser } from './lib/lifeRoutines'
-import { ensureHistoryUser, pushPendingHistoryToSupabase } from './lib/sessionHistory'
+import { ensureHistoryUser } from './lib/sessionHistory'
 import { ensureRepeatingRulesUser } from './lib/repeatingSessions'
 import { bootstrapGuestDataIfNeeded } from './lib/bootstrap'
 import { ensureGoalsUser } from './lib/goalsSync'
@@ -688,6 +688,35 @@ function MainApp() {
       setAuthCreateError(null)
       setAuthVerifyStatus(null)
       setAuthCreateSubmitting(true)
+      
+      // Snapshot guest data before sign-up so bootstrap can migrate it
+      // even if another tab signs out and clears localStorage
+      if (typeof window !== 'undefined') {
+        try {
+          const guestRoutines = window.localStorage.getItem('nc-taskwatch-life-routines::__guest__')
+          const guestQuickList = window.localStorage.getItem('nc-taskwatch-quicklist::__guest__')
+          const guestGoals = window.localStorage.getItem('nc-taskwatch-goals-snapshot::__guest__')
+          const guestHistory = window.localStorage.getItem('nc-taskwatch-session-history::__guest__')
+          const guestRepeating = window.localStorage.getItem('nc-taskwatch-repeating-rules::__guest__')
+          
+          console.log('[signup] Snapshotting guest data:', {
+            routines: guestRoutines ? JSON.parse(guestRoutines).length : 0,
+            quickList: guestQuickList ? JSON.parse(guestQuickList).length : 0,
+            goals: guestGoals ? 'exists' : 'none',
+            history: guestHistory ? JSON.parse(guestHistory).length : 0,
+            repeating: guestRepeating ? JSON.parse(guestRepeating).length : 0,
+          })
+          
+          if (guestRoutines) window.localStorage.setItem('nc-taskwatch-bootstrap-snapshot::life-routines', guestRoutines)
+          if (guestQuickList) window.localStorage.setItem('nc-taskwatch-bootstrap-snapshot::quick-list', guestQuickList)
+          if (guestGoals) window.localStorage.setItem('nc-taskwatch-bootstrap-snapshot::goals', guestGoals)
+          if (guestHistory) window.localStorage.setItem('nc-taskwatch-bootstrap-snapshot::history', guestHistory)
+          if (guestRepeating) window.localStorage.setItem('nc-taskwatch-bootstrap-snapshot::repeating', guestRepeating)
+        } catch (e) {
+          console.warn('[signup] Could not snapshot guest data:', e)
+        }
+      }
+      
       try {
         const { data, error } = await supabase.auth.signUp({
           email: trimmedEmail,
@@ -818,18 +847,49 @@ function MainApp() {
     const client = supabase
     let mounted = true
 
-    const resetLocalStoresToGuest = (options?: { suppressGoalsSnapshot?: boolean }) => {
+    const resetLocalStoresToGuest = () => {
+      // Clear all guest data for fresh defaults
+      if (typeof window !== 'undefined') {
+        try {
+          window.localStorage.removeItem('nc-taskwatch-life-routines::__guest__')
+          window.localStorage.removeItem('nc-taskwatch-quicklist::__guest__')
+          window.localStorage.removeItem('nc-taskwatch-session-history::__guest__')
+          window.localStorage.removeItem('nc-taskwatch-repeating-rules::__guest__')
+          window.localStorage.removeItem('nc-taskwatch-goals-snapshot::__guest__')
+        } catch {}
+      }
+      // Initialize fresh guest defaults
       ensureQuickListUser(null)
-      // Don't suppress guest defaults when signing out - user should see guest data
       ensureLifeRoutineUser(null, { suppressGuestDefaults: false })
       ensureHistoryUser(null)
-      ensureGoalsUser(null, options?.suppressGoalsSnapshot ? { suppressGuestSnapshot: true } : undefined)
+      ensureGoalsUser(null)
       ensureRepeatingRulesUser(null)
     }
 
     // Track pending alignment operations to prevent race conditions across tabs
     const ALIGN_LOCK_KEY = 'nc-taskwatch-align-lock'
     const ALIGN_LOCK_TTL_MS = 10000 // 10 seconds
+    const ALIGN_COMPLETE_KEY = 'nc-taskwatch-align-complete'
+
+    const isAlignmentComplete = (userId: string): boolean => {
+      if (typeof window === 'undefined') return false
+      try {
+        const raw = window.localStorage.getItem(ALIGN_COMPLETE_KEY)
+        if (!raw) return false
+        const parsed = JSON.parse(raw) as { userId: string; timestamp: number }
+        // Check if alignment was completed for this user in the last 30 seconds
+        return parsed.userId === userId && Date.now() - parsed.timestamp < 30000
+      } catch {
+        return false
+      }
+    }
+
+    const markAlignmentComplete = (userId: string): void => {
+      if (typeof window === 'undefined') return
+      try {
+        window.localStorage.setItem(ALIGN_COMPLETE_KEY, JSON.stringify({ userId, timestamp: Date.now() }))
+      } catch {}
+    }
 
     const acquireAlignLock = (userId: string): boolean => {
       if (typeof window === 'undefined') return true
@@ -866,6 +926,7 @@ function MainApp() {
       const userChanged = previousUserId !== userId
       
       // Do not attempt to bootstrap/sync without a valid Supabase session
+      // EXCEPT when signing out (userId is null) - we need to reset to guest
       const session = await ensureSingleUserSession()
       if (!session && userId) {
         return
@@ -876,10 +937,29 @@ function MainApp() {
         return
       }
 
+      // Check if alignment was already completed by another tab
+      if (userId && isAlignmentComplete(userId)) {
+        lastAlignedUserIdRef.current = userId
+        return
+      }
+
       // Acquire lock to prevent multiple tabs from aligning simultaneously
       if (userId && !acquireAlignLock(userId)) {
-        // Another tab is handling alignment, just update local tracking
+        // Another tab is handling alignment
+        // Just update tracking - the winning tab will sync data via storage events
         lastAlignedUserIdRef.current = userId
+        
+        // Still need to set the user ID in each module so they know which user to track
+        // but DON'T trigger syncs (they'll get data via storage events from the winning tab)
+        if (typeof window !== 'undefined') {
+          try {
+            window.localStorage.setItem('nc-taskwatch-quicklist-user-id', userId)
+            window.localStorage.setItem('nc-taskwatch-life-routine-user-id', userId)
+            window.localStorage.setItem('nc-taskwatch-session-history-user-id', userId)
+            window.localStorage.setItem('nc-taskwatch-goals-user-id', userId)
+            window.localStorage.setItem('nc-taskwatch-repeating-rules-user-id', userId)
+          } catch {}
+        }
         return
       }
 
@@ -892,19 +972,30 @@ function MainApp() {
         }
 
         if (userId) {
-          if (!migrated) {
-            // Only reset and ensure if we didn't just migrate
-            // (migration already set up all data correctly)
-            resetLocalStoresToGuest({ suppressGoalsSnapshot: true })
+          if (migrated) {
+            // Bootstrap cleared guest data, now initialize user data from DB
+            ensureQuickListUser(userId)
+            ensureLifeRoutineUser(userId)
+            ensureHistoryUser(userId)
+            ensureGoalsUser(userId)
+            ensureRepeatingRulesUser(userId)
+          } else {
+            // User already bootstrapped, just fetch from DB
+            // Don't reset - just ensure user data is loaded
             ensureQuickListUser(userId)
             ensureLifeRoutineUser(userId)
             ensureHistoryUser(userId)
             ensureGoalsUser(userId)
             ensureRepeatingRulesUser(userId)
           }
-          // If migrated=true, skip ensure calls - bootstrap already set up everything
         } else {
+          // Signing out - clear everything and show fresh guest defaults
           resetLocalStoresToGuest()
+        }
+        
+        // Mark alignment as complete so other tabs don't retry
+        if (userId) {
+          markAlignmentComplete(userId)
         }
         
         lastAlignedUserIdRef.current = userId
@@ -923,6 +1014,18 @@ function MainApp() {
           setAuthModalOpen(false)
         }
       }
+      
+      // Skip alignment if we're in the middle of signing out
+      // (we're about to reload anyway, no point triggering syncs)
+      if (typeof window !== 'undefined') {
+        try {
+          const signingOut = window.sessionStorage.getItem('nc-taskwatch-signing-out')
+          if (signingOut === 'true') {
+            return
+          }
+        } catch {}
+      }
+      
       await alignLocalStoresForUser(user?.id ?? null)
     }
 
@@ -997,12 +1100,21 @@ function MainApp() {
         // Skip debounce for sign-out events to ensure immediate response
         const newValue = event.newValue
         const isSignOut = !newValue || newValue === 'null' || newValue === ''
-        void recheckSession({ skipDebounce: isSignOut })
+        if (isSignOut) {
+          // Another tab signed out - reload this tab to reset to guest mode
+          if (typeof window !== 'undefined') {
+            window.location.reload()
+          }
+        } else {
+          void recheckSession({ skipDebounce: false })
+        }
       } else if (event.key === AUTH_PROFILE_STORAGE_KEY) {
-        // Profile was cleared from another tab (sign-out), update immediately
+        // Profile was cleared from another tab (sign-out), reload to reset to guest
         const newValue = event.newValue
         if (!newValue || newValue === 'null' || newValue === '') {
-          void recheckSession({ skipDebounce: true })
+          if (typeof window !== 'undefined') {
+            window.location.reload()
+          }
         }
       } else if (event.key === THEME_STORAGE_KEY) {
         // Theme changed in another tab
@@ -1065,14 +1177,11 @@ function MainApp() {
     setActiveTab('focus')
     closeProfileMenu()
     
-    // Push pending history BEFORE signing out to ensure session is still valid
-    if (supabase) {
+    // Set flag to skip alignment (we're about to reload anyway)
+    if (typeof window !== 'undefined') {
       try {
-        await pushPendingHistoryToSupabase()
-      } catch (err) {
-        // Silently ignore if push fails - data is still local
-        console.warn('[logout] Failed to push pending history:', err)
-      }
+        window.sessionStorage.setItem('nc-taskwatch-signing-out', 'true')
+      } catch {}
     }
     
     // Sign out from Supabase
@@ -1084,35 +1193,17 @@ function MainApp() {
       }
     }
     
-    // Clear all local state
-    clearCachedSupabaseSession()
-    ensureQuickListUser(null)
-    ensureLifeRoutineUser(null)
-    ensureHistoryUser(null)
-    ensureGoalsUser(null)
-    ensureRepeatingRulesUser(null)
-    setUserProfile(null)
+    // Clear auth keys to signal sign-out to other tabs
     if (typeof window !== 'undefined') {
-      // Preserve user data; only clear auth-related keys so other tabs don't lose local state
-      const preservedTheme = window.localStorage.getItem(THEME_STORAGE_KEY)
       try {
         window.localStorage.removeItem(AUTH_SESSION_STORAGE_KEY)
       } catch {}
       try {
-        // Remove profile key to signal sign-out to other tabs
         window.localStorage.removeItem(AUTH_PROFILE_STORAGE_KEY)
       } catch {}
-      if (preservedTheme) {
-        try {
-          window.localStorage.setItem(THEME_STORAGE_KEY, preservedTheme)
-        } catch {}
-      }
-      try {
-        window.localStorage.setItem(QUICK_LIST_EXPANDED_STORAGE_KEY, 'false')
-      } catch {}
-      window.setTimeout(() => {
-        window.location.replace(window.location.origin)
-      }, 10)
+      // Immediately reload - don't try to clean up state, just reload
+      // The reload will handle resetting everything to guest defaults
+      window.location.reload()
     }
   }, [closeProfileMenu, setActiveTab, setIsSigningOut])
 
