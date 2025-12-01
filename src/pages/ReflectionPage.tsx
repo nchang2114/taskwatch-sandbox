@@ -8424,12 +8424,16 @@ useEffect(() => {
               notes: '',
               subtasks: [],
             }
+            // Check if this guide is being dragged and use preview times
+            const isPreviewed = dragPreview && dragPreview.entryId === entry.id
+            const previewStart = isPreviewed ? dragPreview.startedAt : startedAt
+            const previewEnd = isPreviewed ? dragPreview.endedAt : endedAt
             return {
               entry,
-              start: Math.max(startedAt, startMs),
-              end: Math.min(endedAt, endMs),
-              previewStart: startedAt,
-              previewEnd: endedAt,
+              start: Math.max(previewStart, startMs),
+              end: Math.min(previewEnd, endMs),
+              previewStart,
+              previewEnd,
             }
           }
 
@@ -8760,13 +8764,20 @@ useEffect(() => {
   let touchHoldTimer: number | null = null
   let panningFromEvent = false
   let holdCancelled = false
+        // Track guide materialization info to defer state update until drag completes
+        let guideMaterialization: { realEntry: HistoryEntry; ruleId: string; ymd: string } | null = null
+        // Prevent page scroll immediately during hold period (before activation)
+        setPageScrollLock(true, 'full')
         const activateDrag = () => {
           const s = calendarEventDragRef.current
           if (!s || s.activated) return
           s.activated = true
           // Clear any calendar pan state to prevent panning while dragging
           calendarDragRef.current = null
-          // If dragging a guide (repeating) entry, materialize it now so all drag/resize semantics match real entries
+          // Lock page scroll while dragging an event FIRST, before any DOM changes
+          setPageScrollLock(true, 'full')
+          // If dragging a guide (repeating) entry, prepare materialization but don't update state yet
+          // This prevents React re-render from breaking pointer capture during drag
           if (entry.id.startsWith('repeat:')) {
             try {
               const parts = entry.id.split(':')
@@ -8780,34 +8791,14 @@ useEffect(() => {
                 originalTime: entry.startedAt,
                 futureSession: true,
               }
-              updateHistory((current) => {
-                const next = [...current, realEntry]
-                next.sort((a, b) => a.startedAt - b.startedAt)
-                return next
-              })
-              // Persist an exception so future guide synthesis for this occurrence is suppressed even if tags get dropped remotely
-              try {
-                void upsertRepeatingException({
-                  routineId: ruleId,
-                  occurrenceDate: ymd,
-                  action: 'rescheduled',
-                  newStartedAt: realEntry.startedAt,
-                  newEndedAt: realEntry.endedAt,
-                  notes: null,
-                })
-                // Attempt to retire the rule if its window is complete
-                void evaluateAndMaybeRetireRule(ruleId)
-              } catch {}
-              // Update the drag state to reference the new real entry id and baseline times
-              s.entryId = realEntry.id
-              s.initialStart = realEntry.startedAt
-              s.initialEnd = realEntry.endedAt
+              // Store materialization info to apply after drag completes
+              guideMaterialization = { realEntry, ruleId, ymd }
+              // Keep using the guide entry ID in drag state so preview matches DOM
+              // The materialized ID will be used when committing to history
             } catch {}
           }
           // Close any open calendar popover as soon as a drag is activated
           handleCloseCalendarPreview()
-          // Lock page scroll while dragging an event (for all input types)
-          setPageScrollLock(true, 'full')
           try { targetEl.setPointerCapture?.(ev.pointerId) } catch {}
         }
         const onMove = (e: PointerEvent) => {
@@ -8882,6 +8873,9 @@ useEffect(() => {
                     }
                   }
                   return
+                } else {
+                  // Not horizontal intent - release scroll lock since we're not dragging or panning
+                  setPageScrollLock(false)
                 }
               }
               return
@@ -8988,29 +8982,79 @@ useEffect(() => {
             return
           }
           const preview = dragPreviewRef.current
+          // Check if preview matches the guide entry ID (since we kept it during drag)
           if (preview && preview.entryId === s.entryId && (preview.startedAt !== s.initialStart || preview.endedAt !== s.initialEnd)) {
             // A drag occurred and resulted in a time change; commit the change and suppress the click
             dragPreventClickRef.current = true
+            // If this was a guide task, materialize it now after drag completes
+            if (guideMaterialization) {
+              const { realEntry, ruleId, ymd } = guideMaterialization
+              // Add the materialized entry with updated times from preview
+              updateHistory((current) => {
+                const materialized = {
+                  ...realEntry,
+                  startedAt: preview.startedAt,
+                  endedAt: preview.endedAt,
+                  elapsed: Math.max(preview.endedAt - preview.startedAt, 1),
+                }
+                const next = [...current, materialized]
+                next.sort((a, b) => a.startedAt - b.startedAt)
+                return next
+              })
+              // Persist an exception so future guide synthesis is suppressed
+              try {
+                void upsertRepeatingException({
+                  routineId: ruleId,
+                  occurrenceDate: ymd,
+                  action: 'rescheduled',
+                  newStartedAt: preview.startedAt,
+                  newEndedAt: preview.endedAt,
+                  notes: null,
+                })
+                void evaluateAndMaybeRetireRule(ruleId)
+              } catch {}
+            } else {
+              // Regular entry update
+              updateHistory((current) => {
+                const idx = current.findIndex((h) => h.id === s.entryId)
+                if (idx === -1) return current
+                const target = current[idx]
+                const next = [...current]
+                const nowTs = Date.now()
+                const wasFutureSession = Boolean(target.futureSession)
+                const wasInPast = target.startedAt <= nowTs
+                const movedToFuture = preview.startedAt > nowTs
+                const isFuture = wasFutureSession || (wasInPast && movedToFuture)
+                next[idx] = {
+                  ...target,
+                  startedAt: preview.startedAt,
+                  endedAt: preview.endedAt,
+                  elapsed: Math.max(preview.endedAt - preview.startedAt, 1),
+                  futureSession: isFuture,
+                }
+                return next
+              })
+            }
+          } else if (guideMaterialization && s.activated) {
+            // Guide was activated but no time change - still need to materialize
+            const { realEntry, ruleId, ymd } = guideMaterialization
             updateHistory((current) => {
-              const idx = current.findIndex((h) => h.id === s.entryId)
-              if (idx === -1) return current
-              const target = current[idx]
-              const next = [...current]
-              const nowTs = Date.now()
-              const wasFutureSession = Boolean(target.futureSession)
-              const wasInPast = target.startedAt <= nowTs
-              const movedToFuture = preview.startedAt > nowTs
-              // Only auto-mark as planned if a confirmed past entry is moved into the future.
-              const isFuture = wasFutureSession || (wasInPast && movedToFuture)
-              next[idx] = {
-                ...target,
-                startedAt: preview.startedAt,
-                endedAt: preview.endedAt,
-                elapsed: Math.max(preview.endedAt - preview.startedAt, 1),
-                futureSession: isFuture,
-              }
+              const next = [...current, realEntry]
+              next.sort((a, b) => a.startedAt - b.startedAt)
               return next
             })
+            try {
+              void upsertRepeatingException({
+                routineId: ruleId,
+                occurrenceDate: ymd,
+                action: 'rescheduled',
+                newStartedAt: realEntry.startedAt,
+                newEndedAt: realEntry.endedAt,
+                notes: null,
+              })
+              void evaluateAndMaybeRetireRule(ruleId)
+            } catch {}
+            dragPreventClickRef.current = true
           } else {
             // If drag intent was activated (even if it snapped back to original), suppress the click-preview
             if (s.activated) {
