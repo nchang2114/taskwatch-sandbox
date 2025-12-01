@@ -3256,23 +3256,17 @@ const [showInlineExtras, setShowInlineExtras] = useState(false)
           }
         }
       }
-      // Prevent touchmove events based on mode (for fallback when pointer events don't prevent touch scrolling)
+      // Prevent touchmove as a stronger fallback for touch devices
       const touchPreventer: EventListener = (e: Event) => {
-        if (mode === 'full') {
-          // Block all touch scrolling
-          try { e.preventDefault() } catch {}
-        } else {
-          // Only prevent vertical scrolling - allow horizontal
-          // touchmove doesn't have deltaX/Y, so we prevent by default and rely on touch-action CSS
-          // to allow horizontal gestures
-          try { e.preventDefault() } catch {}
-        }
+        // Always prevent default to stop scrolling during drag
+        try { e.preventDefault() } catch {}
       }
       ;(window as any).__scrollLockWheelPreventer = wheelPreventer
       ;(window as any).__scrollLockTouchPreventer = touchPreventer
       try { 
         window.addEventListener('wheel', wheelPreventer, { passive: false })
-        window.addEventListener('touchmove', touchPreventer, { passive: false })
+        // Add touchmove preventer with capture phase to catch it early
+        window.addEventListener('touchmove', touchPreventer, { passive: false, capture: true })
       } catch {}
     } else {
       // If not locked, no-op
@@ -3303,7 +3297,7 @@ const [showInlineExtras, setShowInlineExtras] = useState(false)
         delete (window as any).__scrollLockWheelPreventer
       }
       if (touchPreventer) {
-        try { window.removeEventListener('touchmove', touchPreventer) } catch {}
+        try { window.removeEventListener('touchmove', touchPreventer, { capture: true } as any) } catch {}
         delete (window as any).__scrollLockTouchPreventer
       }
     }
