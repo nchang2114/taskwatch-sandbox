@@ -3258,7 +3258,6 @@ const [showInlineExtras, setShowInlineExtras] = useState(false)
       }
       // Prevent touchmove events based on mode (for fallback when pointer events don't prevent touch scrolling)
       const touchPreventer: EventListener = (e: Event) => {
-        const touchEvent = e as TouchEvent
         if (mode === 'full') {
           // Block all touch scrolling
           try { e.preventDefault() } catch {}
