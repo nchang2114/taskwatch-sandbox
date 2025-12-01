@@ -3922,7 +3922,7 @@ html[data-theme='light'] .goal-bucket-item--surface-neutral-grey-blue {
   z-index: 9999;
   display: flex;
   align-items: center;
-  flex-wrap: nowrap;
+  flex-wrap: nowrap !important;
   gap: 0.75rem;
   padding: 0.65rem 0.85rem;
   border-radius: 0.75rem;
@@ -3934,6 +3934,11 @@ html[data-theme='light'] .goal-bucket-item--surface-neutral-grey-blue {
   /* Force single-line height to match normal tasks - accounts for padding + line height */
   height: auto;
   min-height: 0;
+}
+
+/* Force single-line layout even if task has details */
+.goal-drag-clone .goal-task-row__content {
+  flex-wrap: nowrap !important;
 }
 
 /* Force any multi-line text inside the drag clone to a single line with ellipsis */
