@@ -18,7 +18,7 @@ export const SURFACE_STYLES = [
   // Note: corrected spelling from earlier draft 'muted-lavendar'
   'muted-lavender',
   'neutral-grey-blue',
-  // Daily life routine: additional green variants (#6EBF77/bg-green-400 family)
+  // Life routine: additional green variants (#6EBF77/bg-green-400 family)
   'leaf',
   'sprout',
   'fern',
@@ -28,7 +28,7 @@ export const SURFACE_STYLES = [
   'pine',
   'basil',
   'mint',
-  // Daily life routine: additional warm/coral variants (#FF8C69 family)
+  // Life routine: additional warm/coral variants (#FF8C69 family)
   'coral',
   'peach',
   'apricot',

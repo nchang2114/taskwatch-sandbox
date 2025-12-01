@@ -1228,7 +1228,7 @@ function MainApp() {
           }
         })
         
-        // Clear ALL user-specific daily life routine keys (both formats)
+        // Clear ALL user-specific life routine keys (both formats)
         const keysToRemove: string[] = []
         for (let i = 0; i < window.localStorage.length; i++) {
           const key = window.localStorage.key(i)

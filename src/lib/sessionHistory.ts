@@ -1,10 +1,5 @@
 import { supabase, ensureSingleUserSession } from './supabaseClient'
-import {
-  LIFE_ROUTINES_NAME,
-  isLifeRoutineName,
-  readStoredLifeRoutines,
-  LIFE_ROUTINE_UPDATE_EVENT,
-} from './lifeRoutines'
+import { readStoredLifeRoutines, LIFE_ROUTINE_UPDATE_EVENT } from './lifeRoutines'
 import {
   DEFAULT_SURFACE_STYLE,
   ensureSurfaceStyle,
@@ -288,6 +283,7 @@ const SURFACE_GRADIENTS: Record<SurfaceStyle, string> = {
 export const gradientFromSurface = (surface: SurfaceStyle | null | undefined): string =>
   (surface && SURFACE_GRADIENTS[surface]) || 'linear-gradient(135deg, #FFF8BF 0%, #FFF8BF 100%)'
 
+const LIFE_ROUTINES_NAME = 'Daily Life'
 const LIFE_ROUTINES_GOAL_ID = 'life-routines'
 const LIFE_ROUTINES_SURFACE: SurfaceStyle = 'linen'
 
@@ -345,7 +341,7 @@ const applyLifeRoutineSurfaces = (
     }
     const isDailyLifeRecord =
       record.goalId === LIFE_ROUTINES_GOAL_ID ||
-      isLifeRoutineName(record.goalName) ||
+      record.goalName === LIFE_ROUTINES_NAME ||
       (typeof record.bucketId === 'string' && record.bucketId.startsWith('life-'))
     if (!isDailyLifeRecord) {
       return record
@@ -891,7 +887,7 @@ const sanitizeHistoryEntries = (value: unknown): HistoryEntry[] => {
       let bucketSurface = bucketSurfaceRaw ?? null
       let entryColor = typeof entryColorRaw === 'string' && entryColorRaw.trim().length > 0 ? entryColorRaw.trim() : null
 
-      if (!goalSurface && isLifeRoutineName(normalizedGoalName)) {
+      if (!goalSurface && normalizedGoalName.toLowerCase() === LIFE_ROUTINES_NAME.toLowerCase()) {
         goalSurface = LIFE_ROUTINES_SURFACE
       }
 

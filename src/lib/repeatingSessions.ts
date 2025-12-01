@@ -2,7 +2,6 @@ import { supabase, ensureSingleUserSession } from './supabaseClient'
 import type { HistoryEntry } from './sessionHistory'
 import { readStoredHistory, pruneFuturePlannedForRuleAfter, SAMPLE_SLEEP_ROUTINE_ID } from './sessionHistory'
 import { readRepeatingExceptions } from './repeatingExceptions'
-import { LIFE_ROUTINES_NAME } from './lifeRoutines'
 
 export type RepeatingSessionRule = {
   id: string
@@ -121,7 +120,7 @@ const getSampleRepeatingRules = (): RepeatingSessionRule[] => {
       timeOfDayMinutes,
       durationMinutes: 8 * 60,
       taskName: 'Sleep',
-      goalName: LIFE_ROUTINES_NAME,
+      goalName: 'Daily Life',
       bucketName: 'Sleep',
       timezone,
       createdAtMs: activationStartMs,

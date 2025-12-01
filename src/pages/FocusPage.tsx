@@ -62,8 +62,6 @@ import {
   LIFE_ROUTINE_USER_STORAGE_KEY,
   LIFE_ROUTINE_GUEST_USER_ID,
   LIFE_ROUTINE_USER_EVENT,
-  LIFE_ROUTINES_NAME,
-  isLifeRoutineName,
   type LifeRoutineConfig,
 } from '../lib/lifeRoutines'
 import {
@@ -205,6 +203,7 @@ const SNAPBACK_ACTIONS = [
 type SnapbackReasonId = (typeof SNAPBACK_REASONS)[number]['id']
 type SnapbackActionId = (typeof SNAPBACK_ACTIONS)[number]['id']
 
+const LIFE_ROUTINES_NAME = 'Daily Life'
 const LIFE_ROUTINES_GOAL_ID = 'life-routines'
 const QUICK_LIST_NAME = 'Quick List'
 const QUICK_LIST_GOAL_ID = 'quick-list'
@@ -2021,9 +2020,8 @@ useEffect(() => {
         repeatingOccurrenceDate: entryOccurrenceDate,
         repeatingOriginalTime: entryOriginalTime,
       }
-      // Daily life routine color restoration: prefer gradient from routine config
-      if (isLifeRoutineName(entry.goalName)) {
-        candidate.goalName = LIFE_ROUTINES_NAME
+      // Life routine color restoration: prefer gradient from routine config
+      if ((entry.goalName ?? '').trim().toLowerCase() === LIFE_ROUTINES_NAME.toLowerCase()) {
         const lrColor = candidate.bucketId ? lifeRoutineColorByBucket.get(candidate.bucketId) : null
         if (lrColor) {
           candidate.entryColor = lrColor
