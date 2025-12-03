@@ -649,6 +649,101 @@ const TIMEZONE_CITIES: TimezoneCity[] = [
   { value: 'Lima, Peru', label: 'Lima, Peru', searchTerms: ['lima', 'peru', 'pe'] },
   { value: 'Bogota, Colombia', label: 'Bogota, Colombia', searchTerms: ['bogota', 'colombia', 'co', 'bogotá'] },
 ]
+
+// City to IANA timezone mapping for timezone change markers
+const CITY_TO_IANA_TIMEZONE: Record<string, string> = {
+  'Sydney, Australia': 'Australia/Sydney',
+  'Melbourne, Australia': 'Australia/Melbourne',
+  'Brisbane, Australia': 'Australia/Brisbane',
+  'Perth, Australia': 'Australia/Perth',
+  'Auckland, New Zealand': 'Pacific/Auckland',
+  'Wellington, New Zealand': 'Pacific/Auckland',
+  'Tokyo, Japan': 'Asia/Tokyo',
+  'Seoul, South Korea': 'Asia/Seoul',
+  'Shanghai, China': 'Asia/Shanghai',
+  'Beijing, China': 'Asia/Shanghai',
+  'Hong Kong': 'Asia/Hong_Kong',
+  'Singapore': 'Asia/Singapore',
+  'Kuala Lumpur, Malaysia': 'Asia/Kuala_Lumpur',
+  'Bangkok, Thailand': 'Asia/Bangkok',
+  'Jakarta, Indonesia': 'Asia/Jakarta',
+  'Manila, Philippines': 'Asia/Manila',
+  'Mumbai, India': 'Asia/Kolkata',
+  'Delhi, India': 'Asia/Kolkata',
+  'Bangalore, India': 'Asia/Kolkata',
+  'Dubai, UAE': 'Asia/Dubai',
+  'Abu Dhabi, UAE': 'Asia/Dubai',
+  'Tel Aviv, Israel': 'Asia/Jerusalem',
+  'Istanbul, Turkey': 'Europe/Istanbul',
+  'Moscow, Russia': 'Europe/Moscow',
+  'London, UK': 'Europe/London',
+  'Paris, France': 'Europe/Paris',
+  'Berlin, Germany': 'Europe/Berlin',
+  'Munich, Germany': 'Europe/Berlin',
+  'Frankfurt, Germany': 'Europe/Berlin',
+  'Amsterdam, Netherlands': 'Europe/Amsterdam',
+  'Brussels, Belgium': 'Europe/Brussels',
+  'Zurich, Switzerland': 'Europe/Zurich',
+  'Vienna, Austria': 'Europe/Vienna',
+  'Rome, Italy': 'Europe/Rome',
+  'Milan, Italy': 'Europe/Rome',
+  'Madrid, Spain': 'Europe/Madrid',
+  'Barcelona, Spain': 'Europe/Madrid',
+  'Lisbon, Portugal': 'Europe/Lisbon',
+  'Dublin, Ireland': 'Europe/Dublin',
+  'Edinburgh, UK': 'Europe/London',
+  'Stockholm, Sweden': 'Europe/Stockholm',
+  'Oslo, Norway': 'Europe/Oslo',
+  'Copenhagen, Denmark': 'Europe/Copenhagen',
+  'Helsinki, Finland': 'Europe/Helsinki',
+  'Warsaw, Poland': 'Europe/Warsaw',
+  'Prague, Czech Republic': 'Europe/Prague',
+  'Athens, Greece': 'Europe/Athens',
+  'Cairo, Egypt': 'Africa/Cairo',
+  'Cape Town, South Africa': 'Africa/Johannesburg',
+  'Johannesburg, South Africa': 'Africa/Johannesburg',
+  'Lagos, Nigeria': 'Africa/Lagos',
+  'Nairobi, Kenya': 'Africa/Nairobi',
+  'New York, USA': 'America/New_York',
+  'Los Angeles, USA': 'America/Los_Angeles',
+  'San Francisco, USA': 'America/Los_Angeles',
+  'Seattle, USA': 'America/Los_Angeles',
+  'Chicago, USA': 'America/Chicago',
+  'Boston, USA': 'America/New_York',
+  'Miami, USA': 'America/New_York',
+  'Denver, USA': 'America/Denver',
+  'Austin, USA': 'America/Chicago',
+  'Honolulu, USA': 'Pacific/Honolulu',
+  'Toronto, Canada': 'America/Toronto',
+  'Vancouver, Canada': 'America/Vancouver',
+  'Montreal, Canada': 'America/Toronto',
+  'Mexico City, Mexico': 'America/Mexico_City',
+  'São Paulo, Brazil': 'America/Sao_Paulo',
+  'Rio de Janeiro, Brazil': 'America/Sao_Paulo',
+  'Buenos Aires, Argentina': 'America/Argentina/Buenos_Aires',
+  'Santiago, Chile': 'America/Santiago',
+  'Lima, Peru': 'America/Lima',
+  'Bogota, Colombia': 'America/Bogota',
+}
+
+// Get IANA timezone from city name (full "City, Country" format)
+const getIanaTimezoneForCity = (cityFullName: string): string | null => {
+  return CITY_TO_IANA_TIMEZONE[cityFullName] ?? null
+}
+
+// Get current system timezone
+const getCurrentSystemTimezone = (): string => {
+  return Intl.DateTimeFormat().resolvedOptions().timeZone
+}
+
+// Check if a city's timezone matches the current system timezone
+const isCityInCurrentTimezone = (cityFullName: string): boolean => {
+  const cityTimezone = getIanaTimezoneForCity(cityFullName)
+  if (!cityTimezone) return false
+  const currentTimezone = getCurrentSystemTimezone()
+  return cityTimezone === currentTimezone
+}
+
 // Snapback virtual goal
 // Session History: use orange→crimson gradient
 // Time Overview: we render Snapback arcs with reversed sampling (crimson→orange)
@@ -10429,14 +10524,12 @@ useEffect(() => {
                               (pev.currentTarget as HTMLElement).style.cursor = 'grab'
                             }}
                           >
-                            {/* The visible line */}
+                            {/* The visible line - matching calendar-now-line style */}
                             <div
                               style={{
                                 width: '100%',
-                                height: 'clamp(2px, 0.4vw, 3px)',
-                                borderRadius: '999px',
-                                background: 'linear-gradient(90deg, rgba(250, 72, 64, 0.96) 0%, rgba(200, 26, 26, 0.96) 100%)',
-                                boxShadow: '0 0 0 0.8px rgba(255, 255, 255, 0.24), 0 0 10px rgba(255, 72, 64, 0.45)',
+                                height: '2px',
+                                background: 'linear-gradient(90deg, #ef4444 0%, #ec4899 100%)',
                                 pointerEvents: 'none',
                               }}
                             />
@@ -11249,6 +11342,12 @@ useEffect(() => {
     }
     const goal = entry.goalName || 'No goal'
     const bucket = entry.bucketName || 'No bucket'
+    // Check if this is a timezone change marker
+    const isTimezoneChangeMarker = 
+      entry.goalName?.toLowerCase() === LIFE_ROUTINES_NAME.toLowerCase() &&
+      entry.bucketName?.trim() === TIMEZONE_CHANGE_MARKER
+    // Parse From/To cities from session name for timezone markers
+    const parsedTimezones = isTimezoneChangeMarker ? parseTimezoneFromSessionName(entry.taskName || '') : null
     const cachedSubtasks = subtasksCache.get(entry.id)
     const summarySubtasks =
       entry.id === selectedHistoryId ? historyDraft.subtasks : cachedSubtasks ?? entry.subtasks
@@ -11603,7 +11702,7 @@ useEffect(() => {
                 </button>
               </div>
             ) : null}
-            {!isGuide && isPastPlanned ? (
+            {!isGuide && !isTimezoneChangeMarker && isPastPlanned ? (
               <div className="calendar-popover__cta-row" style={{ display: 'flex', gap: '0.5rem', marginTop: '0.65rem' }}>
                 <button
                   type="button"
@@ -11640,7 +11739,7 @@ useEffect(() => {
                 </button>
               </div>
             ) : null}
-            {!isGuide && isUpcomingPlanned ? (
+            {!isGuide && !isTimezoneChangeMarker && isUpcomingPlanned ? (
               <div className="calendar-popover__cta-row" style={{ display: 'flex', gap: '0.5rem', marginTop: '0.65rem' }}>
                 <button
                   type="button"
@@ -11675,6 +11774,68 @@ useEffect(() => {
                 </button>
               </div>
             ) : null}
+            {isTimezoneChangeMarker && parsedTimezones ? (() => {
+              const fromCity = parsedTimezones.from
+              const toCity = parsedTimezones.to
+              const fromCityName = extractCityName(fromCity)
+              const toCityName = extractCityName(toCity)
+              const fromIsCurrentTz = fromCity ? isCityInCurrentTimezone(fromCity) : false
+              const toIsCurrentTz = toCity ? isCityInCurrentTimezone(toCity) : false
+              return (
+                <div className="calendar-popover__cta-row" style={{ display: 'flex', gap: '0.5rem', marginTop: '0.65rem' }}>
+                  {fromCity && (
+                    <button
+                      type="button"
+                      className={`history-timeline__action-button${fromIsCurrentTz ? ' history-timeline__action-button--selected' : ''}`}
+                      style={{
+                        flex: 1,
+                        position: 'relative',
+                        ...(fromIsCurrentTz ? {
+                          background: 'rgba(34, 197, 94, 0.15)',
+                          borderColor: 'rgba(34, 197, 94, 0.5)',
+                          color: '#22c55e',
+                        } : {}),
+                      }}
+                      onClick={() => {
+                        // For now, just close - actual timezone switching would require system settings
+                        handleCloseCalendarPreview()
+                      }}
+                      disabled={fromIsCurrentTz}
+                    >
+                      {fromIsCurrentTz && (
+                        <span style={{ marginRight: '0.35rem' }}>✓</span>
+                      )}
+                      {fromCityName || 'From'}
+                    </button>
+                  )}
+                  {toCity && (
+                    <button
+                      type="button"
+                      className={`history-timeline__action-button${toIsCurrentTz ? ' history-timeline__action-button--selected' : ''}`}
+                      style={{
+                        flex: 1,
+                        position: 'relative',
+                        ...(toIsCurrentTz ? {
+                          background: 'rgba(34, 197, 94, 0.15)',
+                          borderColor: 'rgba(34, 197, 94, 0.5)',
+                          color: '#22c55e',
+                        } : {}),
+                      }}
+                      onClick={() => {
+                        // For now, just close - actual timezone switching would require system settings
+                        handleCloseCalendarPreview()
+                      }}
+                      disabled={toIsCurrentTz}
+                    >
+                      {toIsCurrentTz && (
+                        <span style={{ marginRight: '0.35rem' }}>✓</span>
+                      )}
+                      {toCityName || 'To'}
+                    </button>
+                  )}
+                </div>
+              )
+            })() : null}
         </div>
       </div>,
       document.body,
