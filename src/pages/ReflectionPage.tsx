@@ -535,6 +535,40 @@ const generateTimezoneSessionName = (fromCity: string, toCity: string): string =
   return 'Timezone Change'
 }
 
+// Parse timezone cities from session name like "Timezone Change: Sydney to Tokyo"
+// Returns { from: "Sydney, Australia", to: "Tokyo, Japan" } by matching city names to TIMEZONE_CITIES
+const parseTimezoneFromSessionName = (sessionName: string): { from: string; to: string } => {
+  const result = { from: '', to: '' }
+  if (!sessionName.startsWith('Timezone Change')) return result
+  
+  // Extract the part after "Timezone Change: "
+  const match = sessionName.match(/^Timezone Change:\s*(.+?)\s+to\s+(.+)$/i)
+  if (!match) return result
+  
+  const [, fromCity, toCity] = match
+  
+  // Try to find matching cities in TIMEZONE_CITIES (defined below)
+  // We'll do a simple case-insensitive match on city name
+  const findCity = (cityName: string): string => {
+    if (!cityName || cityName === '...') return ''
+    const normalizedSearch = cityName.toLowerCase().trim()
+    // First try exact city name match
+    const exactMatch = TIMEZONE_CITIES.find(c => 
+      extractCityName(c.value).toLowerCase() === normalizedSearch
+    )
+    if (exactMatch) return exactMatch.value
+    // Fallback: try partial match
+    const partialMatch = TIMEZONE_CITIES.find(c =>
+      c.searchTerms.some(term => term === normalizedSearch)
+    )
+    return partialMatch?.value ?? ''
+  }
+  
+  result.from = findCity(fromCity)
+  result.to = findCity(toCity)
+  return result
+}
+
 // Timezone city options for the timezone change marker
 type TimezoneCity = {
   value: string
@@ -4487,7 +4521,6 @@ const [showInlineExtras, setShowInlineExtras] = useState(false)
   const trimmedDraftBucket = historyDraft.bucketName.trim()
   const isSnapbackGoalSelected = trimmedDraftGoal.toLowerCase() === SNAPBACK_NAME.toLowerCase()
   const isLifeRoutineGoalSelected = trimmedDraftGoal.toLowerCase() === LIFE_ROUTINES_NAME.toLowerCase()
-  const isTimezoneChangeMarker = isLifeRoutineGoalSelected && trimmedDraftBucket === TIMEZONE_CHANGE_MARKER
 
   const availableBucketOptions = useMemo(() => {
     const normalizedGoal = trimmedDraftGoal.toLowerCase()
@@ -11778,6 +11811,8 @@ useEffect(() => {
                 placeholder="Describe the focus block"
                 onChange={handleHistoryFieldChange('taskName')}
                 onKeyDown={handleHistoryFieldKeyDown}
+                readOnly={editorIsTimezoneChangeMarker}
+                style={editorIsTimezoneChangeMarker ? { opacity: 0.7, cursor: 'default' } : undefined}
               />
             </label>
             {editorIsTimezoneChangeMarker ? (
@@ -11786,26 +11821,30 @@ useEffect(() => {
                   <span className="history-timeline__field-text">From</span>
                   <TimezoneSearchDropdown
                     id={`timezone-from-editor-${calendarEditorEntryId}`}
-                    value={historyDraft.timezoneFrom}
+                    value={parseTimezoneFromSessionName(historyDraft.taskName).from}
                     placeholder="Search city (e.g. Sydney)"
-                    onChange={(value) => setHistoryDraft((draft) => ({
-                      ...draft,
-                      timezoneFrom: value,
-                      taskName: generateTimezoneSessionName(value, draft.timezoneTo),
-                    }))}
+                    onChange={(value) => setHistoryDraft((draft) => {
+                      const parsed = parseTimezoneFromSessionName(draft.taskName)
+                      return {
+                        ...draft,
+                        taskName: generateTimezoneSessionName(value, parsed.to),
+                      }
+                    })}
                   />
                 </label>
                 <label className="history-timeline__field">
                   <span className="history-timeline__field-text">To</span>
                   <TimezoneSearchDropdown
                     id={`timezone-to-editor-${calendarEditorEntryId}`}
-                    value={historyDraft.timezoneTo}
+                    value={parseTimezoneFromSessionName(historyDraft.taskName).to}
                     placeholder="Search city (e.g. New York)"
-                    onChange={(value) => setHistoryDraft((draft) => ({
-                      ...draft,
-                      timezoneTo: value,
-                      taskName: generateTimezoneSessionName(draft.timezoneFrom, value),
-                    }))}
+                    onChange={(value) => setHistoryDraft((draft) => {
+                      const parsed = parseTimezoneFromSessionName(draft.taskName)
+                      return {
+                        ...draft,
+                        taskName: generateTimezoneSessionName(parsed.from, value),
+                      }
+                    })}
                   />
                 </label>
               </>
@@ -12538,6 +12577,8 @@ useEffect(() => {
                       placeholder="Describe the focus block"
                       onChange={handleHistoryFieldChange('taskName')}
                       onKeyDown={handleHistoryFieldKeyDown}
+                      readOnly={inspectorIsTimezoneChangeMarker}
+                      style={inspectorIsTimezoneChangeMarker ? { opacity: 0.7, cursor: 'default' } : undefined}
                     />
                   </label>
                   {inspectorIsTimezoneChangeMarker ? (
@@ -12546,26 +12587,30 @@ useEffect(() => {
                         <span className="history-timeline__field-text">From</span>
                         <TimezoneSearchDropdown
                           id={`timezone-from-${calendarInspectorEntryId}`}
-                          value={historyDraft.timezoneFrom}
+                          value={parseTimezoneFromSessionName(historyDraft.taskName).from}
                           placeholder="Search city (e.g. Sydney)"
-                          onChange={(value) => setHistoryDraft((draft) => ({
-                            ...draft,
-                            timezoneFrom: value,
-                            taskName: generateTimezoneSessionName(value, draft.timezoneTo),
-                          }))}
+                          onChange={(value) => setHistoryDraft((draft) => {
+                            const parsed = parseTimezoneFromSessionName(draft.taskName)
+                            return {
+                              ...draft,
+                              taskName: generateTimezoneSessionName(value, parsed.to),
+                            }
+                          })}
                         />
                       </label>
                       <label className="history-timeline__field">
                         <span className="history-timeline__field-text">To</span>
                         <TimezoneSearchDropdown
                           id={`timezone-to-${calendarInspectorEntryId}`}
-                          value={historyDraft.timezoneTo}
+                          value={parseTimezoneFromSessionName(historyDraft.taskName).to}
                           placeholder="Search city (e.g. New York)"
-                          onChange={(value) => setHistoryDraft((draft) => ({
-                            ...draft,
-                            timezoneTo: value,
-                            taskName: generateTimezoneSessionName(draft.timezoneFrom, value),
-                          }))}
+                          onChange={(value) => setHistoryDraft((draft) => {
+                            const parsed = parseTimezoneFromSessionName(draft.taskName)
+                            return {
+                              ...draft,
+                              taskName: generateTimezoneSessionName(parsed.from, value),
+                            }
+                          })}
                         />
                       </label>
                     </>
@@ -12747,6 +12792,8 @@ useEffect(() => {
                   placeholder="Describe the focus block"
                   onChange={handleHistoryFieldChange('taskName')}
                   onKeyDown={handleHistoryFieldKeyDown}
+                  readOnly={inspectorIsTimezoneChangeMarker}
+                  style={inspectorIsTimezoneChangeMarker ? { opacity: 0.7, cursor: 'default' } : undefined}
                 />
               </label>
               {inspectorIsTimezoneChangeMarker ? (
@@ -12755,26 +12802,30 @@ useEffect(() => {
                     <span className="history-timeline__field-text">From</span>
                     <TimezoneSearchDropdown
                       id={`timezone-from-legacy-${calendarInspectorEntryId}`}
-                      value={historyDraft.timezoneFrom}
+                      value={parseTimezoneFromSessionName(historyDraft.taskName).from}
                       placeholder="Search city (e.g. Sydney)"
-                      onChange={(value) => setHistoryDraft((draft) => ({
-                        ...draft,
-                        timezoneFrom: value,
-                        taskName: generateTimezoneSessionName(value, draft.timezoneTo),
-                      }))}
+                      onChange={(value) => setHistoryDraft((draft) => {
+                        const parsed = parseTimezoneFromSessionName(draft.taskName)
+                        return {
+                          ...draft,
+                          taskName: generateTimezoneSessionName(value, parsed.to),
+                        }
+                      })}
                     />
                   </label>
                   <label className="history-timeline__field">
                     <span className="history-timeline__field-text">To</span>
                     <TimezoneSearchDropdown
                       id={`timezone-to-legacy-${calendarInspectorEntryId}`}
-                      value={historyDraft.timezoneTo}
+                      value={parseTimezoneFromSessionName(historyDraft.taskName).to}
                       placeholder="Search city (e.g. New York)"
-                      onChange={(value) => setHistoryDraft((draft) => ({
-                        ...draft,
-                        timezoneTo: value,
-                        taskName: generateTimezoneSessionName(draft.timezoneFrom, value),
-                      }))}
+                      onChange={(value) => setHistoryDraft((draft) => {
+                        const parsed = parseTimezoneFromSessionName(draft.taskName)
+                        return {
+                          ...draft,
+                          taskName: generateTimezoneSessionName(parsed.from, value),
+                        }
+                      })}
                     />
                   </label>
                 </>
