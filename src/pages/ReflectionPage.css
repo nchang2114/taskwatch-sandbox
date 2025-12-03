@@ -1205,10 +1205,10 @@ html[data-theme='light'] .snapback-list__add-input {
   .snapback-list--stack { grid-template-columns: 1fr; }
 }
 
-/* Force two-up layout on small viewports */
+/* Adjust layout on small viewports */
 @media (max-width: 560px) {
   .snapback-list {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
+    grid-template-columns: 1fr;
   }
   .snapback-item {
     padding: 0.9rem 0.8rem;
@@ -1233,7 +1233,7 @@ html[data-theme='light'] .snapback-list__add-input {
   background: rgba(26, 34, 78, 0.6);
   border-color: rgba(156, 172, 246, 0.55);
 }
-.snapback-item:hover { border-color: rgba(156, 172, 246, 0.5); background: rgba(22, 30, 68, 0.5); }
+.snapback-item:not(.snapback-item--row):hover { border-color: rgba(156, 172, 246, 0.5); background: rgba(22, 30, 68, 0.5); }
 .snapback-item:focus-visible { outline: 2px solid var(--accent, #7c8cff); outline-offset: 3px; }
 .snapback-item__row {
   display: grid;
@@ -1327,6 +1327,12 @@ html[data-theme='light'] .snapback-item__delete:focus-visible {
 /* .snapback-drawer__hint removed */
 .snapback-drawer__privacy { margin: 0.3rem 0 0; color: var(--text-secondary); font-size: 0.82rem; }
 .snapback-drawer__badge { padding: 0.28rem 0.5rem; border-radius: 0.5rem; border: 1px solid rgba(132, 148, 228, 0.4); background: rgba(255, 255, 255, 0.06); color: var(--text-primary); font-size: 0.78rem; white-space: nowrap; }
+.snapback-drawer__badge-full { display: inline; }
+.snapback-drawer__badge-short { display: none; }
+@media (max-width: 480px) {
+  .snapback-drawer__badge-full { display: none; }
+  .snapback-drawer__badge-short { display: inline; }
+}
 html[data-theme='light'] .snapback-drawer__badge { background: rgba(246, 248, 255, 0.96); border-color: rgba(160, 172, 236, 0.45); }
 /* snapback-drawer__phase removed */
 .snapback-drawer__group { display: flex; flex-direction: column; gap: 0.4rem; }
@@ -1342,7 +1348,7 @@ html[data-theme='light'] .snapback-item { background: rgba(244, 246, 255, 0.92);
 html[data-theme='light'] .snapback-item--active { background: rgba(234, 238, 255, 0.96); border-color: rgba(150, 162, 236, 0.6); }
 html[data-theme='light'] .snapback-drawer { background: rgba(248, 250, 255, 0.96); border-color: rgba(160, 172, 236, 0.45); }
 /* light theme chip removed */
-html[data-theme='light'] .snapback-item:hover { background: rgba(240, 244, 255, 0.96); border-color: rgba(150, 162, 236, 0.65); }
+html[data-theme='light'] .snapback-item:not(.snapback-item--row):hover { background: rgba(240, 244, 255, 0.96); border-color: rgba(150, 162, 236, 0.65); }
 html[data-theme='light'] .snapback-drawer__input,
 html[data-theme='light'] .snapback-drawer__textarea {
   background: rgba(255, 255, 255, 0.98);

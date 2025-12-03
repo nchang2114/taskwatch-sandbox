@@ -1039,6 +1039,14 @@ function MainApp() {
     }
 
     const bootstrapSession = async () => {
+      // Clear the signing-out flag at the start of a fresh page load
+      // This flag is only meant to block alignment during the immediate sign-out reload
+      if (typeof window !== 'undefined') {
+        try {
+          window.sessionStorage.removeItem('nc-taskwatch-signing-out')
+        } catch {}
+      }
+      
       let session: Session | null = null
       try {
         const { data } = await client.auth.getSession()
@@ -1199,9 +1207,9 @@ function MainApp() {
         window.localStorage.removeItem('nc-taskwatch-life-routines-user') // Alternative key
         window.localStorage.removeItem('nc-taskwatch-quicklist-user-id')
         window.localStorage.removeItem('nc-taskwatch-quick-list-user') // Alternative key
-        window.localStorage.removeItem('nc-taskwatch-session-history-user-id')
+        window.localStorage.removeItem('nc-taskwatch-history-user') // Correct key for history user
         window.localStorage.removeItem('nc-taskwatch-goals-user-id')
-        window.localStorage.removeItem('nc-taskwatch-repeating-rules-user-id')
+        window.localStorage.removeItem('nc-taskwatch-repeating-user') // Correct key for repeating rules user
         
         // Clear guest keys (both old and new format)
         window.localStorage.removeItem('nc-taskwatch-life-routines::__guest__')
@@ -1211,6 +1219,10 @@ function MainApp() {
         window.localStorage.removeItem('nc-taskwatch-repeating-rules::__guest__')
         window.localStorage.removeItem('nc-taskwatch-goals-snapshot::__guest__')
         
+        // Clear snapback guest data
+        window.localStorage.removeItem('nc-taskwatch-local-snapback-triggers')
+        window.localStorage.removeItem('nc-taskwatch-local-snap-plans')
+        
         // Clear non-suffixed data keys (goals, tasks, history, etc.)
         window.localStorage.removeItem('nc-taskwatch-goals-snapshot')
         window.localStorage.removeItem('nc-taskwatch-quick-list-v1')
@@ -1219,6 +1231,10 @@ function MainApp() {
         window.localStorage.removeItem('nc-taskwatch-current-session')
         window.localStorage.removeItem('nc-taskwatch-task-details-v1')
         window.localStorage.removeItem('nc-taskwatch-flags')
+        
+        // Clear alignment tracking so next sign-in runs fresh alignment
+        window.localStorage.removeItem('nc-taskwatch-align-complete')
+        window.localStorage.removeItem('nc-taskwatch-align-lock')
         
         // Clear ALL goals-related keys (for any user)
         const allKeys = Object.keys(window.localStorage)
@@ -1234,7 +1250,8 @@ function MainApp() {
           const key = window.localStorage.key(i)
           if (key && (
             (key.startsWith('nc-taskwatch-life-routines::') && key !== 'nc-taskwatch-life-routines::__guest__') ||
-            (key.startsWith('nc-taskwatch-life-routines-v1::') && key !== 'nc-taskwatch-life-routines-v1::__guest__')
+            (key.startsWith('nc-taskwatch-life-routines-v1::') && key !== 'nc-taskwatch-life-routines-v1::__guest__') ||
+            (key.startsWith('nc-taskwatch-repeating-rules::') && key !== 'nc-taskwatch-repeating-rules::__guest__')
           )) {
             keysToRemove.push(key)
           }
@@ -2364,6 +2381,12 @@ function App(): React.ReactElement {
 export default App
 
 function AuthCallbackScreen(): React.ReactElement {
+  // Apply stored theme so the callback screen respects dark/light mode
+  useEffect(() => {
+    const storedTheme = getInitialTheme()
+    document.documentElement.setAttribute('data-theme', storedTheme)
+  }, [])
+
   useEffect(() => {
     let cancelled = false
     const finalize = async () => {

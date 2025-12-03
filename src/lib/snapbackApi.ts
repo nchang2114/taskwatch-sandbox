@@ -3,7 +3,6 @@ import { supabase, ensureSingleUserSession } from './supabaseClient'
 export type DbSnapbackOverview = {
   id: string
   user_id: string
-  base_key: string
   trigger_name: string
   cue_text: string
   deconstruction_text: string
@@ -19,7 +18,7 @@ export async function fetchSnapbackOverviewRows(): Promise<DbSnapbackOverview[]>
   if (!session?.user?.id) return []
   const { data, error } = await supabase
     .from('snapback_overview')
-    .select('id, user_id, base_key, trigger_name, cue_text, deconstruction_text, plan_text, sort_index, created_at, updated_at')
+    .select('id, user_id, trigger_name, cue_text, deconstruction_text, plan_text, sort_index, created_at, updated_at')
     .eq('user_id', session.user.id)
     .order('sort_index', { ascending: true })
   if (error) {
@@ -28,80 +27,123 @@ export async function fetchSnapbackOverviewRows(): Promise<DbSnapbackOverview[]>
   return Array.isArray(data) ? (data as DbSnapbackOverview[]) : []
 }
 
-export async function upsertSnapbackOverviewByBaseKey(input: {
-  base_key: string
-  trigger_name?: string
-  cue_text?: string
-  deconstruction_text?: string
-  plan_text?: string
-  sort_index?: number
-}): Promise<DbSnapbackOverview | null> {
-  if (!supabase) return null
-  const session = await ensureSingleUserSession()
-  if (!session?.user?.id) return null
-  const payload: any = {
-    user_id: session.user.id,
-    base_key: input.base_key,
-  }
-  if (typeof input.trigger_name === 'string') payload.trigger_name = input.trigger_name
-  if (typeof input.cue_text === 'string') payload.cue_text = input.cue_text
-  if (typeof input.deconstruction_text === 'string') payload.deconstruction_text = input.deconstruction_text
-  if (typeof input.plan_text === 'string') payload.plan_text = input.plan_text
-  if (typeof input.sort_index === 'number') payload.sort_index = input.sort_index
-  const { data, error } = await supabase
-    .from('snapback_overview')
-    .upsert(payload, { onConflict: 'user_id,base_key' })
-    .select('id, user_id, base_key, trigger_name, cue_text, deconstruction_text, plan_text, sort_index, created_at, updated_at')
-  if (error) {
+export async function getOrCreateTriggerByName(trigger_name: string): Promise<DbSnapbackOverview | null> {
+  if (!supabase) {
+    console.warn('[snapbackApi] getOrCreateTriggerByName: no supabase client')
     return null
   }
-  const rows = Array.isArray(data) ? (data as DbSnapbackOverview[]) : []
-  return rows[0] ?? null
-}
-
-export async function updateSnapbackTriggerNameById(id: string, trigger_name: string): Promise<boolean> {
-  if (!supabase) return false
   const session = await ensureSingleUserSession()
-  if (!session?.user?.id) return false
-  const { error } = await supabase
-    .from('snapback_overview')
-    .update({ trigger_name })
-    .eq('id', id)
-    .eq('user_id', session.user.id)
-  if (error) {
-    return false
+  if (!session?.user?.id) {
+    console.warn('[snapbackApi] getOrCreateTriggerByName: no user session')
+    return null
   }
-  return true
-}
-
-export async function upsertSnapbackPlanByBaseKey(base_key: string, plan: {
-  cue_text?: string
-  deconstruction_text?: string
-  plan_text?: string
-  trigger_name?: string
-}): Promise<DbSnapbackOverview | null> {
-  return upsertSnapbackOverviewByBaseKey({ base_key, ...plan })
-}
-
-export async function createCustomSnapbackTrigger(trigger_name: string): Promise<DbSnapbackOverview | null> {
-  if (!supabase) return null
-  const session = await ensureSingleUserSession()
-  if (!session?.user?.id) return null
-  // Use a unique base_key to avoid collisions (custom::<uuid>)
-  const uniqueKey = `custom:${(globalThis.crypto?.randomUUID?.() ?? `${Date.now()}-${Math.random().toString(36).slice(2,8)}`)}`
+  
+  // First try to find existing trigger
+  const { data: existing, error: findError } = await supabase
+    .from('snapback_overview')
+    .select('id, user_id, trigger_name, cue_text, deconstruction_text, plan_text, sort_index, created_at, updated_at')
+    .eq('user_id', session.user.id)
+    .eq('trigger_name', trigger_name)
+    .single()
+  
+  if (existing && !findError) {
+    return existing as DbSnapbackOverview
+  }
+  
+  // Create new trigger
   const payload = {
     user_id: session.user.id,
-    base_key: uniqueKey,
     trigger_name,
     cue_text: '',
     deconstruction_text: '',
     plan_text: '',
-    sort_index: 0,
   }
   const { data, error } = await supabase
     .from('snapback_overview')
     .insert([payload])
-    .select('id, user_id, base_key, trigger_name, cue_text, deconstruction_text, plan_text, sort_index, created_at, updated_at')
+    .select('id, user_id, trigger_name, cue_text, deconstruction_text, plan_text, sort_index, created_at, updated_at')
+    .single()
+  if (error) {
+    console.error('[snapbackApi] getOrCreateTriggerByName insert error:', error)
+    return null
+  }
+  console.log('[snapbackApi] Created trigger:', trigger_name, data)
+  return data as DbSnapbackOverview
+}
+
+export async function createSnapbackTrigger(trigger_name: string): Promise<DbSnapbackOverview | null> {
+  if (!supabase) return null
+  const session = await ensureSingleUserSession()
+  if (!session?.user?.id) return null
+  const payload = {
+    user_id: session.user.id,
+    trigger_name,
+    cue_text: '',
+    deconstruction_text: '',
+    plan_text: '',
+  }
+  const { data, error } = await supabase
+    .from('snapback_overview')
+    .insert([payload])
+    .select('id, user_id, trigger_name, cue_text, deconstruction_text, plan_text, sort_index, created_at, updated_at')
+    .single()
+  if (error) {
+    console.error('[snapbackApi] createSnapbackTrigger insert error:', error)
+    return null
+  }
+  return data as DbSnapbackOverview
+}
+
+export async function updateSnapbackTriggerNameById(id: string, newName: string, oldName: string): Promise<boolean> {
+  if (!supabase) return false
+  const session = await ensureSingleUserSession()
+  if (!session?.user?.id) return false
+  
+  // Update the trigger name in snapback_overview
+  const { error: updateError } = await supabase
+    .from('snapback_overview')
+    .update({ trigger_name: newName })
+    .eq('id', id)
+    .eq('user_id', session.user.id)
+  if (updateError) {
+    return false
+  }
+  
+  // Update all session_history rows that reference the old name
+  const { error: historyError } = await supabase
+    .from('session_history')
+    .update({ bucket_name: newName })
+    .eq('user_id', session.user.id)
+    .eq('goal_name', 'Snapback')
+    .eq('bucket_name', oldName)
+  if (historyError) {
+    // Log but don't fail - trigger was renamed successfully
+    console.warn('Failed to update session history bucket names:', historyError)
+  }
+  
+  return true
+}
+
+export async function upsertSnapbackPlanById(id: string, plan: {
+  cue_text?: string
+  deconstruction_text?: string
+  plan_text?: string
+}): Promise<DbSnapbackOverview | null> {
+  if (!supabase) return null
+  const session = await ensureSingleUserSession()
+  if (!session?.user?.id) return null
+  
+  const payload: Record<string, string> = {}
+  if (typeof plan.cue_text === 'string') payload.cue_text = plan.cue_text
+  if (typeof plan.deconstruction_text === 'string') payload.deconstruction_text = plan.deconstruction_text
+  if (typeof plan.plan_text === 'string') payload.plan_text = plan.plan_text
+  
+  const { data, error } = await supabase
+    .from('snapback_overview')
+    .update(payload)
+    .eq('id', id)
+    .eq('user_id', session.user.id)
+    .select('id, user_id, trigger_name, cue_text, deconstruction_text, plan_text, sort_index, created_at, updated_at')
     .single()
   if (error) {
     return null
@@ -122,4 +164,60 @@ export async function deleteSnapbackRowById(id: string): Promise<boolean> {
     return false
   }
   return true
+}
+
+export type SnapbackTriggerPayload = {
+  trigger_name: string
+  cue_text?: string
+  deconstruction_text?: string
+  plan_text?: string
+}
+
+/**
+ * Bulk insert multiple snapback triggers (used during bootstrap migration).
+ * Skips duplicates based on trigger_name.
+ */
+export async function bulkInsertSnapbackTriggers(
+  triggers: SnapbackTriggerPayload[]
+): Promise<DbSnapbackOverview[]> {
+  if (!supabase || triggers.length === 0) return []
+  const session = await ensureSingleUserSession()
+  if (!session?.user?.id) return []
+  
+  const userId = session.user.id
+  
+  // Check for existing triggers to avoid duplicates
+  const { data: existing } = await supabase
+    .from('snapback_overview')
+    .select('trigger_name')
+    .eq('user_id', userId)
+  
+  const existingNames = new Set((existing ?? []).map((r) => r.trigger_name?.toLowerCase()))
+  
+  const newTriggers = triggers.filter(
+    (t) => t.trigger_name && !existingNames.has(t.trigger_name.toLowerCase())
+  )
+  
+  if (newTriggers.length === 0) return []
+  
+  const rows = newTriggers.map((t) => ({
+    user_id: userId,
+    trigger_name: t.trigger_name.trim(),
+    cue_text: t.cue_text ?? '',
+    deconstruction_text: t.deconstruction_text ?? '',
+    plan_text: t.plan_text ?? '',
+  }))
+  
+  const { data, error } = await supabase
+    .from('snapback_overview')
+    .insert(rows)
+    .select('id, user_id, trigger_name, cue_text, deconstruction_text, plan_text, sort_index, created_at, updated_at')
+  
+  if (error) {
+    console.error('[snapbackApi] bulkInsertSnapbackTriggers error:', error)
+    return []
+  }
+  
+  console.log('[snapbackApi] Bulk inserted', data?.length ?? 0, 'snapback triggers')
+  return Array.isArray(data) ? (data as DbSnapbackOverview[]) : []
 }

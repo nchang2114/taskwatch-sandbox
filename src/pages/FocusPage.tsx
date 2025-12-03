@@ -24,7 +24,7 @@ import {
 } from '../lib/goalsApi'
 // Repeating rules fetch not needed for selector coloring; omit imports to avoid unused warnings
 // import { readRepeatingExceptions } from '../lib/repeatingExceptions'
-import { FOCUS_EVENT_TYPE, type FocusBroadcastDetail, type FocusBroadcastEvent } from '../lib/focusChannel'
+import { FOCUS_EVENT_TYPE, PAUSE_FOCUS_EVENT_TYPE, type FocusBroadcastDetail, type FocusBroadcastEvent } from '../lib/focusChannel'
 import {
   createGoalsSnapshot,
   publishGoalsSnapshot,
@@ -73,6 +73,7 @@ import {
   QUICK_LIST_GUEST_USER_ID,
   QUICK_LIST_USER_EVENT,
   type QuickItem,
+  type QuickSubtask,
 } from '../lib/quickList'
 import { fetchQuickListRemoteItems } from '../lib/quickListRemote'
 import {
@@ -2481,15 +2482,17 @@ useEffect(() => {
     if (!focusSource) {
       return null
     }
+    // Search both goals candidates and quick list candidates
+    const allCandidates = [...focusCandidates, ...quickListFocusCandidates]
     if (focusSource.taskId) {
-      const byId = focusCandidates.find((candidate) => candidate.taskId === focusSource.taskId)
+      const byId = allCandidates.find((candidate) => candidate.taskId === focusSource.taskId)
       if (byId) {
         return byId
       }
     }
     if (focusSource.goalId && focusSource.bucketId) {
       const lower = normalizedCurrentTask.toLocaleLowerCase()
-      const byMatch = focusCandidates.find(
+      const byMatch = allCandidates.find(
         (candidate) =>
           candidate.goalId === focusSource.goalId &&
           candidate.bucketId === focusSource.bucketId &&
@@ -2500,7 +2503,7 @@ useEffect(() => {
       }
     }
     return null
-  }, [focusCandidates, focusSource, normalizedCurrentTask])
+  }, [focusCandidates, focusSource, normalizedCurrentTask, quickListFocusCandidates])
 
   const currentSessionMeta = sessionMetadataRef.current
   const sessionGoalName =
@@ -2893,11 +2896,55 @@ useEffect(() => {
     return false
   }, [])
 
+  // Helper: update Quick List item notes and subtasks, then sync to localStorage
+  const updateQuickListItemEntry = useCallback(
+    (taskId: string, entry: NotebookEntry) => {
+      setQuickListItems((current) => {
+        const index = current.findIndex((item) => item.id === taskId)
+        if (index === -1) {
+          return current
+        }
+        const item = current[index]
+        // Convert NotebookSubtask[] to QuickSubtask[]
+        const quickSubtasks: QuickSubtask[] = entry.subtasks.map((subtask) => ({
+          id: subtask.id,
+          text: subtask.text,
+          completed: subtask.completed,
+          sortIndex: subtask.sortIndex,
+          updatedAt: subtask.updatedAt ?? new Date().toISOString(),
+        }))
+        const updated: QuickItem = {
+          ...item,
+          notes: entry.notes,
+          subtasks: quickSubtasks,
+          updatedAt: new Date().toISOString(),
+        }
+        const next = [...current]
+        next[index] = updated
+        writeStoredQuickList(next)
+        return next
+      })
+    },
+    [],
+  )
+
   // Publish with fallback: if the task isn't in our current snapshot, refresh
   // from Supabase and retry once the next snapshot arrives.
+  // For Quick List tasks, update quickListItems instead of goalsSnapshot.
   const publishTaskEntry = useCallback(
     (taskId: string, entry: NotebookEntry, reason?: string) => {
       if (!taskId) return
+      // Check if this is a Quick List task
+      const goalId = focusSource?.goalId ?? activeFocusCandidate?.goalId ?? null
+      if (isQuickListGoal(goalId)) {
+        updateQuickListItemEntry(taskId, entry)
+        if (DEBUG_SYNC) {
+          try {
+            logDebug('[Sync][Focus] publish to Quick List', { taskId, reason })
+          } catch {}
+        }
+        return
+      }
       if (taskExistsIn(goalsSnapshot, taskId)) {
         updateGoalSnapshotTask(taskId, entry, true)
         if (DEBUG_SYNC) {
@@ -2941,7 +2988,7 @@ useEffect(() => {
         void handle
       }
     },
-    [goalsSnapshot, refreshGoalsSnapshotFromSupabase, taskExistsIn, updateGoalSnapshotTask],
+    [activeFocusCandidate, focusSource, goalsSnapshot, isQuickListGoal, refreshGoalsSnapshotFromSupabase, taskExistsIn, updateGoalSnapshotTask, updateQuickListItemEntry],
   )
   const updateFocusSourceFromEntry = useCallback(
     (entry: NotebookEntry) => {
@@ -3248,27 +3295,57 @@ useEffect(() => {
     if (!activeTaskId) {
       return
     }
-    let snapshotTask: GoalTaskSnapshot | null = null
-    outer: for (let goalIndex = 0; goalIndex < goalsSnapshot.length; goalIndex += 1) {
-      const goal = goalsSnapshot[goalIndex]
-      for (let bucketIndex = 0; bucketIndex < goal.buckets.length; bucketIndex += 1) {
-        const bucket = goal.buckets[bucketIndex]
-        const found = bucket.tasks.find((task) => task.id === activeTaskId)
-        if (found) {
-          snapshotTask = found
-          break outer
+    // Check if this is a Quick List task
+    const goalId = focusSource?.goalId ?? activeFocusCandidate?.goalId ?? null
+    const isQuickList = isQuickListGoal(goalId)
+
+    let entryNotes: string = ''
+    let entrySubtasks: NotebookSubtask[] = []
+    let foundTask = false
+
+    if (isQuickList) {
+      // Look for the task in quickListItems
+      const quickItem = quickListItems.find((item) => item.id === activeTaskId)
+      if (quickItem) {
+        foundTask = true
+        entryNotes = quickItem.notes ?? ''
+        entrySubtasks = (quickItem.subtasks ?? []).map((subtask) => ({
+          id: subtask.id,
+          text: subtask.text,
+          completed: subtask.completed,
+          sortIndex: subtask.sortIndex,
+          updatedAt: subtask.updatedAt,
+        }))
+      }
+    } else {
+      // Look for the task in goalsSnapshot
+      let snapshotTask: GoalTaskSnapshot | null = null
+      outer: for (let goalIndex = 0; goalIndex < goalsSnapshot.length; goalIndex += 1) {
+        const goal = goalsSnapshot[goalIndex]
+        for (let bucketIndex = 0; bucketIndex < goal.buckets.length; bucketIndex += 1) {
+          const bucket = goal.buckets[bucketIndex]
+          const found = bucket.tasks.find((task) => task.id === activeTaskId)
+          if (found) {
+            snapshotTask = found
+            break outer
+          }
         }
       }
+      if (snapshotTask) {
+        foundTask = true
+        entryNotes = snapshotTask.notes ?? ''
+        entrySubtasks = snapshotSubtasksToNotebook(snapshotTask.subtasks ?? [])
+      }
     }
-    if (!snapshotTask) {
+
+    if (!foundTask) {
       return
     }
-    const snapSubs = snapshotSubtasksToNotebook(snapshotTask.subtasks ?? [])
     const localEntry = notebookState[notebookKey] ?? createNotebookEntry()
     // Respect hydration block unless the snapshot reflects deletions of non-empty local subtasks
     if (notebookHydrationBlockRef.current > Date.now()) {
       try {
-        const snapIds = new Set(snapSubs.map((s) => s.id))
+        const snapIds = new Set(entrySubtasks.map((s) => s.id))
         let hasMeaningfulDeletion = false
         for (const s of localEntry.subtasks) {
           if (!snapIds.has(s.id) && s.text.trim().length > 0) {
@@ -3284,7 +3361,7 @@ useEffect(() => {
       }
     }
     // Mirror snapshot notes and subtasks so other tabs (Reflection/Goals) stay in sync.
-    const entryFromSnapshot: NotebookEntry = { notes: snapshotTask.notes ?? '', subtasks: snapSubs }
+    const entryFromSnapshot: NotebookEntry = { notes: entryNotes, subtasks: entrySubtasks }
     notebookChangeFromSnapshotRef.current = true
     const result = updateNotebookForKey(notebookKey, (entry) =>
       areNotebookEntriesEqual(entry, entryFromSnapshot) ? entry : entryFromSnapshot,
@@ -3302,9 +3379,13 @@ useEffect(() => {
     }
   }, [
     activeTaskId,
+    activeFocusCandidate,
     areNotebookEntriesEqual,
+    focusSource,
     goalsSnapshot,
+    isQuickListGoal,
     notebookKey,
+    quickListItems,
     snapshotSubtasksToNotebook,
     updateFocusSourceFromEntry,
     updateNotebookForKey,
@@ -3485,7 +3566,8 @@ useEffect(() => {
       // New entries are blank by design; skip snapshot work on add to keep
       // the UI snappy. We'll publish on the first text change or blur.
       if (linkedTaskId && createdSubtask.text.trim().length > 0) {
-        updateGoalSnapshotTask(linkedTaskId, result.entry)
+        // Use publishTaskEntry to handle both regular goals and Quick List
+        publishTaskEntry(linkedTaskId, result.entry, 'subtask-add')
         if (DEBUG_SYNC) {
           logDebug('[Sync][Focus] subtask add publish', {
             taskId: linkedTaskId,
@@ -3516,7 +3598,7 @@ useEffect(() => {
       blockNotebookHydration,
       notebookKey,
       updateFocusSourceFromEntry,
-      updateGoalSnapshotTask,
+      publishTaskEntry,
       updateNotebookForKey,
     ],
   )
@@ -3691,7 +3773,8 @@ useEffect(() => {
       if (!result || !result.changed) {
         // Publish on blur even if no structural change (commit point)
         if (linkedTaskId) {
-          updateGoalSnapshotTask(linkedTaskId, entryToPublish, true)
+          // Use publishTaskEntry to handle both regular goals and Quick List
+          publishTaskEntry(linkedTaskId, entryToPublish, 'subtask-blur')
           // Also flush latest subtask edit for this id to DB on blur
           const updated = entryToPublish.subtasks.find((s) => s.id === subtaskId)
           if (updated) {
@@ -3748,7 +3831,7 @@ useEffect(() => {
       activeNotebookEntry,
       notebookKey,
       updateFocusSourceFromEntry,
-      updateGoalSnapshotTask,
+      publishTaskEntry,
       updateNotebookForKey,
     ],
   )
@@ -4499,9 +4582,11 @@ useEffect(() => {
 
   const currentTaskLower = normalizedCurrentTask.toLocaleLowerCase()
   const isDefaultTask = normalizedCurrentTask.length === 0
+  // Use activeFocusCandidate first (live from goals snapshot) for difficulty/priority,
+  // fall back to focusSource (stored state) if not available
   const focusDifficulty =
-    focusSource?.taskDifficulty ?? activeFocusCandidate?.difficulty ?? null
-  const focusPriority = focusSource?.priority ?? activeFocusCandidate?.priority ?? false
+    activeFocusCandidate?.difficulty ?? focusSource?.taskDifficulty ?? null
+  const focusPriority = activeFocusCandidate?.priority ?? focusSource?.priority ?? false
   const focusGoalName = focusSource?.goalName ?? activeFocusCandidate?.goalName ?? null
   const focusBucketName = focusSource?.bucketName ?? activeFocusCandidate?.bucketName ?? null
   const effectiveTaskId = focusSource?.taskId ?? activeFocusCandidate?.taskId ?? null
@@ -4590,33 +4675,45 @@ useEffect(() => {
       return
     }
     const nextDifficulty = getNextDifficulty(focusDifficulty ?? 'none')
-    setGoalsSnapshot((current) => {
-      let mutated = false
-      const updated = current.map((goal) => {
-        if (goal.id !== effectiveGoalId) {
-          return goal
-        }
-        const updatedBuckets = goal.buckets.map((bucket) => {
-          if (bucket.id !== effectiveBucketId) {
-            return bucket
-          }
-          const updatedTasks = bucket.tasks.map((task) => {
-            if (task.id !== effectiveTaskId) {
-              return task
-            }
-            mutated = true
-            return { ...task, difficulty: nextDifficulty }
-          })
-          return { ...bucket, tasks: updatedTasks }
-        })
-        return { ...goal, buckets: updatedBuckets }
-      })
-      if (mutated) {
-        publishGoalsSnapshot(updated)
+    const isQuickListTask = isQuickListGoal(effectiveGoalId)
+    if (isQuickListTask) {
+      // Update Quick List local state and persist to localStorage (triggers cross-tab sync)
+      setQuickListItems((current) => {
+        const updated = current.map((item) =>
+          item.id === effectiveTaskId ? { ...item, difficulty: nextDifficulty } : item,
+        )
+        writeStoredQuickList(updated)
         return updated
-      }
-      return current
-    })
+      })
+    } else {
+      setGoalsSnapshot((current) => {
+        let mutated = false
+        const updated = current.map((goal) => {
+          if (goal.id !== effectiveGoalId) {
+            return goal
+          }
+          const updatedBuckets = goal.buckets.map((bucket) => {
+            if (bucket.id !== effectiveBucketId) {
+              return bucket
+            }
+            const updatedTasks = bucket.tasks.map((task) => {
+              if (task.id !== effectiveTaskId) {
+                return task
+              }
+              mutated = true
+              return { ...task, difficulty: nextDifficulty }
+            })
+            return { ...bucket, tasks: updatedTasks }
+          })
+          return { ...goal, buckets: updatedBuckets }
+        })
+        if (mutated) {
+          publishGoalsSnapshot(updated)
+          return updated
+        }
+        return current
+      })
+    }
     setFocusSource((current) => {
       if (!current || current.taskId !== effectiveTaskId) {
         return current
@@ -4635,74 +4732,117 @@ useEffect(() => {
     effectiveBucketId,
     effectiveTaskId,
     focusDifficulty,
+    isQuickListGoal,
   ])
 
   const toggleFocusPriority = useCallback(() => {
     if (!canToggleFocusPriority || !effectiveGoalId || !effectiveBucketId || !effectiveTaskId) {
       return
     }
+    const isQuickListTask = isQuickListGoal(effectiveGoalId)
     const snapshotTask = goalsSnapshot
       .find((goal) => goal.id === effectiveGoalId)?.buckets
       .find((bucket) => bucket.id === effectiveBucketId)?.tasks
       .find((task) => task.id === effectiveTaskId) ?? null
-    const wasCompleted = snapshotTask?.completed ?? false
+    const quickListTask = isQuickListTask
+      ? quickListItems.find((item) => item.id === effectiveTaskId) ?? null
+      : null
+    const wasCompleted = isQuickListTask
+      ? (quickListTask?.completed ?? false)
+      : (snapshotTask?.completed ?? false)
     const nextPriority = !focusPriority
-    setGoalsSnapshot((current) => {
-      let mutated = false
-      const updated = current.map((goal) => {
-        if (goal.id !== effectiveGoalId) {
-          return goal
-        }
-        let goalMutated = false
-        const updatedBuckets = goal.buckets.map((bucket) => {
-          if (bucket.id !== effectiveBucketId) {
-            return bucket
-          }
-          const idx = bucket.tasks.findIndex((task) => task.id === effectiveTaskId)
-          if (idx === -1) {
-            return bucket
-          }
-          goalMutated = true
-          mutated = true
-          let updatedTasks = bucket.tasks.map((task, index) =>
-            index === idx ? { ...task, priority: nextPriority } : task,
-          )
-          const moved = updatedTasks.find((task) => task.id === effectiveTaskId)!
-          const active = updatedTasks.filter((task) => !task.completed)
-          const completed = updatedTasks.filter((task) => task.completed)
+    if (isQuickListTask) {
+      // Update Quick List local state and persist to localStorage (triggers cross-tab sync)
+      setQuickListItems((current) => {
+        let updatedItems = current.map((item) =>
+          item.id === effectiveTaskId ? { ...item, priority: nextPriority } : item,
+        )
+        // Reorder: priority items first within their completion group
+        const moved = updatedItems.find((item) => item.id === effectiveTaskId)
+        if (moved) {
+          const active = updatedItems.filter((item) => !item.completed)
+          const completed = updatedItems.filter((item) => item.completed)
           if (nextPriority) {
             if (!moved.completed) {
-              const without = active.filter((task) => task.id !== effectiveTaskId)
-              const newActive = [moved, ...without]
-              updatedTasks = [...newActive, ...completed]
+              const without = active.filter((item) => item.id !== effectiveTaskId)
+              updatedItems = [moved, ...without, ...completed]
             } else {
-              const without = completed.filter((task) => task.id !== effectiveTaskId)
-              const newCompleted = [moved, ...without]
-              updatedTasks = [...active, ...newCompleted]
+              const without = completed.filter((item) => item.id !== effectiveTaskId)
+              updatedItems = [...active, moved, ...without]
             }
           } else {
             if (!moved.completed) {
-              const prios = active.filter((task) => task.priority)
-              const non = active.filter((task) => !task.priority && task.id !== effectiveTaskId)
-              const newActive = [...prios, moved, ...non]
-              updatedTasks = [...newActive, ...completed]
+              const prios = active.filter((item) => item.priority)
+              const non = active.filter((item) => !item.priority && item.id !== effectiveTaskId)
+              updatedItems = [...prios, moved, ...non, ...completed]
             } else {
-              const prios = completed.filter((task) => task.priority)
-              const non = completed.filter((task) => !task.priority && task.id !== effectiveTaskId)
-              const newCompleted = [...prios, moved, ...non]
-              updatedTasks = [...active, ...newCompleted]
+              const prios = completed.filter((item) => item.priority)
+              const non = completed.filter((item) => !item.priority && item.id !== effectiveTaskId)
+              updatedItems = [...active, ...prios, moved, ...non]
             }
           }
-          return { ...bucket, tasks: updatedTasks }
-        })
-        return goalMutated ? { ...goal, buckets: updatedBuckets } : goal
+        }
+        writeStoredQuickList(updatedItems)
+        return updatedItems
       })
-      if (mutated) {
-        publishGoalsSnapshot(updated)
-        return updated
-      }
-      return current
-    })
+    } else {
+      setGoalsSnapshot((current) => {
+        let mutated = false
+        const updated = current.map((goal) => {
+          if (goal.id !== effectiveGoalId) {
+            return goal
+          }
+          let goalMutated = false
+          const updatedBuckets = goal.buckets.map((bucket) => {
+            if (bucket.id !== effectiveBucketId) {
+              return bucket
+            }
+            const idx = bucket.tasks.findIndex((task) => task.id === effectiveTaskId)
+            if (idx === -1) {
+              return bucket
+            }
+            goalMutated = true
+            mutated = true
+            let updatedTasks = bucket.tasks.map((task, index) =>
+              index === idx ? { ...task, priority: nextPriority } : task,
+            )
+            const moved = updatedTasks.find((task) => task.id === effectiveTaskId)!
+            const active = updatedTasks.filter((task) => !task.completed)
+            const completed = updatedTasks.filter((task) => task.completed)
+            if (nextPriority) {
+              if (!moved.completed) {
+                const without = active.filter((task) => task.id !== effectiveTaskId)
+                const newActive = [moved, ...without]
+                updatedTasks = [...newActive, ...completed]
+              } else {
+                const without = completed.filter((task) => task.id !== effectiveTaskId)
+                const newCompleted = [moved, ...without]
+                updatedTasks = [...active, ...newCompleted]
+              }
+            } else {
+              if (!moved.completed) {
+                const prios = active.filter((task) => task.priority)
+                const non = active.filter((task) => !task.priority && task.id !== effectiveTaskId)
+                const newActive = [...prios, moved, ...non]
+                updatedTasks = [...newActive, ...completed]
+              } else {
+                const prios = completed.filter((task) => task.priority)
+                const non = completed.filter((task) => !task.priority && task.id !== effectiveTaskId)
+                const newCompleted = [...prios, moved, ...non]
+                updatedTasks = [...active, ...newCompleted]
+              }
+            }
+            return { ...bucket, tasks: updatedTasks }
+          })
+          return goalMutated ? { ...goal, buckets: updatedBuckets } : goal
+        })
+        if (mutated) {
+          publishGoalsSnapshot(updated)
+          return updated
+        }
+        return current
+      })
+    }
     setFocusSource((current) => {
       if (!current || current.taskId !== effectiveTaskId) {
         return current
@@ -4722,6 +4862,8 @@ useEffect(() => {
     effectiveTaskId,
     focusPriority,
     goalsSnapshot,
+    isQuickListGoal,
+    quickListItems,
   ])
 
   const clearPriorityHoldTimer = useCallback(() => {
@@ -5626,6 +5768,49 @@ useEffect(() => {
       window.removeEventListener(FOCUS_EVENT_TYPE, handleFocusBroadcast as EventListener)
     }
   }, [elapsed, normalizedCurrentTask, registerNewHistoryEntry, scrollFocusToTop, updateNotebookForKey, isRunning, sessionStart])
+
+  // Listen for pause focus events from other pages (e.g., ReflectionPage)
+  useEffect(() => {
+    const handlePauseFocus = () => {
+      if (isRunning && sessionStart !== null) {
+        const now = Date.now()
+        const currentElapsed = now - sessionStart
+        const delta = Math.max(0, currentElapsed - lastCommittedElapsedRef.current)
+
+        // Log the session progress to history (same as regular pause)
+        if (delta > 0) {
+          const entryName = normalizedCurrentTask.length > 0 ? normalizedCurrentTask : 'New Task'
+          const sessionMeta = sessionMetadataRef.current
+          const preservedMeta = { ...sessionMeta }
+
+          registerNewHistoryEntry(delta, entryName, {
+            goalId: sessionMeta.goalId,
+            bucketId: sessionMeta.bucketId,
+            taskId: sessionMeta.taskId,
+            sessionKey: currentSessionKeyRef.current,
+            goalName: sessionMeta.goalName,
+            bucketName: sessionMeta.bucketName,
+            repeatingRuleId: sessionMeta.repeatingRuleId,
+            repeatingOccurrenceDate: sessionMeta.repeatingOccurrenceDate,
+            repeatingOriginalTime: sessionMeta.repeatingOriginalTime,
+            startedAt: now - delta,
+          })
+
+          sessionMetadataRef.current = preservedMeta
+          lastLoggedSessionKeyRef.current = null
+        }
+
+        setIsRunning(false)
+        setElapsed(currentElapsed)
+        setSessionStart(null)
+        lastCommittedElapsedRef.current = currentElapsed
+      }
+    }
+    window.addEventListener(PAUSE_FOCUS_EVENT_TYPE, handlePauseFocus)
+    return () => {
+      window.removeEventListener(PAUSE_FOCUS_EVENT_TYPE, handlePauseFocus)
+    }
+  }, [isRunning, sessionStart, normalizedCurrentTask, registerNewHistoryEntry])
 
   const formattedTime = useMemo(() => formatTime(elapsed), [elapsed])
   const formattedClock = useMemo(() => formatClockTime(currentTime), [currentTime])
