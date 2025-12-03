@@ -261,6 +261,8 @@ type HistoryDraftState = {
   endedAt: number | null
   notes: string
   subtasks: HistorySubtask[]
+  timezoneFrom: string
+  timezoneTo: string
 }
 
 const cloneHistorySubtasks = (subtasks: HistorySubtask[]): HistorySubtask[] =>
@@ -274,6 +276,8 @@ const createHistoryDraftFromEntry = (entry?: HistoryEntry | null): HistoryDraftS
   endedAt: entry?.endedAt ?? null,
   notes: entry?.notes ?? '',
   subtasks: entry ? cloneHistorySubtasks(entry.subtasks) : [],
+  timezoneFrom: entry?.timezoneFrom ?? '',
+  timezoneTo: entry?.timezoneTo ?? '',
 })
 
 const createEmptyHistoryDraft = (): HistoryDraftState => createHistoryDraftFromEntry(null)
@@ -292,6 +296,8 @@ const areHistoryDraftsEqual = (a: HistoryDraftState | null, b: HistoryDraftState
     a.startedAt === b.startedAt &&
     a.endedAt === b.endedAt &&
     a.notes === b.notes &&
+    a.timezoneFrom === b.timezoneFrom &&
+    a.timezoneTo === b.timezoneTo &&
     areHistorySubtasksEqual(a.subtasks, b.subtasks)
   )
 }
@@ -502,7 +508,113 @@ type PieArc = {
 const UNCATEGORISED_LABEL = 'Uncategorised'
 const CHART_COLORS = ['#6366f1', '#22d3ee', '#f97316', '#f472b6', '#a855f7', '#4ade80', '#60a5fa', '#facc15', '#38bdf8', '#fb7185']
 const LIFE_ROUTINES_NAME = 'Daily Life'
+const LIFE_ROUTINES_GOAL_ID = 'life-routines'
 const LIFE_ROUTINES_SURFACE: SurfaceStyle = 'linen'
+const TIMEZONE_CHANGE_MARKER = 'Timezone Change marker'
+
+// Helper to extract city name from "City, Country" format
+const extractCityName = (fullLocation: string): string => {
+  if (!fullLocation) return ''
+  const commaIndex = fullLocation.indexOf(',')
+  return commaIndex > 0 ? fullLocation.substring(0, commaIndex).trim() : fullLocation.trim()
+}
+
+// Generate timezone change session name from From and To cities
+const generateTimezoneSessionName = (fromCity: string, toCity: string): string => {
+  const from = extractCityName(fromCity)
+  const to = extractCityName(toCity)
+  if (from && to) {
+    return `Timezone Change: ${from} to ${to}`
+  }
+  if (from) {
+    return `Timezone Change: ${from} to ...`
+  }
+  if (to) {
+    return `Timezone Change: ... to ${to}`
+  }
+  return 'Timezone Change'
+}
+
+// Timezone city options for the timezone change marker
+type TimezoneCity = {
+  value: string
+  label: string
+  searchTerms: string[]
+}
+const TIMEZONE_CITIES: TimezoneCity[] = [
+  { value: 'Sydney, Australia', label: 'Sydney, Australia', searchTerms: ['sydney', 'australia', 'syd', 'aus'] },
+  { value: 'Melbourne, Australia', label: 'Melbourne, Australia', searchTerms: ['melbourne', 'australia', 'mel', 'aus'] },
+  { value: 'Brisbane, Australia', label: 'Brisbane, Australia', searchTerms: ['brisbane', 'australia', 'aus'] },
+  { value: 'Perth, Australia', label: 'Perth, Australia', searchTerms: ['perth', 'australia', 'aus'] },
+  { value: 'Auckland, New Zealand', label: 'Auckland, New Zealand', searchTerms: ['auckland', 'new zealand', 'nz'] },
+  { value: 'Wellington, New Zealand', label: 'Wellington, New Zealand', searchTerms: ['wellington', 'new zealand', 'nz'] },
+  { value: 'Tokyo, Japan', label: 'Tokyo, Japan', searchTerms: ['tokyo', 'japan', 'jp'] },
+  { value: 'Seoul, South Korea', label: 'Seoul, South Korea', searchTerms: ['seoul', 'south korea', 'korea', 'kr'] },
+  { value: 'Shanghai, China', label: 'Shanghai, China', searchTerms: ['shanghai', 'china', 'cn'] },
+  { value: 'Beijing, China', label: 'Beijing, China', searchTerms: ['beijing', 'china', 'cn', 'peking'] },
+  { value: 'Hong Kong', label: 'Hong Kong', searchTerms: ['hong kong', 'hk'] },
+  { value: 'Singapore', label: 'Singapore', searchTerms: ['singapore', 'sg'] },
+  { value: 'Kuala Lumpur, Malaysia', label: 'Kuala Lumpur, Malaysia', searchTerms: ['kuala lumpur', 'malaysia', 'kl', 'my'] },
+  { value: 'Bangkok, Thailand', label: 'Bangkok, Thailand', searchTerms: ['bangkok', 'thailand', 'th'] },
+  { value: 'Jakarta, Indonesia', label: 'Jakarta, Indonesia', searchTerms: ['jakarta', 'indonesia', 'id'] },
+  { value: 'Manila, Philippines', label: 'Manila, Philippines', searchTerms: ['manila', 'philippines', 'ph'] },
+  { value: 'Mumbai, India', label: 'Mumbai, India', searchTerms: ['mumbai', 'india', 'bombay', 'in'] },
+  { value: 'Delhi, India', label: 'Delhi, India', searchTerms: ['delhi', 'india', 'new delhi', 'in'] },
+  { value: 'Bangalore, India', label: 'Bangalore, India', searchTerms: ['bangalore', 'india', 'bengaluru', 'in'] },
+  { value: 'Dubai, UAE', label: 'Dubai, UAE', searchTerms: ['dubai', 'uae', 'emirates'] },
+  { value: 'Abu Dhabi, UAE', label: 'Abu Dhabi, UAE', searchTerms: ['abu dhabi', 'uae', 'emirates'] },
+  { value: 'Tel Aviv, Israel', label: 'Tel Aviv, Israel', searchTerms: ['tel aviv', 'israel', 'il'] },
+  { value: 'Istanbul, Turkey', label: 'Istanbul, Turkey', searchTerms: ['istanbul', 'turkey', 'tr', 'türkiye'] },
+  { value: 'Moscow, Russia', label: 'Moscow, Russia', searchTerms: ['moscow', 'russia', 'ru'] },
+  { value: 'London, UK', label: 'London, UK', searchTerms: ['london', 'uk', 'england', 'britain', 'gb'] },
+  { value: 'Paris, France', label: 'Paris, France', searchTerms: ['paris', 'france', 'fr'] },
+  { value: 'Berlin, Germany', label: 'Berlin, Germany', searchTerms: ['berlin', 'germany', 'de'] },
+  { value: 'Munich, Germany', label: 'Munich, Germany', searchTerms: ['munich', 'germany', 'de', 'münchen'] },
+  { value: 'Frankfurt, Germany', label: 'Frankfurt, Germany', searchTerms: ['frankfurt', 'germany', 'de'] },
+  { value: 'Amsterdam, Netherlands', label: 'Amsterdam, Netherlands', searchTerms: ['amsterdam', 'netherlands', 'nl', 'holland'] },
+  { value: 'Brussels, Belgium', label: 'Brussels, Belgium', searchTerms: ['brussels', 'belgium', 'be'] },
+  { value: 'Zurich, Switzerland', label: 'Zurich, Switzerland', searchTerms: ['zurich', 'switzerland', 'ch', 'zürich'] },
+  { value: 'Vienna, Austria', label: 'Vienna, Austria', searchTerms: ['vienna', 'austria', 'at', 'wien'] },
+  { value: 'Rome, Italy', label: 'Rome, Italy', searchTerms: ['rome', 'italy', 'it', 'roma'] },
+  { value: 'Milan, Italy', label: 'Milan, Italy', searchTerms: ['milan', 'italy', 'it', 'milano'] },
+  { value: 'Madrid, Spain', label: 'Madrid, Spain', searchTerms: ['madrid', 'spain', 'es'] },
+  { value: 'Barcelona, Spain', label: 'Barcelona, Spain', searchTerms: ['barcelona', 'spain', 'es'] },
+  { value: 'Lisbon, Portugal', label: 'Lisbon, Portugal', searchTerms: ['lisbon', 'portugal', 'pt', 'lisboa'] },
+  { value: 'Dublin, Ireland', label: 'Dublin, Ireland', searchTerms: ['dublin', 'ireland', 'ie'] },
+  { value: 'Edinburgh, UK', label: 'Edinburgh, UK', searchTerms: ['edinburgh', 'uk', 'scotland', 'gb'] },
+  { value: 'Stockholm, Sweden', label: 'Stockholm, Sweden', searchTerms: ['stockholm', 'sweden', 'se'] },
+  { value: 'Oslo, Norway', label: 'Oslo, Norway', searchTerms: ['oslo', 'norway', 'no'] },
+  { value: 'Copenhagen, Denmark', label: 'Copenhagen, Denmark', searchTerms: ['copenhagen', 'denmark', 'dk'] },
+  { value: 'Helsinki, Finland', label: 'Helsinki, Finland', searchTerms: ['helsinki', 'finland', 'fi'] },
+  { value: 'Warsaw, Poland', label: 'Warsaw, Poland', searchTerms: ['warsaw', 'poland', 'pl'] },
+  { value: 'Prague, Czech Republic', label: 'Prague, Czech Republic', searchTerms: ['prague', 'czech', 'cz', 'praha'] },
+  { value: 'Athens, Greece', label: 'Athens, Greece', searchTerms: ['athens', 'greece', 'gr'] },
+  { value: 'Cairo, Egypt', label: 'Cairo, Egypt', searchTerms: ['cairo', 'egypt', 'eg'] },
+  { value: 'Cape Town, South Africa', label: 'Cape Town, South Africa', searchTerms: ['cape town', 'south africa', 'za'] },
+  { value: 'Johannesburg, South Africa', label: 'Johannesburg, South Africa', searchTerms: ['johannesburg', 'south africa', 'za', 'joburg'] },
+  { value: 'Lagos, Nigeria', label: 'Lagos, Nigeria', searchTerms: ['lagos', 'nigeria', 'ng'] },
+  { value: 'Nairobi, Kenya', label: 'Nairobi, Kenya', searchTerms: ['nairobi', 'kenya', 'ke'] },
+  { value: 'New York, USA', label: 'New York, USA', searchTerms: ['new york', 'usa', 'us', 'nyc', 'america'] },
+  { value: 'Los Angeles, USA', label: 'Los Angeles, USA', searchTerms: ['los angeles', 'usa', 'us', 'la', 'america'] },
+  { value: 'San Francisco, USA', label: 'San Francisco, USA', searchTerms: ['san francisco', 'usa', 'us', 'sf', 'america'] },
+  { value: 'Seattle, USA', label: 'Seattle, USA', searchTerms: ['seattle', 'usa', 'us', 'america'] },
+  { value: 'Chicago, USA', label: 'Chicago, USA', searchTerms: ['chicago', 'usa', 'us', 'america'] },
+  { value: 'Boston, USA', label: 'Boston, USA', searchTerms: ['boston', 'usa', 'us', 'america'] },
+  { value: 'Miami, USA', label: 'Miami, USA', searchTerms: ['miami', 'usa', 'us', 'america', 'florida'] },
+  { value: 'Denver, USA', label: 'Denver, USA', searchTerms: ['denver', 'usa', 'us', 'america', 'colorado'] },
+  { value: 'Austin, USA', label: 'Austin, USA', searchTerms: ['austin', 'usa', 'us', 'america', 'texas'] },
+  { value: 'Honolulu, USA', label: 'Honolulu, USA', searchTerms: ['honolulu', 'usa', 'us', 'america', 'hawaii'] },
+  { value: 'Toronto, Canada', label: 'Toronto, Canada', searchTerms: ['toronto', 'canada', 'ca'] },
+  { value: 'Vancouver, Canada', label: 'Vancouver, Canada', searchTerms: ['vancouver', 'canada', 'ca'] },
+  { value: 'Montreal, Canada', label: 'Montreal, Canada', searchTerms: ['montreal', 'canada', 'ca', 'montréal'] },
+  { value: 'Mexico City, Mexico', label: 'Mexico City, Mexico', searchTerms: ['mexico city', 'mexico', 'mx', 'cdmx'] },
+  { value: 'São Paulo, Brazil', label: 'São Paulo, Brazil', searchTerms: ['sao paulo', 'brazil', 'br', 'são paulo'] },
+  { value: 'Rio de Janeiro, Brazil', label: 'Rio de Janeiro, Brazil', searchTerms: ['rio', 'brazil', 'br', 'rio de janeiro'] },
+  { value: 'Buenos Aires, Argentina', label: 'Buenos Aires, Argentina', searchTerms: ['buenos aires', 'argentina', 'ar'] },
+  { value: 'Santiago, Chile', label: 'Santiago, Chile', searchTerms: ['santiago', 'chile', 'cl'] },
+  { value: 'Lima, Peru', label: 'Lima, Peru', searchTerms: ['lima', 'peru', 'pe'] },
+  { value: 'Bogota, Colombia', label: 'Bogota, Colombia', searchTerms: ['bogota', 'colombia', 'co', 'bogotá'] },
+]
 // Snapback virtual goal
 // Session History: use orange→crimson gradient
 // Time Overview: we render Snapback arcs with reversed sampling (crimson→orange)
@@ -1185,6 +1297,240 @@ const HistoryDropdown = ({ id, value, placeholder, options, onChange, disabled, 
                     }}
                     onKeyDown={(event) => handleOptionKeyDown(event, index)}
                     disabled={option.disabled}
+                    ref={(node) => {
+                      optionRefs.current[index] = node
+                    }}
+                    tabIndex={-1}
+                  >
+                    {option.label}
+                  </button>
+                ))
+              )}
+            </div>,
+            document.body,
+          )
+        : null}
+    </div>
+  )
+}
+
+// Searchable timezone dropdown component
+type TimezoneSearchDropdownProps = {
+  id?: string
+  value: string
+  placeholder: string
+  onChange: (value: string) => void
+  labelId?: string
+}
+
+const TimezoneSearchDropdown = ({ id, value, placeholder, onChange, labelId }: TimezoneSearchDropdownProps) => {
+  const [open, setOpen] = useState(false)
+  const [searchQuery, setSearchQuery] = useState('')
+  const containerRef = useRef<HTMLDivElement | null>(null)
+  const inputRef = useRef<HTMLInputElement | null>(null)
+  const menuRef = useRef<HTMLDivElement | null>(null)
+  const optionRefs = useRef<Array<HTMLButtonElement | null>>([])
+  const [focusedIndex, setFocusedIndex] = useState(-1)
+  const [menuPosition, setMenuPosition] = useState<{ top: number; left: number; width: number }>({ top: 0, left: 0, width: 0 })
+  const [menuPositionReady, setMenuPositionReady] = useState(false)
+
+  const filteredOptions = useMemo(() => {
+    if (!searchQuery.trim()) {
+      return TIMEZONE_CITIES
+    }
+    const query = searchQuery.toLowerCase().trim()
+    return TIMEZONE_CITIES.filter((city) =>
+      city.label.toLowerCase().includes(query) ||
+      city.searchTerms.some((term) => term.includes(query))
+    )
+  }, [searchQuery])
+
+  const selectedCity = useMemo(() => TIMEZONE_CITIES.find((c) => c.value === value) ?? null, [value])
+
+  const updateMenuPosition = useCallback(() => {
+    const input = inputRef.current
+    const menu = menuRef.current
+    if (!input || !menu) {
+      return
+    }
+    const inputRect = input.getBoundingClientRect()
+    const menuRect = menu.getBoundingClientRect()
+    const spacing = 8
+    
+    let left = inputRect.left
+    let top = inputRect.bottom + spacing
+    const width = inputRect.width
+    
+    // Ensure menu doesn't go off-screen horizontally
+    if (left + width > window.innerWidth - 16) {
+      left = window.innerWidth - width - 16
+    }
+    if (left < 16) {
+      left = 16
+    }
+    
+    // If menu would go below viewport, show it above the input instead
+    if (top + menuRect.height > window.innerHeight - 16) {
+      top = inputRect.top - menuRect.height - spacing
+    }
+    
+    setMenuPosition({ top, left, width })
+    setMenuPositionReady(true)
+  }, [])
+
+  useEffect(() => {
+    if (!open) {
+      setMenuPositionReady(false)
+      return
+    }
+    
+    updateMenuPosition()
+    
+    const handleUpdate = () => updateMenuPosition()
+    window.addEventListener('scroll', handleUpdate, true)
+    window.addEventListener('resize', handleUpdate)
+    
+    return () => {
+      window.removeEventListener('scroll', handleUpdate, true)
+      window.removeEventListener('resize', handleUpdate)
+    }
+  }, [open, updateMenuPosition])
+
+  useEffect(() => {
+    if (!open) {
+      return
+    }
+    const handleClickOutside = (event: Event) => {
+      const container = containerRef.current
+      const menu = menuRef.current
+      
+      if (container && event.target instanceof Node && container.contains(event.target)) {
+        return
+      }
+      
+      if (menu && event.target instanceof Node && menu.contains(event.target)) {
+        return
+      }
+      
+      setOpen(false)
+      setSearchQuery('')
+    }
+    document.addEventListener('click', handleClickOutside, true)
+    return () => {
+      document.removeEventListener('click', handleClickOutside, true)
+    }
+  }, [open])
+
+  const handleInputFocus = useCallback(() => {
+    setOpen(true)
+    setSearchQuery('')
+  }, [])
+
+  const handleInputChange = useCallback((event: ChangeEvent<HTMLInputElement>) => {
+    setSearchQuery(event.target.value)
+    setFocusedIndex(0)
+    if (!open) {
+      setOpen(true)
+    }
+  }, [open])
+
+  const handleOptionSelect = useCallback(
+    (nextValue: string) => {
+      onChange(nextValue)
+      setOpen(false)
+      setSearchQuery('')
+      inputRef.current?.blur()
+    },
+    [onChange],
+  )
+
+  const handleKeyDown = useCallback(
+    (event: KeyboardEvent<HTMLInputElement>) => {
+      if (event.key === 'ArrowDown') {
+        event.preventDefault()
+        if (!open) {
+          setOpen(true)
+          setFocusedIndex(0)
+        } else {
+          setFocusedIndex((prev) => Math.min(prev + 1, filteredOptions.length - 1))
+        }
+      } else if (event.key === 'ArrowUp') {
+        event.preventDefault()
+        setFocusedIndex((prev) => Math.max(prev - 1, 0))
+      } else if (event.key === 'Enter') {
+        event.preventDefault()
+        const option = filteredOptions[focusedIndex]
+        if (option) {
+          handleOptionSelect(option.value)
+        }
+      } else if (event.key === 'Escape') {
+        event.preventDefault()
+        setOpen(false)
+        setSearchQuery('')
+        inputRef.current?.blur()
+      }
+    },
+    [filteredOptions, focusedIndex, handleOptionSelect, open],
+  )
+
+  useEffect(() => {
+    if (open && focusedIndex >= 0 && optionRefs.current[focusedIndex]) {
+      optionRefs.current[focusedIndex]?.scrollIntoView({ block: 'nearest' })
+    }
+  }, [focusedIndex, open])
+
+  const displayValue = open ? searchQuery : (selectedCity?.label ?? '')
+
+  return (
+    <div className="timezone-search-dropdown" ref={containerRef}>
+      <input
+        type="text"
+        id={id}
+        ref={inputRef}
+        className="history-timeline__field-input timezone-search-dropdown__input"
+        value={displayValue}
+        placeholder={placeholder}
+        onChange={handleInputChange}
+        onFocus={handleInputFocus}
+        onKeyDown={handleKeyDown}
+        aria-labelledby={labelId}
+        aria-expanded={open}
+        aria-haspopup="listbox"
+        autoComplete="off"
+      />
+      {open
+        ? createPortal(
+            <div
+              ref={menuRef}
+              role="listbox"
+              aria-labelledby={labelId ?? id}
+              className="history-dropdown__menu"
+              style={{
+                position: 'fixed',
+                top: menuPosition.top,
+                left: menuPosition.left,
+                width: menuPosition.width,
+                visibility: menuPositionReady ? 'visible' : 'hidden',
+                zIndex: 10000,
+              }}
+            >
+              {filteredOptions.length === 0 ? (
+                <div className="history-dropdown__empty">No cities found</div>
+              ) : (
+                filteredOptions.map((option, index) => (
+                  <button
+                    key={option.value}
+                    type="button"
+                    role="option"
+                    aria-selected={option.value === value}
+                    className={[
+                      'history-dropdown__option',
+                      option.value === value ? 'history-dropdown__option--selected' : '',
+                      index === focusedIndex ? 'history-dropdown__option--focused' : '',
+                    ]
+                      .filter(Boolean)
+                      .join(' ')}
+                    onClick={() => handleOptionSelect(option.value)}
                     ref={(node) => {
                       optionRefs.current[index] = node
                     }}
@@ -4140,6 +4486,8 @@ const [showInlineExtras, setShowInlineExtras] = useState(false)
   const trimmedDraftGoal = historyDraft.goalName.trim()
   const trimmedDraftBucket = historyDraft.bucketName.trim()
   const isSnapbackGoalSelected = trimmedDraftGoal.toLowerCase() === SNAPBACK_NAME.toLowerCase()
+  const isLifeRoutineGoalSelected = trimmedDraftGoal.toLowerCase() === LIFE_ROUTINES_NAME.toLowerCase()
+  const isTimezoneChangeMarker = isLifeRoutineGoalSelected && trimmedDraftBucket === TIMEZONE_CHANGE_MARKER
 
   const availableBucketOptions = useMemo(() => {
     const normalizedGoal = trimmedDraftGoal.toLowerCase()
@@ -4247,7 +4595,18 @@ const [showInlineExtras, setShowInlineExtras] = useState(false)
     () => {
       const emptyLabel =
         isSnapbackGoalSelected && snapbackTriggerOptions.length === 0 ? 'No triggers yet' : 'No bucket'
-      const options: HistoryDropdownOption[] = isSnapbackGoalSelected ? [] : [{ value: '', label: emptyLabel }]
+      const options: HistoryDropdownOption[] = isSnapbackGoalSelected || isLifeRoutineGoalSelected ? [] : [{ value: '', label: emptyLabel }]
+      
+      // For Daily Life: show existing routines section and other options
+      if (isLifeRoutineGoalSelected) {
+        if (resolvedBucketOptions.length > 0) {
+          options.push({ value: '__hdr_existing_routines__', label: 'Existing Daily Life Routines', disabled: true })
+          options.push(...resolvedBucketOptions.map((option) => ({ value: option, label: option })))
+        }
+        options.push({ value: '__hdr_other_options__', label: 'Other Options', disabled: true })
+        options.push({ value: TIMEZONE_CHANGE_MARKER, label: TIMEZONE_CHANGE_MARKER })
+        return options
+      }
       
       // For Snapback: offer to create a new trigger from the session name if it doesn't already exist
       if (isSnapbackGoalSelected) {
@@ -4268,18 +4627,23 @@ const [showInlineExtras, setShowInlineExtras] = useState(false)
       options.push(...resolvedBucketOptions.map((option) => ({ value: option, label: option })))
       return options
     },
-    [resolvedBucketOptions, isSnapbackGoalSelected, snapbackTriggerOptions, historyDraft.taskName],
+    [resolvedBucketOptions, isSnapbackGoalSelected, isLifeRoutineGoalSelected, snapbackTriggerOptions, historyDraft.taskName],
   )
 
   const bucketDropdownPlaceholder = useMemo(() => {
     if (isSnapbackGoalSelected && snapbackTriggerOptions.length === 0) {
       return 'No triggers yet'
     }
+    if (isLifeRoutineGoalSelected) {
+      return availableBucketOptions.length > 0 ? 'Select routine' : 'Select an option'
+    }
     return availableBucketOptions.length > 0 ? 'Select bucket' : 'No buckets available'
-  }, [isSnapbackGoalSelected, availableBucketOptions.length, snapbackTriggerOptions.length])
+  }, [isSnapbackGoalSelected, isLifeRoutineGoalSelected, availableBucketOptions.length, snapbackTriggerOptions.length])
   const bucketDropdownDisabled = useMemo(() => {
-    return !isSnapbackGoalSelected && availableBucketOptions.length === 0
-  }, [isSnapbackGoalSelected, availableBucketOptions.length])
+    // Daily Life and Snapback always have options (at minimum, the special actions)
+    if (isLifeRoutineGoalSelected || isSnapbackGoalSelected) return false
+    return availableBucketOptions.length === 0
+  }, [isSnapbackGoalSelected, isLifeRoutineGoalSelected, availableBucketOptions.length])
 
   const historyWithTaskNotes = useMemo(() => {
     if (editorOpenRef.current) {
@@ -4547,17 +4911,17 @@ const [showInlineExtras, setShowInlineExtras] = useState(false)
     const entry: HistoryEntry = {
       id: makeHistoryId(),
       taskName: 'New session',
-      goalName: null,
+      goalName: LIFE_ROUTINES_NAME,
       bucketName: null,
-      goalId: null,
+      goalId: LIFE_ROUTINES_GOAL_ID,
       bucketId: null,
       taskId: null,
       elapsed,
       startedAt,
       endedAt,
-      goalSurface: DEFAULT_SURFACE_STYLE,
+      goalSurface: LIFE_ROUTINES_SURFACE,
       bucketSurface: null,
-      entryColor: gradientFromSurface(DEFAULT_SURFACE_STYLE),
+      entryColor: gradientFromSurface(LIFE_ROUTINES_SURFACE),
       notes: '',
       subtasks: [],
       futureSession: true,
@@ -4650,6 +5014,13 @@ const [showInlineExtras, setShowInlineExtras] = useState(false)
               if (autoGoal && autoGoal !== currentGoal) {
                 base = { ...base, goalName: autoGoal }
               }
+            }
+          }
+          // For timezone markers, sync endedAt with startedAt
+          if (nextBucket === TIMEZONE_CHANGE_MARKER) {
+            const startTs = base.startedAt
+            if (startTs !== null) {
+              base = { ...base, endedAt: startTs }
             }
           }
           // Only auto-fill once: when choosing a Life Routine bucket, and only if name is effectively empty or default
@@ -5399,7 +5770,9 @@ const [showInlineExtras, setShowInlineExtras] = useState(false)
         target.goalSurface === resolvedGoalSurface &&
         target.bucketSurface === resolvedBucketSurface &&
         target.notes === nextNotes &&
-        areHistorySubtasksEqual(target.subtasks, nextSubtasks)
+        areHistorySubtasksEqual(target.subtasks, nextSubtasks) &&
+        (target.timezoneFrom ?? '') === draft.timezoneFrom &&
+        (target.timezoneTo ?? '') === draft.timezoneTo
       ) {
         return current
       }
@@ -5454,6 +5827,8 @@ const [showInlineExtras, setShowInlineExtras] = useState(false)
               null
             : null,
         taskId: resolvedTaskId,
+        timezoneFrom: draft.timezoneFrom || null,
+        timezoneTo: draft.timezoneTo || null,
       }
       didUpdateHistory = true
       return next
@@ -5466,6 +5841,8 @@ const [showInlineExtras, setShowInlineExtras] = useState(false)
       endedAt: nextEndedAt,
       notes: nextNotes,
       subtasks: cloneHistorySubtasks(nextSubtasks),
+      timezoneFrom: draft.timezoneFrom,
+      timezoneTo: draft.timezoneTo,
     }
     const draftChanged = !areHistoryDraftsEqual(draft, normalizedDraft)
     if (draftChanged) {
@@ -5746,6 +6123,11 @@ useEffect(() => {
     const goalName = historyDraft.goalName.trim()
     const bucketName = historyDraft.bucketName.trim()
     if (goalName.length === 0 || bucketName.length === 0) {
+      return
+    }
+    // Allow timezone change marker for Daily Life goal
+    const isLifeRoutine = goalName.toLowerCase() === LIFE_ROUTINES_NAME.toLowerCase()
+    if (isLifeRoutine && bucketName === TIMEZONE_CHANGE_MARKER) {
       return
     }
     const allowedBuckets = bucketOptionsByGoal.get(goalName)
@@ -6906,15 +7288,15 @@ useEffect(() => {
         const syntheticEntry: HistoryEntry = {
           id: 'new-entry',
           taskName: '',
-          goalName: null,
+          goalName: LIFE_ROUTINES_NAME,
           bucketName: null,
-          goalId: null,
+          goalId: LIFE_ROUTINES_GOAL_ID,
           bucketId: null,
           taskId: null,
           elapsed: Math.max(end - start, MIN_SESSION_DURATION_DRAG_MS),
           startedAt: start,
           endedAt: end,
-          goalSurface: DEFAULT_SURFACE_STYLE,
+          goalSurface: LIFE_ROUTINES_SURFACE,
           bucketSurface: null,
           notes: '',
           subtasks: [],
@@ -6970,7 +7352,23 @@ useEffect(() => {
       }
     })
   }, [effectiveHistory, dayStart, dayEnd, enhancedGoalLookup, goalColorLookup, dragPreview])
-  const timelineRowCount = daySegments.length > 0 ? daySegments.reduce((max, segment) => Math.max(max, segment.lane), 0) + 1 : 1
+  
+  // Separate timezone markers from regular segments
+  const { regularSegments, timezoneMarkers } = useMemo(() => {
+    const regular: typeof daySegments = []
+    const markers: typeof daySegments = []
+    daySegments.forEach((segment) => {
+      const bucket = segment.entry.bucketName?.trim() ?? ''
+      if (bucket === TIMEZONE_CHANGE_MARKER) {
+        markers.push(segment)
+      } else {
+        regular.push(segment)
+      }
+    })
+    return { regularSegments: regular, timezoneMarkers: markers }
+  }, [daySegments])
+  
+  const timelineRowCount = regularSegments.length > 0 ? regularSegments.reduce((max, segment) => Math.max(max, segment.lane), 0) + 1 : 1
   const showCurrentTimeIndicator = typeof currentTimePercent === 'number' && editingHistoryId === null
   const timelineStyle = useMemo(() => ({ '--history-timeline-rows': timelineRowCount } as CSSProperties), [timelineRowCount])
   const timelineTicks = useMemo(() => {
@@ -7228,7 +7626,7 @@ useEffect(() => {
       // If tapping a calendar event while a popover is open, handle toggle for the same entry id.
       // For a different event, let its own onClick open the popover so guides (not in effectiveHistory) work too.
       if (node instanceof Element) {
-        const evEl = (node.closest('.calendar-event') || node.closest('.calendar-allday-event')) as HTMLElement | null
+        const evEl = (node.closest('.calendar-event') || node.closest('.calendar-allday-event') || node.closest('.calendar-timezone-marker')) as HTMLElement | null
         const tappedId = evEl?.dataset.entryId
         if (tappedId) {
           if (calendarPreview && calendarPreview.entryId === tappedId) {
@@ -8617,13 +9015,15 @@ useEffect(() => {
             const previewEnd = isPreviewed ? dragPreview.endedAt : entry.endedAt
             const clampedStart = Math.max(Math.min(previewStart, previewEnd), startMs)
             const clampedEnd = Math.min(Math.max(previewStart, previewEnd), endMs)
-            if (clampedEnd <= clampedStart) {
+            // Allow timezone markers (zero duration) to pass through
+            const isTimezoneMarkerEntry = entry.bucketName?.trim() === TIMEZONE_CHANGE_MARKER
+            if (clampedEnd < clampedStart || (clampedEnd === clampedStart && !isTimezoneMarkerEntry)) {
               return null
             }
             return {
               entry,
               start: clampedStart,
-              end: clampedEnd,
+              end: isTimezoneMarkerEntry ? clampedStart : clampedEnd, // Ensure timezone markers have start === end
               previewStart,
               previewEnd,
             }
@@ -9050,6 +9450,7 @@ useEffect(() => {
       const handleCalendarEventPointerDown = (
         entry: HistoryEntry,
         entryDayStart: number,
+        forceMoveOnly?: boolean,
       ) => (ev: ReactPointerEvent<HTMLDivElement>) => {
         if (entry.id === 'active-session') return
         if (ev.button !== 0) return
@@ -9065,11 +9466,14 @@ useEffect(() => {
         const colHeight = col.rect.height
         if (!(Number.isFinite(colHeight) && colHeight > 0)) return
         // Determine drag kind by edge proximity (top/bottom = resize, else move)
+        // If forceMoveOnly is true (e.g., for timezone markers), always use move
         const evRect = (ev.currentTarget as HTMLElement).getBoundingClientRect()
         const edgePx = Math.min(12, Math.max(6, evRect.height * 0.2))
   let kind: DragKind = 'move'
-        if (ev.clientY - evRect.top <= edgePx) kind = 'resize-start'
-        else if (evRect.bottom - ev.clientY <= edgePx) kind = 'resize-end'
+        if (!forceMoveOnly) {
+          if (ev.clientY - evRect.top <= edgePx) kind = 'resize-start'
+          else if (evRect.bottom - ev.clientY <= edgePx) kind = 'resize-end'
+        }
   // Mark intended drag kind on the element so CSS can show the right cursor once dragging begins
   const targetEl = ev.currentTarget as HTMLDivElement
   if (kind === 'move') targetEl.dataset.dragKind = 'move'
@@ -9374,11 +9778,14 @@ useEffect(() => {
                         : target.futureSession && nowInPast
                           ? false  // Stale unconfirmed session: confirm on any edit
                           : target.futureSession  // Preserve current state
+                // For timezone markers, keep endedAt equal to startedAt
+                const isTimezoneMarkerEntry = target.bucketName?.trim() === TIMEZONE_CHANGE_MARKER
+                const finalEndedAt = isTimezoneMarkerEntry ? preview.startedAt : preview.endedAt
                 next[idx] = {
                   ...target,
                   startedAt: preview.startedAt,
-                  endedAt: preview.endedAt,
-                  elapsed: Math.max(preview.endedAt - preview.startedAt, 1),
+                  endedAt: finalEndedAt,
+                  elapsed: Math.max(finalEndedAt - preview.startedAt, 1),
                   futureSession: isFuture,
                 }
                 return next
@@ -9611,8 +10018,8 @@ useEffect(() => {
                     const newEntry: HistoryEntry = {
                       id: newId, taskName: '', elapsed: DAY_DURATION_MS,
                       startedAt: dayStart, endedAt: dayStart + DAY_DURATION_MS,
-                      goalName: null, bucketName: null, goalId: null, bucketId: null, taskId: null,
-                      goalSurface: DEFAULT_SURFACE_STYLE, bucketSurface: null, notes: '', subtasks: [],
+                      goalName: LIFE_ROUTINES_NAME, bucketName: null, goalId: LIFE_ROUTINES_GOAL_ID, bucketId: null, taskId: null,
+                      goalSurface: LIFE_ROUTINES_SURFACE, bucketSurface: null, notes: '', subtasks: [],
                     }
                     updateHistory((current) => { const next = [...current, newEntry]; next.sort((a, b) => a.startedAt - b.startedAt); return next })
                     setPendingNewHistoryId(newId)
@@ -9658,9 +10065,9 @@ useEffect(() => {
                 const handleCalendarColumnPointerDown = (ev: ReactPointerEvent<HTMLDivElement>) => {
                   if (ev.button !== 0) return
                   const targetEl = ev.currentTarget as HTMLDivElement
-                  // Ignore if starting on an existing event
+                  // Ignore if starting on an existing event or timezone marker
                   const rawTarget = ev.target as HTMLElement | null
-                  if (rawTarget && rawTarget.closest('.calendar-event')) return
+                  if (rawTarget && (rawTarget.closest('.calendar-event') || rawTarget.closest('.calendar-timezone-marker'))) return
                   const daysRoot = calendarDaysRef.current
                   const area = calendarDaysAreaRef.current
                   if (!daysRoot || !area) return
@@ -9859,15 +10266,15 @@ useEffect(() => {
                         const newEntry: HistoryEntry = {
                           id: newId,
                           taskName: '',
-                          goalName: null,
+                          goalName: LIFE_ROUTINES_NAME,
                           bucketName: null,
-                          goalId: null,
+                          goalId: LIFE_ROUTINES_GOAL_ID,
                           bucketId: null,
                           taskId: null,
                           elapsed,
                           startedAt,
                           endedAt,
-                          goalSurface: DEFAULT_SURFACE_STYLE,
+                          goalSurface: LIFE_ROUTINES_SURFACE,
                           bucketSurface: null,
                           notes: '',
                           subtasks: [],
@@ -9922,6 +10329,88 @@ useEffect(() => {
                       const isDragging = dragPreview?.entryId === ev.entry.id
                       const dragTime = isDragging ? ev.rangeLabel : undefined
                       const isOutline = !!ev.isGuide || !!ev.isPlanned
+                      
+                      // Check if this is a timezone change marker
+                      const isTimezoneMarker = ev.entry.bucketName?.trim() === TIMEZONE_CHANGE_MARKER
+                      
+                      // Render timezone markers as horizontal indicator lines instead of event blocks
+                      if (isTimezoneMarker) {
+                        return (
+                          <div
+                            key={`tz-${di}-${idx}-${ev.entry.id}`}
+                            className="calendar-timezone-marker"
+                            style={{
+                              position: 'absolute',
+                              top: `${ev.topPct}%`,
+                              left: '0',
+                              right: '0',
+                              transform: 'translateY(-50%)',
+                              // Use padding to create a larger hit area while keeping the visual line thin
+                              height: '20px',
+                              display: 'flex',
+                              alignItems: 'center',
+                              zIndex: ev.zIndex + 10,
+                              cursor: 'grab',
+                              pointerEvents: 'auto',
+                            }}
+                            data-entry-id={ev.entry.id}
+                            role="button"
+                            aria-label={`Timezone change marker at ${ev.rangeLabel}`}
+                            title={`Timezone Change · ${formatTimeOfDay(ev.entry.startedAt)}`}
+                            onClick={(e) => {
+                              if (dragPreventClickRef.current) {
+                                dragPreventClickRef.current = false
+                                return
+                              }
+                              // Suppress the first click if closing/opening race just occurred
+                              if (suppressEventOpenRef.current) {
+                                suppressEventOpenRef.current = false
+                                return
+                              }
+                              // If clicking the same entry that's already previewed, toggle it closed
+                              if (calendarPreview && calendarPreview.entryId === ev.entry.id) {
+                                handleCloseCalendarPreview()
+                                return
+                              }
+                              handleOpenCalendarPreview(ev.entry, e.currentTarget)
+                            }}
+                            onDoubleClick={(e) => {
+                              e.preventDefault()
+                              e.stopPropagation()
+                              setSelectedHistoryId(ev.entry.id)
+                              setHoveredHistoryId(ev.entry.id)
+                              setEditingHistoryId(ev.entry.id)
+                              taskNameAutofilledRef.current = false
+                              setHistoryDraft(createHistoryDraftFromEntry(ev.entry))
+                              openCalendarInspector(ev.entry)
+                              handleCloseCalendarPreview()
+                            }}
+                            onPointerDown={(pev) => {
+                              // Set grabbing cursor while dragging
+                              (pev.currentTarget as HTMLElement).style.cursor = 'grabbing'
+                              // Only allow move drag for timezone markers (no resize)
+                              handleCalendarEventPointerDown(ev.entry, start, true)(pev)
+                            }}
+                            onPointerUp={(pev) => {
+                              // Restore grab cursor after drag
+                              (pev.currentTarget as HTMLElement).style.cursor = 'grab'
+                            }}
+                          >
+                            {/* The visible line */}
+                            <div
+                              style={{
+                                width: '100%',
+                                height: 'clamp(2px, 0.4vw, 3px)',
+                                borderRadius: '999px',
+                                background: 'linear-gradient(90deg, rgba(250, 72, 64, 0.96) 0%, rgba(200, 26, 26, 0.96) 100%)',
+                                boxShadow: '0 0 0 0.8px rgba(255, 255, 255, 0.24), 0 0 10px rgba(255, 72, 64, 0.45)',
+                                pointerEvents: 'none',
+                              }}
+                            />
+                          </div>
+                        )
+                      }
+                      
                       const backgroundStyle: CSSProperties = ev.isGuide
                         ? { background: 'transparent' }
                         : ev.isPlanned
@@ -11218,6 +11707,14 @@ useEffect(() => {
     if (!calendarEditorEntryId || typeof document === 'undefined') return null
     const entry = history.find((h) => h.id === calendarEditorEntryId) || null
     if (!entry) return null
+    
+    // Check if this entry is a timezone change marker (use draft bucket which has current selection)
+    const currentGoal = historyDraft.goalName.trim() || entry.goalName?.trim() || ''
+    const currentBucket = historyDraft.bucketName.trim() || entry.bucketName?.trim() || ''
+    const editorIsTimezoneChangeMarker = 
+      currentGoal.toLowerCase() === LIFE_ROUTINES_NAME.toLowerCase() &&
+      currentBucket === TIMEZONE_CHANGE_MARKER
+    
     // Resolve current values
     const startBase = entry.startedAt
     const endBase = entry.endedAt
@@ -11225,6 +11722,10 @@ useEffect(() => {
     const resolvedEnd = resolveTimestamp(historyDraft.endedAt, endBase)
     const shiftStartAndPreserveDuration = (nextStart: number) => {
       setHistoryDraft((draft) => {
+        // For timezone markers, keep start and end synchronized
+        if (editorIsTimezoneChangeMarker) {
+          return { ...draft, startedAt: nextStart, endedAt: nextStart }
+        }
         return { ...draft, startedAt: nextStart }
       })
     }
@@ -11279,6 +11780,36 @@ useEffect(() => {
                 onKeyDown={handleHistoryFieldKeyDown}
               />
             </label>
+            {editorIsTimezoneChangeMarker ? (
+              <>
+                <label className="history-timeline__field">
+                  <span className="history-timeline__field-text">From</span>
+                  <TimezoneSearchDropdown
+                    id={`timezone-from-editor-${calendarEditorEntryId}`}
+                    value={historyDraft.timezoneFrom}
+                    placeholder="Search city (e.g. Sydney)"
+                    onChange={(value) => setHistoryDraft((draft) => ({
+                      ...draft,
+                      timezoneFrom: value,
+                      taskName: generateTimezoneSessionName(value, draft.timezoneTo),
+                    }))}
+                  />
+                </label>
+                <label className="history-timeline__field">
+                  <span className="history-timeline__field-text">To</span>
+                  <TimezoneSearchDropdown
+                    id={`timezone-to-editor-${calendarEditorEntryId}`}
+                    value={historyDraft.timezoneTo}
+                    placeholder="Search city (e.g. New York)"
+                    onChange={(value) => setHistoryDraft((draft) => ({
+                      ...draft,
+                      timezoneTo: value,
+                      taskName: generateTimezoneSessionName(draft.timezoneFrom, value),
+                    }))}
+                  />
+                </label>
+              </>
+            ) : null}
             {/* All-day toggle removed per request; preserve read-only all-day state via isDraftAllDay to hide time pickers */}
             <label className="history-timeline__field">
               <span className="history-timeline__field-text">Start</span>
@@ -11307,6 +11838,7 @@ useEffect(() => {
                 )}
               </div>
             </label>
+            {editorIsTimezoneChangeMarker ? null : (
             <label className="history-timeline__field">
               <span className="history-timeline__field-text">End</span>
               <div
@@ -11342,6 +11874,7 @@ useEffect(() => {
                 )}
               </div>
             </label>
+            )}
                             <div className="history-timeline__field">
                               <label className="history-timeline__field-text" htmlFor={goalDropdownId} id={goalDropdownLabelId}>
                                 Goal
@@ -11653,15 +12186,15 @@ useEffect(() => {
           const newEntry: HistoryEntry = {
             id: makeHistoryId(),
             taskName: '',
-            goalName: null,
+            goalName: LIFE_ROUTINES_NAME,
             bucketName: null,
-            goalId: null,
+            goalId: LIFE_ROUTINES_GOAL_ID,
             bucketId: null,
             taskId: null,
             elapsed,
             startedAt,
             endedAt,
-            goalSurface: DEFAULT_SURFACE_STYLE,
+            goalSurface: LIFE_ROUTINES_SURFACE,
             bucketSurface: null,
             notes: '',
             subtasks: [],
@@ -11826,6 +12359,13 @@ useEffect(() => {
   const inspectorEntry =
     calendarInspectorEntryId ? history.find((entry) => entry.id === calendarInspectorEntryId) ?? null : null
 
+  // Compute isTimezoneChangeMarker locally for the inspector, based on draft bucket (current selection)
+  const inspectorCurrentGoal = historyDraft.goalName.trim() || inspectorEntry?.goalName?.trim() || ''
+  const inspectorCurrentBucket = historyDraft.bucketName.trim() || inspectorEntry?.bucketName?.trim() || ''
+  const inspectorIsTimezoneChangeMarker = 
+    inspectorCurrentGoal.toLowerCase() === LIFE_ROUTINES_NAME.toLowerCase() &&
+    inspectorCurrentBucket === TIMEZONE_CHANGE_MARKER
+
   let calendarInspectorPanel: ReactElement | null = null
   if (calendarInspectorEntryId !== null) {
     if (inspectorEntry) {
@@ -11835,6 +12375,10 @@ useEffect(() => {
       const resolvedEnd = resolveTimestamp(historyDraft.endedAt, endBase)
       const shiftStartAndPreserveDuration = (nextStart: number) => {
         setHistoryDraft((draft) => {
+          // For timezone markers, keep start and end synchronized
+          if (inspectorIsTimezoneChangeMarker) {
+            return { ...draft, startedAt: nextStart, endedAt: nextStart }
+          }
           return { ...draft, startedAt: nextStart }
         })
       }
@@ -11996,6 +12540,36 @@ useEffect(() => {
                       onKeyDown={handleHistoryFieldKeyDown}
                     />
                   </label>
+                  {inspectorIsTimezoneChangeMarker ? (
+                    <>
+                      <label className="history-timeline__field">
+                        <span className="history-timeline__field-text">From</span>
+                        <TimezoneSearchDropdown
+                          id={`timezone-from-${calendarInspectorEntryId}`}
+                          value={historyDraft.timezoneFrom}
+                          placeholder="Search city (e.g. Sydney)"
+                          onChange={(value) => setHistoryDraft((draft) => ({
+                            ...draft,
+                            timezoneFrom: value,
+                            taskName: generateTimezoneSessionName(value, draft.timezoneTo),
+                          }))}
+                        />
+                      </label>
+                      <label className="history-timeline__field">
+                        <span className="history-timeline__field-text">To</span>
+                        <TimezoneSearchDropdown
+                          id={`timezone-to-${calendarInspectorEntryId}`}
+                          value={historyDraft.timezoneTo}
+                          placeholder="Search city (e.g. New York)"
+                          onChange={(value) => setHistoryDraft((draft) => ({
+                            ...draft,
+                            timezoneTo: value,
+                            taskName: generateTimezoneSessionName(draft.timezoneFrom, value),
+                          }))}
+                        />
+                      </label>
+                    </>
+                  ) : null}
                   <div className="calendar-inspector__schedule">
                     <div className="calendar-inspector__schedule-row">
                       <label className="calendar-inspector__schedule-group">
@@ -12022,6 +12596,7 @@ useEffect(() => {
                           />
                         </div>
                       </label>
+                      {inspectorIsTimezoneChangeMarker ? null : (
                       <label className="calendar-inspector__schedule-group">
                         <span className="calendar-inspector__schedule-heading">End</span>
                     <div
@@ -12055,6 +12630,7 @@ useEffect(() => {
                           />
                         </div>
                       </label>
+                      )}
                     </div>
                   </div>
                   {inspectorRepeatControl}
@@ -12173,6 +12749,36 @@ useEffect(() => {
                   onKeyDown={handleHistoryFieldKeyDown}
                 />
               </label>
+              {inspectorIsTimezoneChangeMarker ? (
+                <>
+                  <label className="history-timeline__field">
+                    <span className="history-timeline__field-text">From</span>
+                    <TimezoneSearchDropdown
+                      id={`timezone-from-legacy-${calendarInspectorEntryId}`}
+                      value={historyDraft.timezoneFrom}
+                      placeholder="Search city (e.g. Sydney)"
+                      onChange={(value) => setHistoryDraft((draft) => ({
+                        ...draft,
+                        timezoneFrom: value,
+                        taskName: generateTimezoneSessionName(value, draft.timezoneTo),
+                      }))}
+                    />
+                  </label>
+                  <label className="history-timeline__field">
+                    <span className="history-timeline__field-text">To</span>
+                    <TimezoneSearchDropdown
+                      id={`timezone-to-legacy-${calendarInspectorEntryId}`}
+                      value={historyDraft.timezoneTo}
+                      placeholder="Search city (e.g. New York)"
+                      onChange={(value) => setHistoryDraft((draft) => ({
+                        ...draft,
+                        timezoneTo: value,
+                        taskName: generateTimezoneSessionName(draft.timezoneFrom, value),
+                      }))}
+                    />
+                  </label>
+                </>
+              ) : null}
               <div className="calendar-inspector__schedule legacy-editor-panel__schedule">
                 <div className="calendar-inspector__schedule-row">
                   <label className="calendar-inspector__schedule-group">
@@ -12190,6 +12796,7 @@ useEffect(() => {
                       />
                     </div>
                   </label>
+                  {inspectorIsTimezoneChangeMarker ? null : (
                   <label className="calendar-inspector__schedule-group">
                     <span className="calendar-inspector__schedule-heading">End</span>
                     <div
@@ -12223,6 +12830,7 @@ useEffect(() => {
                       />
                     </div>
                   </label>
+                  )}
                 </div>
               </div>
               {inspectorRepeatControl}
@@ -12886,7 +13494,47 @@ useEffect(() => {
                 aria-hidden="true"
               />
             ) : null}
-            {daySegments.map((segment) => {
+            {/* Render timezone change markers as indicator lines */}
+            {timezoneMarkers.map((marker) => {
+              const isSelected = marker.entry.id === selectedHistoryId
+              const markerClassName = [
+                'history-timeline__timezone-marker',
+                isSelected ? 'history-timeline__timezone-marker--selected' : '',
+              ].filter(Boolean).join(' ')
+              
+              return (
+                <div
+                  key={`tz-marker-${marker.id}-${marker.start}`}
+                  className={markerClassName}
+                  style={{ 
+                    left: `${marker.leftPercent}%`,
+                    cursor: 'grab',
+                  }}
+                  tabIndex={0}
+                  role="button"
+                  aria-pressed={isSelected}
+                  aria-label={`Timezone change marker at ${formatTimeOfDay(marker.start)}`}
+                  title={`Timezone Change · ${formatTimeOfDay(marker.start)}`}
+                  onClick={(event) => {
+                    event.stopPropagation()
+                    handleSelectHistorySegment(marker.entry)
+                  }}
+                  onDoubleClick={(event) => {
+                    event.stopPropagation()
+                    openCalendarInspector(marker.entry)
+                  }}
+                  onKeyDown={handleTimelineBlockKeyDown(marker.entry)}
+                  onPointerDown={(event) => {
+                    // Allow dragging the marker (move only, no resize)
+                    if (event.button === 0) {
+                      handleSelectHistorySegment(marker.entry)
+                      startDrag(event, marker, 'move')
+                    }
+                  }}
+                />
+              )
+            })}
+            {regularSegments.map((segment) => {
               const isSelected = segment.entry.id === selectedHistoryId
               const isActiveSegment = segment.entry.id === 'active-session'
               const isEditing = editingHistoryId === segment.entry.id
@@ -12922,8 +13570,57 @@ useEffect(() => {
               const trimmedGoalDraft = historyDraft.goalName.trim()
               const trimmedBucketDraft = historyDraft.bucketName.trim()
               const resolvedDurationMs = Math.max(resolvedEndedAt - resolvedStartedAt, 0)
-              const displayGoal = trimmedGoalDraft.length > 0 ? trimmedGoalDraft : segment.goalLabel
-              const displayBucket = trimmedBucketDraft.length > 0 ? trimmedBucketDraft : segment.bucketLabel
+              const displayGoal = isSelected && trimmedGoalDraft.length > 0 ? trimmedGoalDraft : segment.goalLabel
+              const displayBucket = isSelected && trimmedBucketDraft.length > 0 ? trimmedBucketDraft : segment.bucketLabel
+              
+              // Check if this should render as a timezone marker
+              // Check: 1) saved bucket, 2) draft bucket (when selected), 3) the segment's label
+              const savedBucket = segment.entry.bucketName?.trim() ?? ''
+              const isTimezoneMarkerSegment = 
+                savedBucket === TIMEZONE_CHANGE_MARKER ||
+                displayBucket === TIMEZONE_CHANGE_MARKER ||
+                (isSelected && trimmedBucketDraft === TIMEZONE_CHANGE_MARKER)
+              
+              // If this segment should be a timezone change marker, render it as an indicator line
+              if (isTimezoneMarkerSegment) {
+                const markerClassName = [
+                  'history-timeline__timezone-marker',
+                  isSelected ? 'history-timeline__timezone-marker--selected' : '',
+                ].filter(Boolean).join(' ')
+                
+                return (
+                  <div
+                    key={`tz-segment-${segment.id}-${segment.start}`}
+                    className={markerClassName}
+                    style={{ 
+                      left: `${segment.leftPercent}%`,
+                      cursor: 'grab',
+                    }}
+                    tabIndex={0}
+                    role="button"
+                    aria-pressed={isSelected}
+                    aria-label={`Timezone change marker at ${formatTimeOfDay(resolvedStartedAt)}`}
+                    title={`Timezone Change · ${formatTimeOfDay(resolvedStartedAt)}`}
+                    onClick={(event) => {
+                      event.stopPropagation()
+                      handleSelectHistorySegment(segment.entry)
+                    }}
+                    onDoubleClick={(event) => {
+                      event.stopPropagation()
+                      openCalendarInspector(segment.entry)
+                    }}
+                    onKeyDown={handleTimelineBlockKeyDown(segment.entry)}
+                    onPointerDown={(event) => {
+                      // Allow dragging the marker (move only, no resize)
+                      if (event.button === 0) {
+                        handleSelectHistorySegment(segment.entry)
+                        startDrag(event, segment, 'move')
+                      }
+                    }}
+                  />
+                )
+              }
+              
               const timeRangeLabel = (() => {
                 const startDate = new Date(resolvedStartedAt)
                 const endDate = new Date(resolvedEndedAt)

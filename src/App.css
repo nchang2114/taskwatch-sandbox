@@ -2921,6 +2921,35 @@ html[data-theme='light'] .settings-panel__group {
   content: none;
 }
 
+/* Timezone change marker - vertical indicator line matching current time indicator style */
+.history-timeline__timezone-marker {
+  position: absolute;
+  top: clamp(-0.4rem, -1.4vw, -0.6rem);
+  bottom: clamp(-1.2rem, -2.6vw, -1.5rem);
+  transform: translateX(-50%);
+  width: clamp(2px, 0.5vw, 2.5px);
+  border-radius: 999px;
+  background: linear-gradient(180deg, rgba(250, 72, 64, 0.96) 0%, rgba(200, 26, 26, 0.96) 100%);
+  box-shadow:
+    0 0 0 0.8px rgba(255, 255, 255, 0.24),
+    0 0 14px rgba(255, 72, 64, 0.45);
+  z-index: 3;
+  cursor: pointer;
+}
+
+.history-timeline__timezone-marker:hover,
+.history-timeline__timezone-marker:focus {
+  box-shadow:
+    0 0 0 1.2px rgba(255, 255, 255, 0.4),
+    0 0 18px rgba(255, 72, 64, 0.6);
+}
+
+.history-timeline__timezone-marker--selected {
+  box-shadow:
+    0 0 0 1.5px rgba(255, 255, 255, 0.5),
+    0 0 20px rgba(255, 72, 64, 0.7);
+}
+
 .history-timeline__tooltip-task {
   margin: 0;
   font-weight: 600;
