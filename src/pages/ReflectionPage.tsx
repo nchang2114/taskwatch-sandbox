@@ -3276,14 +3276,29 @@ export default function ReflectionPage() {
   const [appTimezone, setAppTimezone] = useState<string | null>(() => readStoredAppTimezone())
   // Deferred timezone for heavy computations (calendar/timeline) - avoids blocking UI
   const deferredAppTimezone = useDeferredValue(appTimezone)
+  // Ref to access deferred timezone without adding it as a dependency to heavy callbacks
+  const deferredAppTimezoneRef = useRef(deferredAppTimezone)
+  // Version counter to trigger calendar re-render after timezone changes (with delay)
+  const [timezoneVersion, setTimezoneVersion] = useState(0)
+  useEffect(() => {
+    deferredAppTimezoneRef.current = deferredAppTimezone
+    // Schedule a re-render with a small delay to let interactions process first
+    const timer = setTimeout(() => {
+      setTimezoneVersion((v) => v + 1)
+    }, 50)
+    return () => clearTimeout(timer)
+  }, [deferredAppTimezone])
   
   // Handler to update app timezone and persist to localStorage
-  // Wrapped in startTransition to avoid blocking UI during heavy calendar re-renders
+  // Uses setTimeout(0) to yield to browser event loop, then startTransition for the heavy re-render
   const updateAppTimezone = useCallback((timezone: string | null) => {
     storeAppTimezone(timezone)
-    startTransition(() => {
-      setAppTimezone(timezone)
-    })
+    // Yield to browser first so pending interactions can process
+    setTimeout(() => {
+      startTransition(() => {
+        setAppTimezone(timezone)
+      })
+    }, 0)
   }, [])
   
   // Timezone-aware time formatter - uses DEFERRED app timezone for calendar rendering
@@ -7671,6 +7686,8 @@ useEffect(() => {
         anchorEl: HTMLElement | null
       }
   >(null)
+  // Deferred preview state for calendar rendering - avoids blocking UI when opening/closing popover
+  const deferredCalendarPreview = useDeferredValue(calendarPreview)
   const calendarPreviewRef = useRef<HTMLDivElement | null>(null)
   const [calendarPopoverEditing, setCalendarPopoverEditing] = useState<CalendarPopoverEditingState | null>(null)
   const calendarPopoverFocusedEntryRef = useRef<string | null>(null)
@@ -7909,7 +7926,7 @@ useEffect(() => {
         const evEl = (node.closest('.calendar-event') || node.closest('.calendar-allday-event') || node.closest('.calendar-timezone-marker')) as HTMLElement | null
         const tappedId = evEl?.dataset.entryId
         if (tappedId) {
-          if (calendarPreview && calendarPreview.entryId === tappedId) {
+          if (deferredCalendarPreview && deferredCalendarPreview.entryId === tappedId) {
             suppressNextEventOpen()
             handleCloseCalendarPreview()
             return
@@ -8877,16 +8894,17 @@ useEffect(() => {
 
   // Build minimal calendar content for non-day views
   const renderCalendarContent = useCallback(() => {
-    // Local timezone helpers that use deferredAppTimezone directly
-    // This avoids callback identity changes triggering re-renders
+    // Local timezone helpers that use ref to avoid dependency changes triggering re-renders
+    // The ref always has the latest deferred timezone value
     const localAdjustTimestamp = (timestamp: number): number => {
-      if (!deferredAppTimezone) return timestamp
+      const tz = deferredAppTimezoneRef.current
+      if (!tz) return timestamp
       const systemTz = getCurrentSystemTimezone()
-      if (systemTz === deferredAppTimezone) return timestamp
-      return timestamp + getTimezoneOffsetMs(timestamp, systemTz, deferredAppTimezone)
+      if (systemTz === tz) return timestamp
+      return timestamp + getTimezoneOffsetMs(timestamp, systemTz, tz)
     }
     const localFormatTime = (timestamp: number): string => {
-      return formatTimeOfDay(timestamp, deferredAppTimezone)
+      return formatTimeOfDay(timestamp, deferredAppTimezoneRef.current)
     }
     
     const entries = effectiveHistory
@@ -10205,7 +10223,7 @@ useEffect(() => {
                     e.preventDefault(); e.stopPropagation()
                     if (dragPreventClickRef.current) { dragPreventClickRef.current = false; return }
                     if (suppressEventOpenRef.current) { suppressEventOpenRef.current = false; return }
-                    if (calendarPreview && calendarPreview.entryId === bar.entry.id) { handleCloseCalendarPreview(); return }
+                    if (deferredCalendarPreview && deferredCalendarPreview.entryId === bar.entry.id) { handleCloseCalendarPreview(); return }
                     handleOpenCalendarPreview(bar.entry, e.currentTarget as HTMLElement)
                   }}
                   onDoubleClick={(e) => {
@@ -10674,7 +10692,7 @@ useEffect(() => {
                                 return
                               }
                               // If clicking the same entry that's already previewed, toggle it closed
-                              if (calendarPreview && calendarPreview.entryId === ev.entry.id) {
+                              if (deferredCalendarPreview && deferredCalendarPreview.entryId === ev.entry.id) {
                                 handleCloseCalendarPreview()
                                 return
                               }
@@ -10751,7 +10769,7 @@ useEffect(() => {
                             return
                           }
                           // If clicking the same entry that's already previewed, toggle it closed
-                          if (calendarPreview && calendarPreview.entryId === ev.entry.id) {
+                          if (deferredCalendarPreview && deferredCalendarPreview.entryId === ev.entry.id) {
                             handleCloseCalendarPreview()
                             return
                           }
@@ -11271,7 +11289,7 @@ useEffect(() => {
     enhancedGoalLookup,
     goalColorLookup,
     lifeRoutineSurfaceLookup,
-    calendarPreview,
+    deferredCalendarPreview,
     handleOpenCalendarPreview,
     handleCloseCalendarPreview,
     animateCalendarPan,
@@ -11284,8 +11302,8 @@ useEffect(() => {
     setHistoryDayOffset,
     navigateByDelta,
     stepSizeByView,
-    // Use deferred timezone directly - this allows React to batch/defer the heavy re-render
-    deferredAppTimezone,
+    // Timezone version triggers re-render after a delay, allowing interactions to process first
+    timezoneVersion,
   ])
 
   // Simple inline icons for popover actions
