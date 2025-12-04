@@ -3274,6 +3274,8 @@ const computeRangeOverview = (
 export default function ReflectionPage() {
   // App timezone override - allows user to switch timezones without changing system settings
   const [appTimezone, setAppTimezone] = useState<string | null>(() => readStoredAppTimezone())
+  // Deferred timezone for heavy computations (calendar/timeline) - avoids blocking UI
+  const deferredAppTimezone = useDeferredValue(appTimezone)
   
   // Handler to update app timezone and persist to localStorage
   // Wrapped in startTransition to avoid blocking UI during heavy calendar re-renders
@@ -3284,12 +3286,12 @@ export default function ReflectionPage() {
     })
   }, [])
   
-  // Timezone-aware time formatter - uses app timezone when set
+  // Timezone-aware time formatter - uses DEFERRED app timezone for calendar rendering
   const formatTime = useCallback((timestamp: number) => {
-    return formatTimeOfDay(timestamp, appTimezone)
-  }, [appTimezone])
+    return formatTimeOfDay(timestamp, deferredAppTimezone)
+  }, [deferredAppTimezone])
   
-  // Get display name for current effective timezone
+  // Get display name for current effective timezone (uses immediate value for UI)
   const effectiveTimezoneDisplay = useMemo(() => {
     const effective = appTimezone || getCurrentSystemTimezone()
     // Try to find a friendly city name for this timezone
@@ -3301,20 +3303,20 @@ export default function ReflectionPage() {
     return effective.replace(/_/g, ' ').split('/').pop() || effective
   }, [appTimezone])
   
-  // Check if app timezone differs from system timezone
+  // Check if app timezone differs from system timezone (uses immediate value for UI)
   const isUsingCustomTimezone = useMemo(() => {
     if (!appTimezone) return false
     return appTimezone !== getCurrentSystemTimezone()
   }, [appTimezone])
   
   // Adjust a timestamp from system timezone to app timezone for visual positioning
-  // This shifts the timestamp so that when interpreted as local time, it shows the correct position
+  // Uses DEFERRED timezone to avoid blocking UI during heavy calendar re-renders
   const adjustTimestampForTimezone = useCallback((timestamp: number): number => {
-    if (!appTimezone) return timestamp
+    if (!deferredAppTimezone) return timestamp
     const systemTz = getCurrentSystemTimezone()
-    if (systemTz === appTimezone) return timestamp
-    return timestamp + getTimezoneOffsetMs(timestamp, systemTz, appTimezone)
-  }, [appTimezone])
+    if (systemTz === deferredAppTimezone) return timestamp
+    return timestamp + getTimezoneOffsetMs(timestamp, systemTz, deferredAppTimezone)
+  }, [deferredAppTimezone])
   
   type CalendarViewMode = 'day' | '3d' | 'week' | 'month' | 'year'
   const [calendarView, setCalendarView] = useState<CalendarViewMode>('3d')
@@ -8875,6 +8877,18 @@ useEffect(() => {
 
   // Build minimal calendar content for non-day views
   const renderCalendarContent = useCallback(() => {
+    // Local timezone helpers that use deferredAppTimezone directly
+    // This avoids callback identity changes triggering re-renders
+    const localAdjustTimestamp = (timestamp: number): number => {
+      if (!deferredAppTimezone) return timestamp
+      const systemTz = getCurrentSystemTimezone()
+      if (systemTz === deferredAppTimezone) return timestamp
+      return timestamp + getTimezoneOffsetMs(timestamp, systemTz, deferredAppTimezone)
+    }
+    const localFormatTime = (timestamp: number): string => {
+      return formatTimeOfDay(timestamp, deferredAppTimezone)
+    }
+    
     const entries = effectiveHistory
     const dayHasSessions = (startMs: number, endMs: number) =>
       entries.some((e) => Math.min(e.endedAt, endMs) > Math.max(e.startedAt, startMs))
@@ -9295,8 +9309,8 @@ useEffect(() => {
             // For actual sessions (not guides), adjust timestamps for app timezone
             // Guide tasks (repeating rules) should stay in their original scheduled time
             const isGuideEntry = entry.id.startsWith('repeat:')
-            const previewStart = isGuideEntry ? rawStart : adjustTimestampForTimezone(rawStart)
-            const previewEnd = isGuideEntry ? rawEnd : adjustTimestampForTimezone(rawEnd)
+            const previewStart = isGuideEntry ? rawStart : localAdjustTimestamp(rawStart)
+            const previewEnd = isGuideEntry ? rawEnd : localAdjustTimestamp(rawEnd)
             
             const clampedStart = Math.max(Math.min(previewStart, previewEnd), startMs)
             const clampedEnd = Math.min(Math.max(previewStart, previewEnd), endMs)
@@ -9702,7 +9716,7 @@ useEffect(() => {
           // Actual sessions should use timezone-adjusted times
           const rangeLabel = isGuide
             ? `${formatTimeOfDay(info.previewStart)} — ${formatTimeOfDay(info.previewEnd)}`
-            : `${formatTime(info.previewStart)} — ${formatTime(info.previewEnd)}`
+            : `${localFormatTime(info.previewStart)} — ${localFormatTime(info.previewEnd)}`
 
           const duration = Math.max(info.end - info.start, 1)
           const durationScore = Math.max(0, Math.round((DAY_DURATION_MS - duration) / MINUTE_MS))
@@ -10648,7 +10662,7 @@ useEffect(() => {
                             data-entry-id={ev.entry.id}
                             role="button"
                             aria-label={`Timezone change marker at ${ev.rangeLabel}`}
-                            title={`Timezone Change · ${formatTime(ev.entry.startedAt)}`}
+                            title={`Timezone Change · ${localFormatTime(ev.entry.startedAt)}`}
                             onClick={(e) => {
                               if (dragPreventClickRef.current) {
                                 dragPreventClickRef.current = false
@@ -10844,7 +10858,7 @@ useEffect(() => {
                       if (endClamped <= startClamped) return null
                       const topPct = ((startClamped - dayStart) / DAY_DURATION_MS) * 100
                       const heightPct = Math.max(((endClamped - startClamped) / DAY_DURATION_MS) * 100, (MINUTE_MS / DAY_DURATION_MS) * 100)
-                      const label = `${formatTime(startClamped)} — ${formatTime(endClamped)}`
+                      const label = `${localFormatTime(startClamped)} — ${localFormatTime(endClamped)}`
                       return (
                         <div
                           className="calendar-event calendar-event--dragging"
@@ -11270,8 +11284,8 @@ useEffect(() => {
     setHistoryDayOffset,
     navigateByDelta,
     stepSizeByView,
-    adjustTimestampForTimezone,
-    formatTime,
+    // Use deferred timezone directly - this allows React to batch/defer the heavy re-render
+    deferredAppTimezone,
   ])
 
   // Simple inline icons for popover actions
