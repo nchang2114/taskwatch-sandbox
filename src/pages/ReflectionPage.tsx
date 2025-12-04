@@ -726,6 +726,9 @@ const CITY_TO_IANA_TIMEZONE: Record<string, string> = {
   'Bogota, Colombia': 'America/Bogota',
 }
 
+// App timezone override - stored in localStorage
+const APP_TIMEZONE_STORAGE_KEY = 'taskwatch_app_timezone'
+
 // Get IANA timezone from city name (full "City, Country" format)
 const getIanaTimezoneForCity = (cityFullName: string): string | null => {
   return CITY_TO_IANA_TIMEZONE[cityFullName] ?? null
@@ -736,12 +739,95 @@ const getCurrentSystemTimezone = (): string => {
   return Intl.DateTimeFormat().resolvedOptions().timeZone
 }
 
-// Check if a city's timezone matches the current system timezone
-const isCityInCurrentTimezone = (cityFullName: string): boolean => {
+// Read app timezone override from localStorage
+const readStoredAppTimezone = (): string | null => {
+  if (typeof localStorage === 'undefined') return null
+  try {
+    return localStorage.getItem(APP_TIMEZONE_STORAGE_KEY)
+  } catch {
+    return null
+  }
+}
+
+// Save app timezone override to localStorage
+const storeAppTimezone = (timezone: string | null): void => {
+  if (typeof localStorage === 'undefined') return
+  try {
+    if (timezone) {
+      localStorage.setItem(APP_TIMEZONE_STORAGE_KEY, timezone)
+    } else {
+      localStorage.removeItem(APP_TIMEZONE_STORAGE_KEY)
+    }
+  } catch {
+    // ignore
+  }
+}
+
+// Get effective timezone (app override if set, otherwise system)
+const getEffectiveTimezone = (appTimezoneOverride: string | null): string => {
+  return appTimezoneOverride || getCurrentSystemTimezone()
+}
+
+// Check if a city's timezone matches the effective app timezone
+const isCityInEffectiveTimezone = (cityFullName: string, appTimezoneOverride: string | null): boolean => {
   const cityTimezone = getIanaTimezoneForCity(cityFullName)
   if (!cityTimezone) return false
-  const currentTimezone = getCurrentSystemTimezone()
-  return cityTimezone === currentTimezone
+  const effectiveTimezone = getEffectiveTimezone(appTimezoneOverride)
+  return cityTimezone === effectiveTimezone
+}
+
+// Get the offset in milliseconds between two timezones at a given timestamp
+// Returns (targetTz offset - sourceTz offset), so adding this to a sourceTz timestamp
+// gives the equivalent time in targetTz
+const getTimezoneOffsetMs = (timestamp: number, sourceTz: string, targetTz: string): number => {
+  if (sourceTz === targetTz) return 0
+  
+  // Get the local time components in each timezone
+  const dateInSource = new Date(timestamp)
+  const dateInTarget = new Date(timestamp)
+  
+  // Format to get the offset for each timezone
+  const sourceFormatter = new Intl.DateTimeFormat('en-US', {
+    timeZone: sourceTz,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hour12: false,
+  })
+  const targetFormatter = new Intl.DateTimeFormat('en-US', {
+    timeZone: targetTz,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hour12: false,
+  })
+  
+  // Parse the formatted strings back to dates in UTC context
+  const parseFormattedDate = (formatted: string): number => {
+    // Format is: MM/DD/YYYY, HH:MM:SS
+    const [datePart, timePart] = formatted.split(', ')
+    const [month, day, year] = datePart.split('/')
+    const [hour, minute, second] = timePart.split(':')
+    return Date.UTC(
+      parseInt(year, 10),
+      parseInt(month, 10) - 1,
+      parseInt(day, 10),
+      parseInt(hour, 10),
+      parseInt(minute, 10),
+      parseInt(second, 10)
+    )
+  }
+  
+  const sourceUtc = parseFormattedDate(sourceFormatter.format(dateInSource))
+  const targetUtc = parseFormattedDate(targetFormatter.format(dateInTarget))
+  
+  return targetUtc - sourceUtc
 }
 
 // Snapback virtual goal
@@ -1811,8 +1897,19 @@ const computePieValueFontSize = (label: string): string => {
   return `clamp(${min}rem, ${vwScale}vw, ${maxAfterLength}rem)`
 }
 
-const formatTimeOfDay = (timestamp: number) => {
+const formatTimeOfDay = (timestamp: number, timezone?: string | null) => {
   const date = new Date(timestamp)
+  if (timezone) {
+    // Use Intl.DateTimeFormat for timezone-aware formatting
+    const formatter = new Intl.DateTimeFormat('en-US', {
+      hour: 'numeric',
+      minute: '2-digit',
+      hour12: true,
+      timeZone: timezone,
+    })
+    return formatter.format(date).replace(' ', '') // Remove space before AM/PM to match original format
+  }
+  // Fallback to local time if no timezone specified
   const hours24 = date.getHours()
   const minutes = date.getMinutes().toString().padStart(2, '0')
   const period = hours24 >= 12 ? 'PM' : 'AM'
@@ -3175,6 +3272,47 @@ const computeRangeOverview = (
 }
 
 export default function ReflectionPage() {
+  // App timezone override - allows user to switch timezones without changing system settings
+  const [appTimezone, setAppTimezone] = useState<string | null>(() => readStoredAppTimezone())
+  
+  // Handler to update app timezone and persist to localStorage
+  const updateAppTimezone = useCallback((timezone: string | null) => {
+    setAppTimezone(timezone)
+    storeAppTimezone(timezone)
+  }, [])
+  
+  // Timezone-aware time formatter - uses app timezone when set
+  const formatTime = useCallback((timestamp: number) => {
+    return formatTimeOfDay(timestamp, appTimezone)
+  }, [appTimezone])
+  
+  // Get display name for current effective timezone
+  const effectiveTimezoneDisplay = useMemo(() => {
+    const effective = appTimezone || getCurrentSystemTimezone()
+    // Try to find a friendly city name for this timezone
+    const cityEntry = Object.entries(CITY_TO_IANA_TIMEZONE).find(([, tz]) => tz === effective)
+    if (cityEntry) {
+      return extractCityName(cityEntry[0]) // Just the city name
+    }
+    // Fallback to IANA timezone formatted nicely
+    return effective.replace(/_/g, ' ').split('/').pop() || effective
+  }, [appTimezone])
+  
+  // Check if app timezone differs from system timezone
+  const isUsingCustomTimezone = useMemo(() => {
+    if (!appTimezone) return false
+    return appTimezone !== getCurrentSystemTimezone()
+  }, [appTimezone])
+  
+  // Adjust a timestamp from system timezone to app timezone for visual positioning
+  // This shifts the timestamp so that when interpreted as local time, it shows the correct position
+  const adjustTimestampForTimezone = useCallback((timestamp: number): number => {
+    if (!appTimezone) return timestamp
+    const systemTz = getCurrentSystemTimezone()
+    if (systemTz === appTimezone) return timestamp
+    return timestamp + getTimezoneOffsetMs(timestamp, systemTz, appTimezone)
+  }, [appTimezone])
+  
   type CalendarViewMode = 'day' | '3d' | 'week' | 'month' | 'year'
   const [calendarView, setCalendarView] = useState<CalendarViewMode>('3d')
   const calendarViewRef = useRef<CalendarViewMode>(calendarView)
@@ -7390,8 +7528,13 @@ useEffect(() => {
     const entries = effectiveHistory
       .map((entry) => {
         const isPreviewed = preview && preview.entryId === entry.id
-        const startedAt = isPreviewed ? preview.startedAt : entry.startedAt
-        const endedAt = isPreviewed ? preview.endedAt : entry.endedAt
+        const rawStartedAt = isPreviewed ? preview.startedAt : entry.startedAt
+        const rawEndedAt = isPreviewed ? preview.endedAt : entry.endedAt
+        
+        // Adjust timestamps for app timezone (for positioning on the timeline)
+        const startedAt = adjustTimestampForTimezone(rawStartedAt)
+        const endedAt = adjustTimestampForTimezone(rawEndedAt)
+        
         const previewedEntry = isPreviewed
           ? {
               ...entry,
@@ -7399,7 +7542,11 @@ useEffect(() => {
               endedAt,
               elapsed: Math.max(endedAt - startedAt, 1),
             }
-          : entry
+          : {
+              ...entry,
+              startedAt,
+              endedAt,
+            }
         const start = Math.max(previewedEntry.startedAt, dayStart)
         const end = Math.min(previewedEntry.endedAt, dayEnd)
         if (end <= start) {
@@ -7479,7 +7626,7 @@ useEffect(() => {
         tooltipTask,
       }
     })
-  }, [effectiveHistory, dayStart, dayEnd, enhancedGoalLookup, goalColorLookup, dragPreview])
+  }, [effectiveHistory, dayStart, dayEnd, enhancedGoalLookup, goalColorLookup, dragPreview, adjustTimestampForTimezone])
   
   // Separate timezone markers from regular segments
   const { regularSegments, timezoneMarkers } = useMemo(() => {
@@ -9139,8 +9286,15 @@ useEffect(() => {
             // Exclude all‑day entries from the time grid; they render in the all‑day lane
             if (isAllDayRange(entry.startedAt, entry.endedAt)) return null
             const isPreviewed = dragPreview && dragPreview.entryId === entry.id
-            const previewStart = isPreviewed ? dragPreview.startedAt : entry.startedAt
-            const previewEnd = isPreviewed ? dragPreview.endedAt : entry.endedAt
+            const rawStart = isPreviewed ? dragPreview.startedAt : entry.startedAt
+            const rawEnd = isPreviewed ? dragPreview.endedAt : entry.endedAt
+            
+            // For actual sessions (not guides), adjust timestamps for app timezone
+            // Guide tasks (repeating rules) should stay in their original scheduled time
+            const isGuideEntry = entry.id.startsWith('repeat:')
+            const previewStart = isGuideEntry ? rawStart : adjustTimestampForTimezone(rawStart)
+            const previewEnd = isGuideEntry ? rawEnd : adjustTimestampForTimezone(rawEnd)
+            
             const clampedStart = Math.max(Math.min(previewStart, previewEnd), startMs)
             const clampedEnd = Math.min(Math.max(previewStart, previewEnd), endMs)
             // Allow timezone markers (zero duration) to pass through
@@ -9536,7 +9690,16 @@ useEffect(() => {
 
           const topPct = ((info.start - startMs) / DAY_DURATION_MS) * 100
           const heightPct = Math.max(((info.end - info.start) / DAY_DURATION_MS) * 100, (MINUTE_MS / DAY_DURATION_MS) * 100)
-          const rangeLabel = `${formatTimeOfDay(info.previewStart)} — ${formatTimeOfDay(info.previewEnd)}`
+          
+          // Determine if this is a guide/planned task BEFORE formatting time
+          const isGuide = info.entry.id.startsWith('repeat:')
+          const isPlanned = !!(info.entry as any).futureSession
+          
+          // Guide tasks (repeating rules) should show original local times, not timezone-adjusted
+          // Actual sessions should use timezone-adjusted times
+          const rangeLabel = isGuide
+            ? `${formatTimeOfDay(info.previewStart)} — ${formatTimeOfDay(info.previewEnd)}`
+            : `${formatTime(info.previewStart)} — ${formatTime(info.previewEnd)}`
 
           const duration = Math.max(info.end - info.start, 1)
           const durationScore = Math.max(0, Math.round((DAY_DURATION_MS - duration) / MINUTE_MS))
@@ -9546,8 +9709,6 @@ useEffect(() => {
           const durationMinutes = duration / MINUTE_MS
           const showLabel = durationMinutes >= 8
           const showTime = durationMinutes >= 20
-          const isGuide = info.entry.id.startsWith('repeat:')
-          const isPlanned = !!(info.entry as any).futureSession
 
           return {
             entry: info.entry,
@@ -10478,13 +10639,13 @@ useEffect(() => {
                               display: 'flex',
                               alignItems: 'center',
                               zIndex: ev.zIndex + 10,
-                              cursor: 'grab',
+                              cursor: 'default',
                               pointerEvents: 'auto',
                             }}
                             data-entry-id={ev.entry.id}
                             role="button"
                             aria-label={`Timezone change marker at ${ev.rangeLabel}`}
-                            title={`Timezone Change · ${formatTimeOfDay(ev.entry.startedAt)}`}
+                            title={`Timezone Change · ${formatTime(ev.entry.startedAt)}`}
                             onClick={(e) => {
                               if (dragPreventClickRef.current) {
                                 dragPreventClickRef.current = false
@@ -10520,8 +10681,8 @@ useEffect(() => {
                               handleCalendarEventPointerDown(ev.entry, start, true)(pev)
                             }}
                             onPointerUp={(pev) => {
-                              // Restore grab cursor after drag
-                              (pev.currentTarget as HTMLElement).style.cursor = 'grab'
+                              // Restore default cursor after drag
+                              (pev.currentTarget as HTMLElement).style.cursor = 'default'
                             }}
                           >
                             {/* The visible line - matching calendar-now-line style */}
@@ -10680,7 +10841,7 @@ useEffect(() => {
                       if (endClamped <= startClamped) return null
                       const topPct = ((startClamped - dayStart) / DAY_DURATION_MS) * 100
                       const heightPct = Math.max(((endClamped - startClamped) / DAY_DURATION_MS) * 100, (MINUTE_MS / DAY_DURATION_MS) * 100)
-                      const label = `${formatTimeOfDay(startClamped)} — ${formatTimeOfDay(endClamped)}`
+                      const label = `${formatTime(startClamped)} — ${formatTime(endClamped)}`
                       return (
                         <div
                           className="calendar-event calendar-event--dragging"
@@ -11162,7 +11323,7 @@ useEffect(() => {
         startD.getDate() === endD.getDate()
       if (sameDay) {
         const dateFmt = startD.toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' })
-        return `${dateFmt} · ${formatTimeOfDay(entry.startedAt)} — ${formatTimeOfDay(entry.endedAt)}`
+        return `${dateFmt} · ${formatTime(entry.startedAt)} — ${formatTime(entry.endedAt)}`
       }
       return formatDateRange(entry.startedAt, entry.endedAt)
     })()
@@ -11779,8 +11940,9 @@ useEffect(() => {
               const toCity = parsedTimezones.to
               const fromCityName = extractCityName(fromCity)
               const toCityName = extractCityName(toCity)
-              const fromIsCurrentTz = fromCity ? isCityInCurrentTimezone(fromCity) : false
-              const toIsCurrentTz = toCity ? isCityInCurrentTimezone(toCity) : false
+              // Use app timezone override if set, otherwise fall back to system timezone
+              const fromIsCurrentTz = fromCity ? isCityInEffectiveTimezone(fromCity, appTimezone) : false
+              const toIsCurrentTz = toCity ? isCityInEffectiveTimezone(toCity, appTimezone) : false
               return (
                 <div className="calendar-popover__cta-row" style={{ display: 'flex', gap: '0.5rem', marginTop: '0.65rem' }}>
                   {fromCity && (
@@ -11797,7 +11959,10 @@ useEffect(() => {
                         } : {}),
                       }}
                       onClick={() => {
-                        // For now, just close - actual timezone switching would require system settings
+                        const fromIana = getIanaTimezoneForCity(fromCity)
+                        if (fromIana) {
+                          updateAppTimezone(fromIana)
+                        }
                         handleCloseCalendarPreview()
                       }}
                       disabled={fromIsCurrentTz}
@@ -11822,7 +11987,10 @@ useEffect(() => {
                         } : {}),
                       }}
                       onClick={() => {
-                        // For now, just close - actual timezone switching would require system settings
+                        const toIana = getIanaTimezoneForCity(toCity)
+                        if (toIana) {
+                          updateAppTimezone(toIana)
+                        }
                         handleCloseCalendarPreview()
                       }}
                       disabled={toIsCurrentTz}
@@ -11842,6 +12010,7 @@ useEffect(() => {
     )
   }, [
     activeSession,
+    appTimezone,
     calendarPreview,
     calendarPopoverEditing,
     effectiveHistory,
@@ -11851,6 +12020,7 @@ useEffect(() => {
     subtasksCache,
     historyDraft.subtasks,
     selectedHistoryId,
+    updateAppTimezone,
     updateHistory,
     repeatingRules,
   ])
@@ -12595,7 +12765,7 @@ useEffect(() => {
           startD.getDate() === endD.getDate()
         if (sameDay) {
           const dateFmt = startD.toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' })
-          return `${dateFmt} · ${formatTimeOfDay(resolvedStart)} — ${formatTimeOfDay(resolvedEnd)}`
+          return `${dateFmt} · ${formatTime(resolvedStart)} — ${formatTime(resolvedEnd)}`
         }
         return formatDateRange(resolvedStart, resolvedEnd)
       })()
@@ -13522,6 +13692,21 @@ useEffect(() => {
       <div className="reflection-intro">
         <h1 className="reflection-title">Reflection</h1>
         {/* Subtitle removed for cleaner header */}
+        {/* Timezone indicator - shows current app timezone */}
+        <div className="timezone-indicator">
+          <span className="timezone-indicator__icon">🌐</span>
+          <span className="timezone-indicator__label">{effectiveTimezoneDisplay}</span>
+          {isUsingCustomTimezone && (
+            <button
+              type="button"
+              className="timezone-indicator__reset"
+              onClick={() => updateAppTimezone(null)}
+              title="Reset to system timezone"
+            >
+              ✕
+            </button>
+          )}
+        </div>
       </div>
 
       <div className="history-block" ref={historyBlockRef}>
@@ -13720,13 +13905,12 @@ useEffect(() => {
                   className={markerClassName}
                   style={{ 
                     left: `${marker.leftPercent}%`,
-                    cursor: 'grab',
                   }}
                   tabIndex={0}
                   role="button"
                   aria-pressed={isSelected}
-                  aria-label={`Timezone change marker at ${formatTimeOfDay(marker.start)}`}
-                  title={`Timezone Change · ${formatTimeOfDay(marker.start)}`}
+                  aria-label={`Timezone change marker at ${formatTime(marker.start)}`}
+                  title={`Timezone Change · ${formatTime(marker.start)}`}
                   onClick={(event) => {
                     event.stopPropagation()
                     handleSelectHistorySegment(marker.entry)
@@ -13739,9 +13923,13 @@ useEffect(() => {
                   onPointerDown={(event) => {
                     // Allow dragging the marker (move only, no resize)
                     if (event.button === 0) {
+                      (event.currentTarget as HTMLElement).style.cursor = 'grabbing'
                       handleSelectHistorySegment(marker.entry)
                       startDrag(event, marker, 'move')
                     }
+                  }}
+                  onPointerUp={(event) => {
+                    (event.currentTarget as HTMLElement).style.cursor = ''
                   }}
                 />
               )
@@ -13806,13 +13994,12 @@ useEffect(() => {
                     className={markerClassName}
                     style={{ 
                       left: `${segment.leftPercent}%`,
-                      cursor: 'grab',
                     }}
                     tabIndex={0}
                     role="button"
                     aria-pressed={isSelected}
-                    aria-label={`Timezone change marker at ${formatTimeOfDay(resolvedStartedAt)}`}
-                    title={`Timezone Change · ${formatTimeOfDay(resolvedStartedAt)}`}
+                    aria-label={`Timezone change marker at ${formatTime(resolvedStartedAt)}`}
+                    title={`Timezone Change · ${formatTime(resolvedStartedAt)}`}
                     onClick={(event) => {
                       event.stopPropagation()
                       handleSelectHistorySegment(segment.entry)
@@ -13825,9 +14012,13 @@ useEffect(() => {
                     onPointerDown={(event) => {
                       // Allow dragging the marker (move only, no resize)
                       if (event.button === 0) {
+                        (event.currentTarget as HTMLElement).style.cursor = 'grabbing'
                         handleSelectHistorySegment(segment.entry)
                         startDrag(event, segment, 'move')
                       }
+                    }}
+                    onPointerUp={(event) => {
+                      (event.currentTarget as HTMLElement).style.cursor = ''
                     }}
                   />
                 )
@@ -13841,7 +14032,7 @@ useEffect(() => {
                   startDate.getMonth() === endDate.getMonth() &&
                   startDate.getDate() === endDate.getDate()
                 if (sameDay) {
-                  return `${formatTimeOfDay(resolvedStartedAt)} — ${formatTimeOfDay(resolvedEndedAt)}`
+                  return `${formatTime(resolvedStartedAt)} — ${formatTime(resolvedEndedAt)}`
                 }
                 return formatDateRange(resolvedStartedAt, resolvedEndedAt)
               })()
@@ -14255,13 +14446,13 @@ useEffect(() => {
                   }}
                   data-drag-time={
                     showDragBadge
-                      ? `${formatTimeOfDay(resolvedStartedAt)} — ${formatTimeOfDay(resolvedEndedAt)}`
+                      ? `${formatTime(resolvedStartedAt)} — ${formatTime(resolvedEndedAt)}`
                       : undefined
                   }
                   tabIndex={0}
                   role="button"
                   aria-pressed={isSelected}
-                  aria-label={`${segment.tooltipTask} from ${formatTimeOfDay(resolvedStartedAt)} to ${formatTimeOfDay(resolvedEndedAt)}`}
+                  aria-label={`${segment.tooltipTask} from ${formatTime(resolvedStartedAt)} to ${formatTime(resolvedEndedAt)}`}
                   onPointerDown={handleBlockPointerDown}
                   onPointerUp={handleBlockPointerUp}
                   onClick={(event) => {
@@ -14305,12 +14496,12 @@ useEffect(() => {
                 >
                   <div
                     className="history-timeline__block-label"
-                    title={`${displayTask} · ${formatTimeOfDay(resolvedStartedAt)} — ${formatTimeOfDay(resolvedEndedAt)}`}
+                    title={`${displayTask} · ${formatTime(resolvedStartedAt)} — ${formatTime(resolvedEndedAt)}`}
                     aria-hidden
                   >
                     <div className="history-timeline__block-title">{displayTask}</div>
                     <div className="history-timeline__block-time">
-                      {formatTimeOfDay(resolvedStartedAt)} — {formatTimeOfDay(resolvedEndedAt)}
+                      {formatTime(resolvedStartedAt)} — {formatTime(resolvedEndedAt)}
                     </div>
                   </div>
                   <div
