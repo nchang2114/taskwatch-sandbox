@@ -2470,6 +2470,8 @@ html[data-theme='light'] .settings-panel__group {
   gap: clamp(0.45rem, 1.2vw, 0.75rem);
   padding-block: clamp(0.25rem, 0.6vw, 0.4rem);
   overflow: visible;
+  /* Performance: limit browser repaint scope */
+  contain: layout style;
 }
 
 .history-timeline__bar {
@@ -2483,6 +2485,8 @@ html[data-theme='light'] .settings-panel__group {
   padding: clamp(0.35rem, 1vw, 0.5rem) clamp(0.7rem, 2.2vw, 1rem);
   overflow: visible;
   touch-action: none; /* improve touch drag responsiveness */
+  /* Performance: limit browser repaint scope */
+  contain: layout style;
 }
 
 .history-timeline__empty {
@@ -2508,6 +2512,9 @@ html[data-theme='light'] .settings-panel__group {
   backdrop-filter: saturate(110%);
   user-select: none;
   touch-action: none; /* allow our JS to fully control dragging */
+  /* Performance: limit browser repaint scope */
+  contain: layout style;
+  will-change: transform;
 }
 
 .history-timeline__block-label {

@@ -1787,6 +1787,9 @@ type DragState = {
   dayEnd: number
   minDurationMs: number
   hasMoved: boolean
+  // For ref-based CSS transform during drag (no React re-render)
+  initialLeftPercent: number
+  initialWidthPercent: number
 }
 
 type DragPreview = {
@@ -1808,6 +1811,10 @@ type CalendarEventDragState = {
   columns: Array<{ rect: DOMRect; dayStart: number }>
   moved?: boolean
   activated?: boolean
+  // Track current column index for efficient cross-day drag handling
+  currentColIdx: number
+  // Ghost element for drag visualization (Google Calendar style)
+  ghostEl?: HTMLDivElement
 }
 
 type TimelineSegment = {
@@ -3707,6 +3714,8 @@ export default function ReflectionPage() {
   const [pendingNewHistoryId, setPendingNewHistoryId] = useState<string | null>(null)
   const [hoveredHistoryId, setHoveredHistoryId] = useState<string | null>(null)
   const [historyDraft, setHistoryDraft] = useState<HistoryDraftState>(() => createEmptyHistoryDraft())
+  // PERFORMANCE: Defer historyDraft for non-selected segments to avoid blocking UI during typing
+  const deferredHistoryDraft = useDeferredValue(historyDraft)
   const [editingHistoryId, setEditingHistoryId] = useState<string | null>(null)
   const historyDraftRef = useRef<HistoryDraftState | null>(null)
   const pendingHistorySubtaskFocusRef = useRef<{ entryId: string; subtaskId: string } | null>(null)
@@ -3738,6 +3747,10 @@ export default function ReflectionPage() {
   })
   const timelineRef = useRef<HTMLDivElement | null>(null)
   const timelineBarRef = useRef<HTMLDivElement | null>(null)
+  // Map of entry IDs to their DOM element refs for direct CSS transform during drag
+  const blockRefsMap = useRef<Map<string, HTMLDivElement>>(new Map())
+  // Map of entry IDs to calendar event DOM elements for direct CSS transform during drag
+  const calendarEventRefsMap = useRef<Map<string, HTMLDivElement>>(new Map())
   const activeTooltipRef = useRef<HTMLDivElement | null>(null)
   const editingTooltipRef = useRef<HTMLDivElement | null>(null)
   const historyCalendarRef = useRef<HTMLDivElement | null>(null)
@@ -3802,6 +3815,8 @@ const [showInlineExtras, setShowInlineExtras] = useState(false)
   const [activeTooltipPlacement, setActiveTooltipPlacement] = useState<'above' | 'below'>('above')
   const dragStateRef = useRef<DragState | null>(null)
   const [dragPreview, setDragPreview] = useState<DragPreview | null>(null)
+  // PERFORMANCE: Defer drag preview for segment calculations to avoid blocking during rapid updates
+  const deferredDragPreview = useDeferredValue(dragPreview)
   const dragPreviewRef = useRef<DragPreview | null>(null)
   const calendarEventDragRef = useRef<CalendarEventDragState | null>(null)
   const dragPreventClickRef = useRef(false)
@@ -7543,62 +7558,28 @@ useEffect(() => {
     const raw = ((nowTick - dayStart) / DAY_DURATION_MS) * 100
     return Math.min(Math.max(raw, 0), 100)
   }, [nowTick, dayStart, dayEnd])
-  const daySegments = useMemo(() => {
-    const preview = dragPreview
+  
+  // PERFORMANCE: Compute base segments WITHOUT drag preview to avoid recalculation during drag
+  const baseSegments = useMemo(() => {
     const entries = effectiveHistory
       .map((entry) => {
-        const isPreviewed = preview && preview.entryId === entry.id
-        const rawStartedAt = isPreviewed ? preview.startedAt : entry.startedAt
-        const rawEndedAt = isPreviewed ? preview.endedAt : entry.endedAt
-        
         // Adjust timestamps for app timezone (for positioning on the timeline)
-        const startedAt = adjustTimestampForTimezone(rawStartedAt)
-        const endedAt = adjustTimestampForTimezone(rawEndedAt)
+        const startedAt = adjustTimestampForTimezone(entry.startedAt)
+        const endedAt = adjustTimestampForTimezone(entry.endedAt)
         
-        const previewedEntry = isPreviewed
-          ? {
-              ...entry,
-              startedAt,
-              endedAt,
-              elapsed: Math.max(endedAt - startedAt, 1),
-            }
-          : {
-              ...entry,
-              startedAt,
-              endedAt,
-            }
-        const start = Math.max(previewedEntry.startedAt, dayStart)
-        const end = Math.min(previewedEntry.endedAt, dayEnd)
+        const adjustedEntry = {
+          ...entry,
+          startedAt,
+          endedAt,
+        }
+        const start = Math.max(adjustedEntry.startedAt, dayStart)
+        const end = Math.min(adjustedEntry.endedAt, dayEnd)
         if (end <= start) {
           return null
         }
-        return { entry: previewedEntry, start, end }
+        return { entry: adjustedEntry, start, end }
       })
       .filter((segment): segment is { entry: HistoryEntry; start: number; end: number } => Boolean(segment))
-
-    if (preview && preview.entryId === 'new-entry') {
-      const start = Math.max(Math.min(preview.startedAt, preview.endedAt), dayStart)
-      const end = Math.min(Math.max(preview.startedAt, preview.endedAt), dayEnd)
-      if (end > start) {
-        const syntheticEntry: HistoryEntry = {
-          id: 'new-entry',
-          taskName: '',
-          goalName: LIFE_ROUTINES_NAME,
-          bucketName: null,
-          goalId: LIFE_ROUTINES_GOAL_ID,
-          bucketId: null,
-          taskId: null,
-          elapsed: Math.max(end - start, MIN_SESSION_DURATION_DRAG_MS),
-          startedAt: start,
-          endedAt: end,
-          goalSurface: LIFE_ROUTINES_SURFACE,
-          bucketSurface: null,
-          notes: '',
-          subtasks: [],
-        }
-        entries.push({ entry: syntheticEntry, start, end })
-      }
-    }
 
     entries.sort((a, b) => a.start - b.start)
     const lanes: number[] = []
@@ -7646,7 +7627,107 @@ useEffect(() => {
         tooltipTask,
       }
     })
-  }, [effectiveHistory, dayStart, dayEnd, enhancedGoalLookup, goalColorLookup, dragPreview, adjustTimestampForTimezone])
+  }, [effectiveHistory, dayStart, dayEnd, enhancedGoalLookup, goalColorLookup, adjustTimestampForTimezone])
+
+  // PERFORMANCE: Apply drag preview as a lightweight transformation on top of base segments
+  const daySegments = useMemo(() => {
+    const preview = deferredDragPreview
+    if (!preview) {
+      return baseSegments
+    }
+
+    // Handle new-entry preview (creating a new session by dragging)
+    if (preview.entryId === 'new-entry') {
+      const start = Math.max(Math.min(preview.startedAt, preview.endedAt), dayStart)
+      const end = Math.min(Math.max(preview.startedAt, preview.endedAt), dayEnd)
+      if (end <= start) {
+        return baseSegments
+      }
+      const syntheticEntry: HistoryEntry = {
+        id: 'new-entry',
+        taskName: '',
+        goalName: LIFE_ROUTINES_NAME,
+        bucketName: null,
+        goalId: LIFE_ROUTINES_GOAL_ID,
+        bucketId: null,
+        taskId: null,
+        elapsed: Math.max(end - start, MIN_SESSION_DURATION_DRAG_MS),
+        startedAt: start,
+        endedAt: end,
+        goalSurface: LIFE_ROUTINES_SURFACE,
+        bucketSurface: null,
+        notes: '',
+        subtasks: [],
+      }
+      const left = ((start - dayStart) / DAY_DURATION_MS) * 100
+      const rawWidth = ((end - start) / DAY_DURATION_MS) * 100
+      const safeLeft = Math.min(Math.max(left, 0), 100)
+      const maxWidth = Math.max(100 - safeLeft, 0)
+      const widthPercent = Math.min(Math.max(rawWidth, 0.8), maxWidth)
+      // Find a lane for the new entry
+      const lanes = baseSegments.map(s => ({ end: s.end, lane: s.lane }))
+      let lane = 0
+      for (let l = 0; l <= lanes.length; l++) {
+        const laneOccupied = lanes.some(s => s.lane === l && start < s.end + 1000)
+        if (!laneOccupied) {
+          lane = l
+          break
+        }
+        lane = l + 1
+      }
+      const newSegment: TimelineSegment = {
+        id: 'new-entry',
+        entry: syntheticEntry,
+        start,
+        end,
+        lane,
+        leftPercent: safeLeft,
+        widthPercent,
+        color: gradientFromSurface(LIFE_ROUTINES_SURFACE),
+        gradientCss: gradientFromSurface(LIFE_ROUTINES_SURFACE),
+        colorInfo: undefined,
+        goalLabel: LIFE_ROUTINES_NAME,
+        bucketLabel: '',
+        deletable: false,
+        originalRangeLabel: formatDateRange(start, end),
+        tooltipTask: 'New session',
+      }
+      return [...baseSegments, newSegment]
+    }
+
+    // Handle existing entry being dragged - just update that one segment
+    return baseSegments.map((segment) => {
+      if (segment.entry.id !== preview.entryId) {
+        return segment
+      }
+      // Recalculate position for the dragged segment
+      const startedAt = adjustTimestampForTimezone(preview.startedAt)
+      const endedAt = adjustTimestampForTimezone(preview.endedAt)
+      const start = Math.max(startedAt, dayStart)
+      const end = Math.min(endedAt, dayEnd)
+      if (end <= start) {
+        return segment // Keep original if dragged out of view
+      }
+      const left = ((start - dayStart) / DAY_DURATION_MS) * 100
+      const rawWidth = ((end - start) / DAY_DURATION_MS) * 100
+      const safeLeft = Math.min(Math.max(left, 0), 100)
+      const maxWidth = Math.max(100 - safeLeft, 0)
+      const widthPercent = Math.min(Math.max(rawWidth, 0.8), maxWidth)
+      return {
+        ...segment,
+        entry: {
+          ...segment.entry,
+          startedAt,
+          endedAt,
+          elapsed: Math.max(endedAt - startedAt, 1),
+        },
+        start,
+        end,
+        leftPercent: safeLeft,
+        widthPercent,
+      }
+    })
+  }, [baseSegments, deferredDragPreview, dayStart, dayEnd, adjustTimestampForTimezone])
   
   // Separate timezone markers from regular segments
   const { regularSegments, timezoneMarkers } = useMemo(() => {
@@ -7804,12 +7885,17 @@ useEffect(() => {
 
   const handleOpenCalendarPreview = useCallback(
     (entry: HistoryEntry, targetEl: HTMLElement) => {
-      // Select entry for consistency with other flows.
-      handleSelectHistorySegment(entry, { preserveSelection: true })
+      // PERFORMANCE: Wrap state updates in startTransition to avoid blocking UI
+      startTransition(() => {
+        // Select entry for consistency with other flows.
+        handleSelectHistorySegment(entry, { preserveSelection: true })
+      })
       void ensureSubtasksFetched(entry)
       if (calendarInspectorEntryId) {
-        openCalendarInspector(entry)
-        setCalendarPreview(null)
+        startTransition(() => {
+          openCalendarInspector(entry)
+          setCalendarPreview(null)
+        })
         return
       }
       // Compute an initial position immediately
@@ -9806,6 +9892,10 @@ useEffect(() => {
         const clampedStart = Math.max(Math.min(entry.startedAt, entry.endedAt), entryDayStart)
         const clampedEnd = Math.min(Math.max(entry.startedAt, entry.endedAt), entryDayStart + DAY_DURATION_MS)
         const timeOfDayMs0 = (kind === 'resize-end' ? clampedEnd : clampedStart) - entryDayStart
+        // Find the initial column index for tracking day boundary crossings
+        const initialColIdx = columns.findIndex(c => 
+          entry.startedAt >= c.dayStart && entry.startedAt < c.dayStart + DAY_DURATION_MS
+        )
         const state = {
           pointerId: ev.pointerId,
           entryId: entry.id,
@@ -9819,6 +9909,8 @@ useEffect(() => {
           columns,
           moved: false,
           activated: false,
+          // Track current column for efficient cross-day drag handling
+          currentColIdx: initialColIdx >= 0 ? initialColIdx : 0,
         }
         calendarEventDragRef.current = state
         // Defer capture until long-press activates drag for all devices (mouse/pen/touch)
@@ -9862,6 +9954,71 @@ useEffect(() => {
           // Close any open calendar popover as soon as a drag is activated
           handleCloseCalendarPreview()
           try { targetEl.setPointerCapture?.(ev.pointerId) } catch {}
+          
+          // GHOST-BASED DRAG: Create a ghost element that follows the cursor
+          // This avoids transform-to-DOM snap issues when crossing days
+          // Find ALL DOM elements for this entry (multi-day sessions have multiple elements)
+          const allOriginalEls = document.querySelectorAll<HTMLDivElement>(`[data-entry-id="${entry.id}"]`)
+          
+          if (allOriginalEls.length > 0) {
+            // Create ghosts for ALL parts of the session (handles multi-day)
+            let mainGhost: HTMLDivElement | null = null
+            allOriginalEls.forEach((el, idx) => {
+              const elRect = el.getBoundingClientRect()
+              const elComputed = window.getComputedStyle(el)
+              
+              // Clone the element for the ghost
+              const ghost = el.cloneNode(true) as HTMLDivElement
+              
+              // Remove the cloned percentage-based positioning styles
+              ghost.style.removeProperty('top')
+              ghost.style.removeProperty('left')
+              ghost.style.removeProperty('width')
+              ghost.style.removeProperty('height')
+              
+              // Set positioning for fixed placement with exact pixel dimensions
+              ghost.style.position = 'fixed'
+              ghost.style.left = `${elRect.left}px`
+              ghost.style.top = `${elRect.top}px`
+              ghost.style.width = `${elRect.width}px`
+              ghost.style.height = `${elRect.height}px`
+              ghost.style.minHeight = `${elRect.height}px`
+              ghost.style.maxHeight = `${elRect.height}px`
+              ghost.style.margin = '0'
+              ghost.style.transform = 'none'
+              ghost.style.zIndex = '10000'
+              ghost.style.pointerEvents = 'none'
+              ghost.style.overflow = 'hidden'
+              
+              // Ensure box-shadow matches
+              ghost.style.boxShadow = elComputed.boxShadow
+              
+              // Remove data-entry-id so it's not affected by querySelectorAll
+              ghost.removeAttribute('data-entry-id')
+              
+              if (idx === 0) {
+                // First ghost is the "main" one that we track
+                ghost.classList.add('calendar-event-ghost')
+                ghost.dataset.originalWidth = String(elRect.width)
+                ghost.dataset.originalHeight = String(elRect.height)
+                ghost.dataset.offsetX = String(elRect.left - ev.clientX)
+                ghost.dataset.offsetY = String(elRect.top - ev.clientY)
+                mainGhost = ghost
+              } else {
+                // Additional ghosts for multi-day portions
+                ghost.classList.add('calendar-event-ghost-continuation')
+              }
+              
+              document.body.appendChild(ghost)
+              
+              // Hide the original element
+              el.style.opacity = '0'
+            })
+            
+            if (mainGhost) {
+              s.ghostEl = mainGhost
+            }
+          }
         }
         const onMove = (e: PointerEvent) => {
           const s = calendarEventDragRef.current
@@ -9947,29 +10104,86 @@ useEffect(() => {
           }
           // Prevent page/area scrolling while dragging an event
           try { e.preventDefault() } catch {}
-          // Base column by X position (nearest if outside bounds)
-          const baseIdx = s.columns.findIndex((c) => e.clientX >= c.rect.left && e.clientX <= c.rect.right)
-          const nearestIdx = baseIdx >= 0 ? baseIdx : (e.clientX < s.columns[0].rect.left ? 0 : s.columns.length - 1)
-          const baseCol = s.columns[nearestIdx]
-          const colH = baseCol.rect.height
+          
+          // Get fresh column rects - the stored ones may be stale if calendar scrolled
+          const daysRoot = calendarDaysRef.current
+          const columnEls = daysRoot ? Array.from(daysRoot.querySelectorAll<HTMLDivElement>('.calendar-day-column')) : []
+          const freshColumns = s.columns.map((col, i) => {
+            const colEl = columnEls[i]
+            if (colEl) {
+              return { ...col, rect: colEl.getBoundingClientRect() }
+            }
+            return col
+          })
+          
+          // Use the first column's rect as reference for vertical calculations
+          // All columns have the same height and vertical position
+          const refCol = freshColumns[0]
+          const colH = refCol.rect.height
+          const colTop = refCol.rect.top
+          const colBottom = refCol.rect.bottom
           if (!(Number.isFinite(colH) && colH > 0)) return
-          // Vertical delta to time delta
-          const deltaMsRaw = (dy / colH) * DAY_DURATION_MS
-          // Snap to minute for stable movement
-          const deltaMinutes = Math.round(deltaMsRaw / MINUTE_MS)
-          const deltaMs = deltaMinutes * MINUTE_MS
-          // Allow crossing midnight by converting overflow into day shifts
-          let desiredTimeOfDay = s.initialTimeOfDayMs + deltaMs
+          
+          // Base column by X position (nearest if outside bounds)
+          const baseIdx = freshColumns.findIndex((c) => e.clientX >= c.rect.left && e.clientX <= c.rect.right)
+          const nearestIdx = baseIdx >= 0 ? baseIdx : (e.clientX < freshColumns[0].rect.left ? 0 : freshColumns.length - 1)
+          
+          // Calculate the cursor's vertical position as a time-of-day
+          // cursorY relative to column top, converted to time
+          // Note: colTop/colBottom are viewport-relative from getBoundingClientRect
+          const cursorYInCol = e.clientY - colTop
+          const cursorTimeRaw = (cursorYInCol / colH) * DAY_DURATION_MS
+          
+          // Apply grab offset: maintain the same relative position where user grabbed the event
+          // s.initialTimeOfDayMs = where the event START was at drag begin
+          // We need to calculate where the cursor was relative to the event start
+          const initialColTop = s.columns[0].rect.top // Use stored initial rect for offset calc
+          const initialCursorYInCol = s.startY - initialColTop
+          const initialCursorTime = (initialCursorYInCol / s.columns[0].rect.height) * DAY_DURATION_MS
+          const grabOffset = s.initialTimeOfDayMs - initialCursorTime
+          
+          // Desired start time = cursor time + grab offset
+          let desiredTimeOfDay = cursorTimeRaw + grabOffset
+          
+          // Snap to minute
+          desiredTimeOfDay = Math.round(desiredTimeOfDay / MINUTE_MS) * MINUTE_MS
+          
+          // Calculate day shift based on cursor position relative to column bounds
+          // When cursor goes ABOVE the column top (e.clientY < colTop), shift to previous day
+          // When cursor goes BELOW the column bottom (e.clientY > colBottom), shift to next day
           let dayShift = 0
-          if (desiredTimeOfDay <= -MINUTE_MS || desiredTimeOfDay >= DAY_DURATION_MS + MINUTE_MS) {
-            dayShift = Math.floor(desiredTimeOfDay / DAY_DURATION_MS)
-            desiredTimeOfDay = desiredTimeOfDay - dayShift * DAY_DURATION_MS
+          
+          // Check if cursor is outside column vertical bounds
+          if (e.clientY < colTop) {
+            // Cursor is above the column - calculate how many "column heights" above
+            const pixelsAbove = colTop - e.clientY
+            const daysAbove = Math.ceil(pixelsAbove / colH)
+            dayShift = -daysAbove
+            // Adjust desiredTimeOfDay to wrap correctly
+            desiredTimeOfDay = desiredTimeOfDay + (daysAbove * DAY_DURATION_MS)
+          } else if (e.clientY > colBottom) {
+            // Cursor is below the column - calculate how many "column heights" below
+            const pixelsBelow = e.clientY - colBottom
+            const daysBelow = Math.ceil(pixelsBelow / colH)
+            dayShift = daysBelow
+            // Adjust desiredTimeOfDay to wrap correctly
+            desiredTimeOfDay = desiredTimeOfDay - (daysBelow * DAY_DURATION_MS)
           }
-          // Compute target column after applying vertical overflow
-          const targetIdx = Math.min(Math.max(nearestIdx + dayShift, 0), s.columns.length - 1)
-          const target = s.columns[targetIdx]
-          // Clamp within the day bounds; allow duration to overflow to adjacent day
-          const timeOfDay = Math.min(Math.max(desiredTimeOfDay, 0), DAY_DURATION_MS)
+          
+          // Now normalize desiredTimeOfDay to 0-24h and adjust dayShift if needed
+          while (desiredTimeOfDay < 0) {
+            dayShift -= 1
+            desiredTimeOfDay += DAY_DURATION_MS
+          }
+          while (desiredTimeOfDay >= DAY_DURATION_MS) {
+            dayShift += 1
+            desiredTimeOfDay -= DAY_DURATION_MS
+          }
+          
+          // Compute target column: horizontal position + vertical day shift
+          const targetIdx = Math.min(Math.max(nearestIdx + dayShift, 0), freshColumns.length - 1)
+          const target = freshColumns[targetIdx]
+          const timeOfDay = desiredTimeOfDay
           let newStart = s.initialStart
           let newEnd = s.initialEnd
           if (s.kind === 'move') {
@@ -9994,7 +10208,100 @@ useEffect(() => {
           }
           const preview = { entryId: s.entryId, startedAt: newStart, endedAt: newEnd }
           dragPreviewRef.current = preview
-          setDragPreview(preview)
+          
+          // GHOST-BASED DRAG: Snap ghost to target column both horizontally and vertically
+          // When dragging above/below calendar bounds, the ghost wraps to adjacent days
+          // For multi-day sessions, show ghost portions in each affected column
+          try {
+            const ghost = s.ghostEl
+            if (ghost) {
+              // Get the original ghost dimensions (set at creation time from original element)
+              const ghostWidth = parseFloat(ghost.dataset.originalWidth || ghost.style.width) || freshColumns[0].rect.width
+              
+              // Update the time display on the ghost element using the same format as the app
+              const timeStr = `${formatTimeOfDay(newStart)} — ${formatTimeOfDay(newEnd)}`
+              ghost.setAttribute('data-drag-time', timeStr)
+              
+              // Also update the actual time text inside the ghost
+              const timeEl = ghost.querySelector('.calendar-event__time') as HTMLElement | null
+              if (timeEl) {
+                timeEl.textContent = timeStr
+              }
+              
+              // Remove ALL existing continuation ghosts - we'll recreate based on current times
+              document.querySelectorAll('.calendar-event-ghost-continuation').forEach(el => el.remove())
+              
+              // Find which columns the session spans based on newStart and newEnd
+              const startColIdx = freshColumns.findIndex(col => 
+                newStart >= col.dayStart && newStart < col.dayStart + DAY_DURATION_MS
+              )
+              const endColIdx = freshColumns.findIndex(col => 
+                newEnd > col.dayStart && newEnd <= col.dayStart + DAY_DURATION_MS
+              )
+              
+              // Use valid indices (clamp to available columns)
+              const firstColIdx = startColIdx >= 0 ? startColIdx : 0
+              const lastColIdx = endColIdx >= 0 ? endColIdx : freshColumns.length - 1
+              
+              // Position ghosts for each day the session spans
+              for (let colIdx = firstColIdx; colIdx <= lastColIdx && colIdx < freshColumns.length; colIdx++) {
+                const col = freshColumns[colIdx]
+                const colRect = col.rect
+                const colDayStart = col.dayStart
+                const colDayEnd = colDayStart + DAY_DURATION_MS
+                
+                // Calculate the portion of the session in this column
+                const sessionStartInCol = Math.max(newStart, colDayStart)
+                const sessionEndInCol = Math.min(newEnd, colDayEnd)
+                
+                // Skip if no portion in this column
+                if (sessionEndInCol <= sessionStartInCol) continue
+                
+                // Calculate position and height for this column's portion
+                const startTimeInCol = sessionStartInCol - colDayStart
+                const endTimeInCol = sessionEndInCol - colDayStart
+                const topPct = (startTimeInCol / DAY_DURATION_MS) * 100
+                const heightPct = ((endTimeInCol - startTimeInCol) / DAY_DURATION_MS) * 100
+                const top = colRect.top + (topPct / 100) * colRect.height
+                const height = (heightPct / 100) * colRect.height
+                const snappedX = colRect.left + (colRect.width - ghostWidth) / 2
+                
+                if (colIdx === firstColIdx) {
+                  // Update main ghost position
+                  ghost.style.left = `${snappedX}px`
+                  ghost.style.top = `${top}px`
+                  ghost.style.height = `${height}px`
+                  ghost.style.minHeight = `${height}px`
+                  ghost.style.maxHeight = `${height}px`
+                } else {
+                  // Create continuation ghost for additional days
+                  const continuationGhost = ghost.cloneNode(true) as HTMLDivElement
+                  continuationGhost.classList.add('calendar-event-ghost-continuation')
+                  continuationGhost.classList.remove('calendar-event-ghost')
+                  
+                  continuationGhost.style.position = 'fixed'
+                  continuationGhost.style.left = `${snappedX}px`
+                  continuationGhost.style.top = `${top}px`
+                  continuationGhost.style.width = `${ghostWidth}px`
+                  continuationGhost.style.height = `${height}px`
+                  continuationGhost.style.minHeight = `${height}px`
+                  continuationGhost.style.maxHeight = `${height}px`
+                  continuationGhost.style.zIndex = '10000'
+                  continuationGhost.style.pointerEvents = 'none'
+                  
+                  // Update time text
+                  const contTimeEl = continuationGhost.querySelector('.calendar-event__time') as HTMLElement | null
+                  if (contTimeEl) {
+                    contTimeEl.textContent = timeStr
+                  }
+                  continuationGhost.setAttribute('data-drag-time', timeStr)
+                  
+                  document.body.appendChild(continuationGhost)
+                }
+              }
+            }
+          } catch {}
+          
           s.moved = true
         }
         const onUp = (e: PointerEvent) => {
@@ -10051,18 +10358,22 @@ useEffect(() => {
             // If this was a guide task, materialize it now after drag completes
             if (guideMaterialization) {
               const { realEntry, ruleId, ymd } = guideMaterialization
-              // Add the materialized entry with updated times from preview
-              updateHistory((current) => {
-                const materialized = {
-                  ...realEntry,
-                  startedAt: preview.startedAt,
-                  endedAt: preview.endedAt,
-                  elapsed: Math.max(preview.endedAt - preview.startedAt, 1),
-                }
-                const next = [...current, materialized]
-                next.sort((a, b) => a.startedAt - b.startedAt)
-                return next
-              })
+              // PERFORMANCE: Defer to next event loop tick to avoid blocking pointer event (INP)
+              // but still update quickly so element moves to new column before transform reset
+              setTimeout(() => {
+                // Add the materialized entry with updated times from preview
+                updateHistory((current) => {
+                  const materialized = {
+                    ...realEntry,
+                    startedAt: preview.startedAt,
+                    endedAt: preview.endedAt,
+                    elapsed: Math.max(preview.endedAt - preview.startedAt, 1),
+                  }
+                  const next = [...current, materialized]
+                  next.sort((a, b) => a.startedAt - b.startedAt)
+                  return next
+                })
+              }, 0)
               // Persist an exception so future guide synthesis is suppressed
               try {
                 void upsertRepeatingException({
@@ -10076,21 +10387,23 @@ useEffect(() => {
                 void evaluateAndMaybeRetireRule(ruleId)
               } catch {}
             } else {
-              // Regular entry update
-              updateHistory((current) => {
-                const idx = current.findIndex((h) => h.id === s.entryId)
-                if (idx === -1) return current
-                const target = current[idx]
-                const next = [...current]
-                const nowTs = Date.now()
-                // Evaluate futureSession based on start time and current state
-                const wasInPast = target.startedAt <= nowTs
-                const nowInPast = preview.startedAt <= nowTs
-                const crossedBoundary = wasInPast !== nowInPast
-                // Newly created sessions always stay as future sessions until explicitly confirmed.
-                // For existing sessions:
-                // - Crossed to future: unconfirm
-                // - Crossed to past: confirm
+              // PERFORMANCE: Defer to next event loop tick to avoid blocking pointer event (INP)
+              setTimeout(() => {
+                // Regular entry update
+                updateHistory((current) => {
+                  const idx = current.findIndex((h) => h.id === s.entryId)
+                  if (idx === -1) return current
+                  const target = current[idx]
+                  const next = [...current]
+                  const nowTs = Date.now()
+                  // Evaluate futureSession based on start time and current state
+                  const wasInPast = target.startedAt <= nowTs
+                  const nowInPast = preview.startedAt <= nowTs
+                  const crossedBoundary = wasInPast !== nowInPast
+                  // Newly created sessions always stay as future sessions until explicitly confirmed.
+                  // For existing sessions:
+                  // - Crossed to future: unconfirm
+                  // - Crossed to past: confirm
                 // - Stale unconfirmed (futureSession=true but start in past): any drag confirms it
                 const isFuture =
                   pendingNewHistoryId && target.id === pendingNewHistoryId
@@ -10114,15 +10427,19 @@ useEffect(() => {
                 }
                 return next
               })
+              }, 0)
             }
           } else if (guideMaterialization && s.activated) {
             // Guide was activated but no time change - still need to materialize
             const { realEntry, ruleId, ymd } = guideMaterialization
-            updateHistory((current) => {
-              const next = [...current, realEntry]
-              next.sort((a, b) => a.startedAt - b.startedAt)
-              return next
-            })
+            // PERFORMANCE: Defer to next event loop tick to avoid blocking pointer event (INP)
+            setTimeout(() => {
+              updateHistory((current) => {
+                const next = [...current, realEntry]
+                next.sort((a, b) => a.startedAt - b.startedAt)
+                return next
+              })
+            }, 0)
             try {
               void upsertRepeatingException({
                 routineId: ruleId,
@@ -10143,7 +10460,65 @@ useEffect(() => {
           }
           calendarEventDragRef.current = null
           dragPreviewRef.current = null
-          setDragPreview(null)
+          
+          // GHOST-BASED DRAG: Keep ghost visible until React has re-rendered
+          const entryId = s.entryId
+          const ghost = s.ghostEl
+          const movedToDifferentPosition = s.moved
+          
+          // Helper to cleanup ghost after React re-renders
+          const cleanupGhost = () => {
+            // Wait for React to render, then remove ghost and show original
+            requestAnimationFrame(() => {
+              requestAnimationFrame(() => {
+                if (ghost) {
+                  try { ghost.remove() } catch {}
+                }
+                // Also remove continuation ghost if it exists
+                const continuationGhost = document.querySelector('.calendar-event-ghost-continuation')
+                if (continuationGhost) {
+                  try { continuationGhost.remove() } catch {}
+                }
+                // Restore ALL original elements for this entry (multi-day sessions have multiple DOM elements)
+                const allOriginalEls = document.querySelectorAll(`[data-entry-id="${entryId}"]`)
+                allOriginalEls.forEach((el) => {
+                  ;(el as HTMLElement).style.opacity = ''
+                  ;(el as HTMLElement).style.transform = ''
+                  ;(el as HTMLElement).style.zIndex = ''
+                })
+              })
+            })
+          }
+          
+          // If no movement, cleanup immediately
+          if (!movedToDifferentPosition) {
+            if (ghost) {
+              try { ghost.remove() } catch {}
+            }
+            // Also remove continuation ghost if it exists
+            const continuationGhost = document.querySelector('.calendar-event-ghost-continuation')
+            if (continuationGhost) {
+              try { continuationGhost.remove() } catch {}
+            }
+            // Restore ALL original elements for this entry (multi-day sessions have multiple DOM elements)
+            const allOriginalEls = document.querySelectorAll(`[data-entry-id="${entryId}"]`)
+            allOriginalEls.forEach((el) => {
+              ;(el as HTMLElement).style.opacity = ''
+              ;(el as HTMLElement).style.transform = ''
+              ;(el as HTMLElement).style.zIndex = ''
+            })
+          } else {
+            // Position changed - cleanup will happen after updateHistory (called from setTimeout above)
+            // Schedule cleanup after the setTimeout has had time to run and React to render
+            setTimeout(() => {
+              cleanupGhost()
+            }, 16) // One frame after the updateHistory setTimeout
+          }
+          
+          // PERFORMANCE: Defer state cleanup to avoid blocking the main thread
+          startTransition(() => {
+            setDragPreview(null)
+          })
           // Clear drag kind marker so cursor returns to default/hover affordances
           delete targetEl.dataset.dragKind
           // Always release scroll lock at the end of a drag (noop if not locked)
@@ -10418,6 +10793,8 @@ useEffect(() => {
                   const startCreate = () => {
                     if (startedCreate) return
                     startedCreate = true
+                    // Find the starting column index
+                    const startColIdx = columns.findIndex((c) => startX >= c.rect.left && startX <= c.rect.right)
                     const state: CalendarEventDragState = {
                       pointerId,
                       entryId: 'new-entry',
@@ -10429,6 +10806,7 @@ useEffect(() => {
                       durationMs: MIN_SESSION_DURATION_DRAG_MS,
                       kind: 'resize-end',
                       columns,
+                      currentColIdx: startColIdx >= 0 ? startColIdx : 0,
                     }
                     calendarEventDragRef.current = state
                     dragPreviewRef.current = { entryId: 'new-entry', startedAt: state.initialStart, endedAt: state.initialEnd }
@@ -10701,13 +11079,16 @@ useEffect(() => {
                             onDoubleClick={(e) => {
                               e.preventDefault()
                               e.stopPropagation()
-                              setSelectedHistoryId(ev.entry.id)
-                              setHoveredHistoryId(ev.entry.id)
-                              setEditingHistoryId(ev.entry.id)
-                              taskNameAutofilledRef.current = false
-                              setHistoryDraft(createHistoryDraftFromEntry(ev.entry))
-                              openCalendarInspector(ev.entry)
-                              handleCloseCalendarPreview()
+                              // PERFORMANCE: Batch all state updates in startTransition
+                              startTransition(() => {
+                                setSelectedHistoryId(ev.entry.id)
+                                setHoveredHistoryId(ev.entry.id)
+                                setEditingHistoryId(ev.entry.id)
+                                taskNameAutofilledRef.current = false
+                                setHistoryDraft(createHistoryDraftFromEntry(ev.entry))
+                                openCalendarInspector(ev.entry)
+                                handleCloseCalendarPreview()
+                              })
                             }}
                             onPointerDown={(pev) => {
                               // Set grabbing cursor while dragging
@@ -10744,6 +11125,14 @@ useEffect(() => {
                       return (
                       <div
                         key={`ev-${di}-${idx}-${ev.entry.id}`}
+                        ref={(el) => {
+                          // Store ref for direct CSS manipulation during drag
+                          if (el) {
+                            calendarEventRefsMap.current.set(ev.entry.id, el)
+                          } else {
+                            calendarEventRefsMap.current.delete(ev.entry.id)
+                          }
+                        }}
                         className={`calendar-event${isDragging ? ' calendar-event--dragging' : ''}${ev.isGuide ? ' calendar-event--guide' : ''}${ev.isPlanned ? ' calendar-event--planned' : ''}`}
                         style={{
                           top: `${ev.topPct}%`,
@@ -10779,14 +11168,16 @@ useEffect(() => {
                           e.preventDefault()
                           e.stopPropagation()
                           if (!ev.isGuide) {
-                            // Prepare draft + selection state and open the full editor modal
-                            setSelectedHistoryId(ev.entry.id)
-                            setHoveredHistoryId(ev.entry.id)
-                            setEditingHistoryId(ev.entry.id)
-                            taskNameAutofilledRef.current = false
-                            setHistoryDraft(createHistoryDraftFromEntry(ev.entry))
-                            openCalendarInspector(ev.entry)
-                            handleCloseCalendarPreview()
+                            // PERFORMANCE: Batch all state updates in startTransition
+                            startTransition(() => {
+                              setSelectedHistoryId(ev.entry.id)
+                              setHoveredHistoryId(ev.entry.id)
+                              setEditingHistoryId(ev.entry.id)
+                              taskNameAutofilledRef.current = false
+                              setHistoryDraft(createHistoryDraftFromEntry(ev.entry))
+                              openCalendarInspector(ev.entry)
+                              handleCloseCalendarPreview()
+                            })
                           } else {
                             // Materialize guide then open editor
                             const parts = ev.entry.id.split(':')
@@ -10799,28 +11190,34 @@ useEffect(() => {
                               repeatingSessionId: ruleId,
                               originalTime: ev.entry.startedAt,
                             }
-                            updateHistory((current) => {
-                              const next = [...current, newEntry]
-                              next.sort((a, b) => a.startedAt - b.startedAt)
-                              return next
-                            })
-                            try {
-                              void upsertRepeatingException({
-                                routineId: ruleId,
-                                occurrenceDate: ymd,
-                                action: 'rescheduled',
-                                newStartedAt: newEntry.startedAt,
-                                newEndedAt: newEntry.endedAt,
-                                notes: null,
+                            // PERFORMANCE: Defer heavy history update and batch state changes
+                            startTransition(() => {
+                              updateHistory((current) => {
+                                const next = [...current, newEntry]
+                                next.sort((a, b) => a.startedAt - b.startedAt)
+                                return next
                               })
-                            } catch {}
-                            setSelectedHistoryId(newEntry.id)
-                            setHoveredHistoryId(newEntry.id)
-                            setEditingHistoryId(newEntry.id)
-                            taskNameAutofilledRef.current = false
-                            setHistoryDraft(createHistoryDraftFromEntry(newEntry))
-                            openCalendarInspector(newEntry)
-                            handleCloseCalendarPreview()
+                              setSelectedHistoryId(newEntry.id)
+                              setHoveredHistoryId(newEntry.id)
+                              setEditingHistoryId(newEntry.id)
+                              taskNameAutofilledRef.current = false
+                              setHistoryDraft(createHistoryDraftFromEntry(newEntry))
+                              openCalendarInspector(newEntry)
+                              handleCloseCalendarPreview()
+                            })
+                            // Defer network call to not block UI
+                            setTimeout(() => {
+                              try {
+                                void upsertRepeatingException({
+                                  routineId: ruleId,
+                                  occurrenceDate: ymd,
+                                  action: 'rescheduled',
+                                  newStartedAt: newEntry.startedAt,
+                                  newEndedAt: newEntry.endedAt,
+                                  notes: null,
+                                })
+                              } catch {}
+                            }, 0)
                           }
                         }}
                         onPointerUp={() => {
@@ -12563,8 +12960,44 @@ useEffect(() => {
 
       const nextPreview = { entryId: state.entryId, startedAt: nextStartRounded, endedAt: nextEndRounded }
       dragPreviewRef.current = nextPreview
-      setDragPreview(nextPreview)
-      setHoveredDuringDragId(state.entryId)
+
+      // PERFORMANCE: Use direct CSS transform instead of React state during drag
+      // This avoids re-rendering the entire segment list on every mouse move
+      const blockEl = blockRefsMap.current.get(state.entryId)
+      if (blockEl) {
+        const newStart = Math.max(nextStartRounded, state.dayStart)
+        const newEnd = Math.min(nextEndRounded, state.dayEnd)
+        const newLeftPercent = ((newStart - state.dayStart) / DAY_DURATION_MS) * 100
+        const newWidthPercent = ((newEnd - newStart) / DAY_DURATION_MS) * 100
+        
+        // Calculate transform offset from initial position
+        const translateX = newLeftPercent - state.initialLeftPercent
+        const scaleX = state.type === 'move' ? 1 : newWidthPercent / state.initialWidthPercent
+        
+        if (state.type === 'move') {
+          // For move: just translate
+          blockEl.style.transform = `translateX(${translateX}%)`
+        } else if (state.type === 'resize-start') {
+          // For resize-start: translate and scale from right edge
+          blockEl.style.transformOrigin = 'right center'
+          blockEl.style.transform = `translateX(${translateX}%) scaleX(${scaleX})`
+        } else {
+          // For resize-end: scale from left edge
+          blockEl.style.transformOrigin = 'left center'
+          blockEl.style.transform = `scaleX(${scaleX})`
+        }
+        
+        // Update the drag time badge via data attribute
+        const startTime = new Date(nextStartRounded)
+        const endTime = new Date(nextEndRounded)
+        const formatT = (d: Date) => d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })
+        blockEl.setAttribute('data-drag-time', `${formatT(startTime)} — ${formatT(endTime)}`)
+      }
+      
+      // Only set hovered state once at start, not on every move
+      if (!state.hasMoved) {
+        setHoveredDuringDragId(state.entryId)
+      }
     },
     [],
   )
@@ -12585,6 +13018,15 @@ useEffect(() => {
       }
 
       const preview = dragPreviewRef.current
+      
+      // PERFORMANCE: Reset CSS transform on the dragged block before committing to state
+      // This ensures the block snaps to its final React-rendered position cleanly
+      const blockEl = blockRefsMap.current.get(state.entryId)
+      if (blockEl) {
+        blockEl.style.transform = ''
+        blockEl.style.transformOrigin = ''
+      }
+      
       if (state.hasMoved && preview) {
         if (state.entryId === 'new-entry') {
           const startedAt = Math.min(preview.startedAt, preview.endedAt)
@@ -12691,6 +13133,10 @@ useEffect(() => {
       if (!rect || rect.width <= 0) {
         return
       }
+      // Calculate initial position for CSS transform-based dragging
+      const initialLeftPercent = segment.leftPercent
+      const initialWidthPercent = segment.widthPercent
+      
       dragStateRef.current = {
         entryId: segment.entry.id,
         type,
@@ -12703,10 +13149,12 @@ useEffect(() => {
         dayEnd,
         minDurationMs: MIN_SESSION_DURATION_DRAG_MS,
         hasMoved: false,
+        initialLeftPercent,
+        initialWidthPercent,
       }
       dragPreventClickRef.current = false
       dragPreviewRef.current = null
-      setDragPreview(null)
+      // Don't set dragPreview state here - we'll use CSS transforms during drag
       setHoveredDuringDragId(segment.entry.id)
       event.stopPropagation()
       window.addEventListener('pointermove', handleWindowPointerMove)
@@ -12732,6 +13180,10 @@ useEffect(() => {
       if (!rect || rect.width <= 0) {
         return
       }
+      // Calculate initial position for CSS transform-based dragging
+      const initialLeftPercent = ((startTimestamp - dayStart) / DAY_DURATION_MS) * 100
+      const initialWidthPercent = (MIN_SESSION_DURATION_DRAG_MS / DAY_DURATION_MS) * 100
+      
       dragStateRef.current = {
         entryId: 'new-entry',
         type: 'resize-end',
@@ -12744,12 +13196,15 @@ useEffect(() => {
         dayEnd,
         minDurationMs: MIN_SESSION_DURATION_DRAG_MS,
         hasMoved: false,
+        initialLeftPercent,
+        initialWidthPercent,
       }
       dragPreviewRef.current = {
         entryId: 'new-entry',
         startedAt: startTimestamp,
         endedAt: startTimestamp + MIN_SESSION_DURATION_DRAG_MS,
       }
+      // For new entries, we still need state to render the new block initially
       setDragPreview(dragPreviewRef.current)
       dragPreventClickRef.current = false
       setHoveredDuringDragId('new-entry')
@@ -13978,7 +14433,9 @@ useEffect(() => {
               const isActiveSessionSegment = segment.entry.id === 'active-session'
               const isDragging = dragPreview?.entryId === segment.entry.id
               const isNewEntryEditing = isEditing && selectedHistoryId === pendingNewHistoryId
-              const trimmedTaskDraft = historyDraft.taskName.trim()
+              // PERFORMANCE: Use immediate draft for selected segment, deferred for others
+              const effectiveDraft = isSelected ? historyDraft : deferredHistoryDraft
+              const trimmedTaskDraft = effectiveDraft.taskName.trim()
               const displayTask = isSelected
                 ? trimmedTaskDraft.length > 0
                   ? trimmedTaskDraft
@@ -13988,24 +14445,24 @@ useEffect(() => {
               const baseEndedAt = segment.entry.endedAt
               const draggedStartedAt = isDragging && dragPreview ? dragPreview.startedAt : baseStartedAt
               const draggedEndedAt = isDragging && dragPreview ? dragPreview.endedAt : baseEndedAt
-              const shouldUseLiveStart = isActiveSessionSegment && activeSession?.isRunning && historyDraft.startedAt === null && !isDragging
+              const shouldUseLiveStart = isActiveSessionSegment && activeSession?.isRunning && effectiveDraft.startedAt === null && !isDragging
               const resolvedStartedAt = isSelected
                 ? isDragging
                   ? draggedStartedAt
                   : shouldUseLiveStart
                     ? baseStartedAt
-                    : resolveTimestamp(historyDraft.startedAt, baseStartedAt)
+                    : resolveTimestamp(effectiveDraft.startedAt, baseStartedAt)
                 : draggedStartedAt
-              const shouldUseLiveEnd = isActiveSessionSegment && activeSession?.isRunning && historyDraft.endedAt === null && !isDragging
+              const shouldUseLiveEnd = isActiveSessionSegment && activeSession?.isRunning && effectiveDraft.endedAt === null && !isDragging
               const resolvedEndedAt = isSelected
                 ? isDragging
                   ? draggedEndedAt
                   : shouldUseLiveEnd
                     ? baseEndedAt
-                    : resolveTimestamp(historyDraft.endedAt, baseEndedAt)
+                    : resolveTimestamp(effectiveDraft.endedAt, baseEndedAt)
                 : draggedEndedAt
-              const trimmedGoalDraft = historyDraft.goalName.trim()
-              const trimmedBucketDraft = historyDraft.bucketName.trim()
+              const trimmedGoalDraft = effectiveDraft.goalName.trim()
+              const trimmedBucketDraft = effectiveDraft.bucketName.trim()
               const resolvedDurationMs = Math.max(resolvedEndedAt - resolvedStartedAt, 0)
               const displayGoal = isSelected && trimmedGoalDraft.length > 0 ? trimmedGoalDraft : segment.goalLabel
               const displayBucket = isSelected && trimmedBucketDraft.length > 0 ? trimmedBucketDraft : segment.bucketLabel
@@ -14474,6 +14931,14 @@ useEffect(() => {
               return (
                 <div
                   key={`${segment.id}-${segment.start}-${segment.end}`}
+                  ref={(el) => {
+                    // Store ref for direct CSS manipulation during drag
+                    if (el) {
+                      blockRefsMap.current.set(segment.entry.id, el)
+                    } else {
+                      blockRefsMap.current.delete(segment.entry.id)
+                    }
+                  }}
                   className={blockClassName}
                   style={{
                     left: `${segment.leftPercent}%`,
