@@ -1107,10 +1107,7 @@ function MainApp() {
       } catch {}
       
       // Bootstrap complete - all data is loaded, ready to show the app
-      // Add a small delay to ensure localStorage writes are flushed and React can read fresh data
-      console.log('[bootstrap] complete, waiting before setting isSigningIn=false')
-      await new Promise(resolve => setTimeout(resolve, 7000))
-      console.log('[bootstrap] delay done, setting isSigningIn=false')
+      console.log('[bootstrap] complete, setting isSigningIn=false')
       if (mounted) {
         setIsSigningIn(false)
       }
