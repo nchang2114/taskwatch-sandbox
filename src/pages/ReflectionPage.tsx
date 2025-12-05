@@ -10327,12 +10327,10 @@ useEffect(() => {
               dragPreventClickRef.current = true
               // For existing entries (non-guides), the drag calculation uses system timezone dayStarts,
               // and real sessions are displayed with timezone adjustment, so no conversion needed.
-              // For guide materializations: the preview is in system timezone space (where the guide was displayed),
-              // but the resulting session will be timezone-adjusted for display. So we need to unadjust
-              // the preview values so the saved session appears at the same visual position.
+              // For guide materializations: the preview is calculated using system timezone dayStarts.
+              // Guide timestamps represent intended LOCAL time, so we need to unadjust for storage.
               if (guideMaterialization) {
                 const { realEntry, ruleId, ymd } = guideMaterialization
-                // Unadjust so that adjust(stored) = preview position (where user dropped it)
                 const storedStartedAt = unadjustTimestampForTimezone(preview.startedAt)
                 const storedEndedAt = unadjustTimestampForTimezone(preview.endedAt)
                 flushSync(() => {
@@ -10380,8 +10378,8 @@ useEffect(() => {
                 })
               }
             } else if (guideMaterialization && s) {
-              // Guide held but not moved - materialize at same visual position
-              // realEntry has guide's system timezone times, unadjust for storage
+              // Guide held but not moved - materialize at same visual position.
+              // Guide timestamps represent intended LOCAL time, unadjust for storage.
               const { realEntry, ruleId, ymd } = guideMaterialization
               const storedStartedAt = unadjustTimestampForTimezone(realEntry.startedAt)
               const storedEndedAt = unadjustTimestampForTimezone(realEntry.endedAt)
@@ -11116,7 +11114,7 @@ useEffect(() => {
                             const ruleId = parts[1]
                             const dayStart = Number(parts[2])
                             const ymd = formatLocalYmd(dayStart)
-                            // Guide shows at scheduled local time, unadjust for storage so displayed position matches
+                            // Guide timestamps represent intended LOCAL time, unadjust for storage.
                             const storedStartedAt = unadjustTimestampForTimezone(ev.entry.startedAt)
                             const storedEndedAt = unadjustTimestampForTimezone(ev.entry.endedAt)
                             const newEntry: HistoryEntry = {
@@ -11139,8 +11137,8 @@ useEffect(() => {
                                 routineId: ruleId,
                                 occurrenceDate: ymd,
                                 action: 'rescheduled',
-                                newStartedAt: newEntry.startedAt,
-                                newEndedAt: newEntry.endedAt,
+                                newStartedAt: storedStartedAt,
+                                newEndedAt: storedEndedAt,
                                 notes: null,
                               })
                             } catch {}
@@ -12165,10 +12163,10 @@ useEffect(() => {
                   className="history-timeline__action-button history-timeline__action-button--primary"
                   onClick={() => {
                     if (!parsedGuide) return
-                    // Guide shows at its scheduled local time (e.g., 11 AM) without timezone adjustment.
-                    // The confirmed session will be timezone-adjusted for display.
-                    // To make it appear at the same visual position (11 AM), we need to unadjust:
-                    // stored = unadjust(guideTime) so that adjust(stored) = guideTime
+                    // Guide timestamps are computed in system timezone (baseDayStart + timeOfDayMinutes).
+                    // Guide timestamps represent intended LOCAL time (e.g., "11 AM wherever I am").
+                    // We need to unadjust them so that when displayed with adjustTimestampForTimezone,
+                    // the session appears at the same visual position as the guide.
                     const storedStartedAt = unadjustTimestampForTimezone(entry.startedAt)
                     const storedEndedAt = unadjustTimestampForTimezone(entry.endedAt)
                     const newEntry: HistoryEntry = {
@@ -12176,7 +12174,7 @@ useEffect(() => {
                       id: makeHistoryId(),
                       startedAt: storedStartedAt,
                       endedAt: storedEndedAt,
-                      elapsed: Math.max(storedEndedAt - storedStartedAt, 1),
+                      elapsed: Math.max(entry.endedAt - entry.startedAt, 1),
                       repeatingSessionId: parsedGuide.ruleId,
                       // originalTime must match the guide's time for suppression lookup to work
                       // (confirmedKeySet uses formatLocalYmd(originalTime) to match guide's dayStart)
@@ -12209,14 +12207,14 @@ useEffect(() => {
                   className="history-timeline__action-button"
                   onClick={async () => {
                     if (!parsedGuide) return
-                    // Create a zero-duration entry to mark this occurrence as resolved without rendering
-                    // Use unadjusted time so it matches the guide's visual position
-                    const storedStartedAt = unadjustTimestampForTimezone(entry.startedAt)
+                    // Create a zero-duration entry to mark this occurrence as resolved without rendering.
+                    // Guide timestamps represent intended LOCAL time, unadjust for storage.
+                    const storedTime = unadjustTimestampForTimezone(entry.startedAt)
                     const zeroEntry: HistoryEntry = {
                       ...entry,
                       id: makeHistoryId(),
-                      startedAt: storedStartedAt,
-                      endedAt: storedStartedAt,
+                      startedAt: storedTime,
+                      endedAt: storedTime,
                       elapsed: 0,
                       repeatingSessionId: parsedGuide.ruleId,
                       // originalTime must match the guide's time for suppression lookup to work
