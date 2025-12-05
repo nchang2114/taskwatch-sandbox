@@ -459,6 +459,9 @@ const makeGoalSubtaskInputId = (taskId: string, subtaskId: string): string =>
 
 const SHOW_TASK_DETAILS = true as const
 
+// Toggle sort animation on/off (set to false to disable the shuffle animation when sorting)
+const ENABLE_SORT_ANIMATION = false as const
+
 // Auto-size a textarea to fit its content without requiring focus
 const autosizeTextArea = (el: HTMLTextAreaElement | null) => {
   if (!el) return
@@ -8925,11 +8928,12 @@ export default function GoalsPage(): ReactElement {
 
   const sortBucketByDate = async (goalId: string, bucketId: string, direction: 'oldest' | 'newest') => {
     const STEP = 1024
-    // Start sorting animation
-    setSortingBucketId(bucketId)
-    
-    // Small delay to let animation start before state update
-    await new Promise(resolve => setTimeout(resolve, 50))
+    // Start sorting animation (if enabled)
+    if (ENABLE_SORT_ANIMATION) {
+      setSortingBucketId(bucketId)
+      // Small delay to let animation start before state update
+      await new Promise(resolve => setTimeout(resolve, 50))
+    }
     
     // Try API first (for logged-in users)
     const result = await apiSortBucketTasksByDate(bucketId, direction)
@@ -8961,7 +8965,7 @@ export default function GoalsPage(): ReactElement {
         ),
       )
       // Clear animation after a short delay
-      setTimeout(() => setSortingBucketId(null), 300)
+      if (ENABLE_SORT_ANIMATION) setTimeout(() => setSortingBucketId(null), 300)
     } else {
       // Guest mode: sort tasks locally by createdAt within priority groups
       setGoals((gs) =>
@@ -8992,17 +8996,18 @@ export default function GoalsPage(): ReactElement {
         ),
       )
       // Clear animation after a short delay
-      setTimeout(() => setSortingBucketId(null), 300)
+      if (ENABLE_SORT_ANIMATION) setTimeout(() => setSortingBucketId(null), 300)
     }
   }
 
   const sortBucketByPriority = async (goalId: string, bucketId: string) => {
     const STEP = 1024
-    // Start sorting animation
-    setSortingBucketId(bucketId)
-    
-    // Small delay to let animation start before state update
-    await new Promise(resolve => setTimeout(resolve, 50))
+    // Start sorting animation (if enabled)
+    if (ENABLE_SORT_ANIMATION) {
+      setSortingBucketId(bucketId)
+      // Small delay to let animation start before state update
+      await new Promise(resolve => setTimeout(resolve, 50))
+    }
     
     // Difficulty weight: green=0, yellow=1, red=2, none/null=3
     const difficultyWeight = (diff: string | null | undefined): number => {
@@ -9042,7 +9047,7 @@ export default function GoalsPage(): ReactElement {
         ),
       )
       // Clear animation after a short delay
-      setTimeout(() => setSortingBucketId(null), 300)
+      if (ENABLE_SORT_ANIMATION) setTimeout(() => setSortingBucketId(null), 300)
     } else {
       // Guest mode: sort tasks locally by priority then difficulty (stable sort)
       setGoals((gs) =>
@@ -9074,7 +9079,7 @@ export default function GoalsPage(): ReactElement {
         ),
       )
       // Clear animation after a short delay
-      setTimeout(() => setSortingBucketId(null), 300)
+      if (ENABLE_SORT_ANIMATION) setTimeout(() => setSortingBucketId(null), 300)
     }
   }
 
