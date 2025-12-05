@@ -338,8 +338,15 @@ function MainApp() {
   const [authVerifyStatus, setAuthVerifyStatus] = useState<string | null>(null)
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [isSigningOut, setIsSigningOut] = useState(false)
-  // Start bootstrapping as true - we'll set to false once session + data is fully loaded
-  const [isBootstrapping, setIsBootstrapping] = useState(true)
+  // Only show "Signing you in..." screen when returning from OAuth redirect
+  const [isSigningIn, setIsSigningIn] = useState(() => {
+    if (typeof window !== 'undefined') {
+      const hasAuthCallback = window.location.hash.includes('access_token') || 
+                              window.location.search.includes('code=')
+      return hasAuthCallback
+    }
+    return false
+  })
   const [activeSettingsSection, setActiveSettingsSection] = useState(SETTINGS_SECTIONS[0]?.id ?? 'general')
   const [authEmailLookupValue, setAuthEmailLookupValue] = useState('')
   const [authEmailLookupResult, setAuthEmailLookupResult] = useState<boolean | null>(null)
@@ -1084,7 +1091,7 @@ function MainApp() {
       
       // Bootstrap complete - all data is loaded, ready to show the app
       if (mounted) {
-        setIsBootstrapping(false)
+        setIsSigningIn(false)
       }
     }
 
@@ -1994,6 +2001,16 @@ const nextThemeLabel = theme === 'dark' ? 'light' : 'dark'
     return <SignOutScreen />
   }
 
+  if (isSigningIn) {
+    return (
+      <div className="app-loading">
+        <div className="app-loading__content">
+          <p className="app-loading__title">Signing you in...</p>
+        </div>
+      </div>
+    )
+  }
+
   return (
     <div className="page">
       <header className={headerClassName}>
@@ -2114,7 +2131,7 @@ const nextThemeLabel = theme === 'dark' ? 'light' : 'dark'
           tabIndex={-1}
           hidden={activeTab !== 'goals'}
         >
-          {!isBootstrapping && <GoalsPage />}
+          {!isSigningIn && <GoalsPage />}
         </section>
 
         <section
@@ -2125,7 +2142,7 @@ const nextThemeLabel = theme === 'dark' ? 'light' : 'dark'
           tabIndex={-1}
           hidden={activeTab !== 'focus'}
         >
-          {!isBootstrapping && <FocusPage viewportWidth={viewportWidth} />}
+          {!isSigningIn && <FocusPage viewportWidth={viewportWidth} />}
         </section>
 
         <section
@@ -2136,7 +2153,7 @@ const nextThemeLabel = theme === 'dark' ? 'light' : 'dark'
           tabIndex={-1}
           hidden={activeTab !== 'reflection'}
         >
-          {!isBootstrapping && <ReflectionPage />}
+          {!isSigningIn && <ReflectionPage />}
         </section>
       </main>
       {settingsOpen ? (
@@ -2172,7 +2189,7 @@ const nextThemeLabel = theme === 'dark' ? 'light' : 'dark'
           </div>
         </div>
       ) : null}
-      {(authModalOpen || isBootstrapping) ? (
+      {authModalOpen ? (
         <div className="auth-modal-overlay" role="dialog" aria-modal="true" aria-label="Sign in to Taskwatch">
           <div className="auth-modal" ref={authModalRef}>
             {authEmailStage === 'create' ? (
