@@ -1135,10 +1135,20 @@ function MainApp() {
       }
     }
 
-    void bootstrapSession()
+    // Track whether initial bootstrap is complete to avoid duplicate alignment calls
+    let bootstrapComplete = false
+
+    void (async () => {
+      await bootstrapSession()
+      bootstrapComplete = true
+    })()
 
     // Listen to auth state changes within this tab
     const { data: listener } = client.auth.onAuthStateChange((_event, session) => {
+      // Skip during initial bootstrap - bootstrapSession handles it
+      if (!bootstrapComplete) {
+        return
+      }
       void applySessionUser(session?.user ?? null)
     })
 
