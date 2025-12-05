@@ -3431,8 +3431,8 @@ let tzDebugLastReportTime = 0
 export default function ReflectionPage() {
   // App timezone override - allows user to switch timezones without changing system settings
   const [appTimezone, setAppTimezone] = useState<string | null>(() => readStoredAppTimezone())
-  // NOTE: Removed useDeferredValue - it was causing 5-10 extra render passes per timezone change
-  // The caching in getTimezoneOffsetMs makes the computation fast enough without deferring
+  // Deferred timezone for heavy computations (calendar/timeline) - avoids blocking UI
+  const deferredAppTimezone = useDeferredValue(appTimezone)
   
   // Handler to update app timezone and persist to localStorage
   // Wrapped in startTransition to avoid blocking UI during heavy calendar re-renders
@@ -3481,10 +3481,10 @@ export default function ReflectionPage() {
     })
   }, [appTimezone])
   
-  // Timezone-aware time formatter
+  // Timezone-aware time formatter - uses DEFERRED app timezone for calendar rendering
   const formatTime = useCallback((timestamp: number) => {
-    return formatTimeOfDay(timestamp, appTimezone)
-  }, [appTimezone])
+    return formatTimeOfDay(timestamp, deferredAppTimezone)
+  }, [deferredAppTimezone])
   
   // Get display name for current effective timezone (uses immediate value for UI)
   const effectiveTimezoneDisplay = useMemo(() => {
@@ -3504,24 +3504,16 @@ export default function ReflectionPage() {
     return appTimezone !== getCurrentSystemTimezone()
   }, [appTimezone])
   
-  // Ref to hold current appTimezone - allows adjustTimestampForTimezone to be stable
-  const appTimezoneRef = useRef(appTimezone)
-  useEffect(() => {
-    appTimezoneRef.current = appTimezone
-  }, [appTimezone])
-  
   // Adjust a timestamp from system timezone to app timezone for visual positioning
-  // STABLE function - reads from ref so it never changes identity, avoiding memo invalidation
-  // Memos that use this should depend on `appTimezone` string to trigger recalculation
+  // Uses DEFERRED timezone to avoid blocking UI during heavy calendar re-renders
   const adjustTimestampForTimezone = useCallback((timestamp: number): number => {
-    const tz = appTimezoneRef.current
-    if (!tz) return timestamp
+    if (!deferredAppTimezone) return timestamp
     const systemTz = getCurrentSystemTimezone()
-    if (systemTz === tz) return timestamp
+    if (systemTz === deferredAppTimezone) return timestamp
     
     // DEBUG: Track performance
     const debugStart = TIMEZONE_DEBUG ? performance.now() : 0
-    const result = timestamp + getTimezoneOffsetMs(timestamp, systemTz, tz)
+    const result = timestamp + getTimezoneOffsetMs(timestamp, systemTz, deferredAppTimezone)
     if (TIMEZONE_DEBUG) {
       const elapsed = performance.now() - debugStart
       tzDebugCallCount++
@@ -3535,7 +3527,7 @@ export default function ReflectionPage() {
       }
     }
     return result
-  }, []) // Empty deps - stable function that reads from ref
+  }, [deferredAppTimezone])
   
   type CalendarViewMode = 'day' | '3d' | 'week' | 'month' | 'year'
   const [calendarView, setCalendarView] = useState<CalendarViewMode>('3d')
@@ -7946,7 +7938,7 @@ useEffect(() => {
         tooltipTask,
       }
     })
-  }, [effectiveHistory, dayStart, dayEnd, enhancedGoalLookup, goalColorLookup, dragPreview, appTimezone]) // appTimezone triggers recalc, adjustTimestampForTimezone is stable
+  }, [effectiveHistory, dayStart, dayEnd, enhancedGoalLookup, goalColorLookup, dragPreview, adjustTimestampForTimezone])
   
   // Separate timezone markers from regular segments
   const { regularSegments, timezoneMarkers } = useMemo(() => {
@@ -11654,7 +11646,7 @@ useEffect(() => {
     setHistoryDayOffset,
     navigateByDelta,
     stepSizeByView,
-    appTimezone, // appTimezone triggers recalc, adjustTimestampForTimezone is stable
+    adjustTimestampForTimezone,
     formatTime,
   ])
 
