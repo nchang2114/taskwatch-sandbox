@@ -338,16 +338,8 @@ function MainApp() {
   const [authVerifyStatus, setAuthVerifyStatus] = useState<string | null>(null)
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [isSigningOut, setIsSigningOut] = useState(false)
-  // Show sign-in modal during initial bootstrap if returning from OAuth redirect
-  const [isBootstrapping, setIsBootstrapping] = useState(() => {
-    // Check if we're returning from an OAuth redirect (has hash or code param)
-    if (typeof window !== 'undefined') {
-      const hasAuthCallback = window.location.hash.includes('access_token') || 
-                              window.location.search.includes('code=')
-      return hasAuthCallback
-    }
-    return false
-  })
+  // Start bootstrapping as true - we'll set to false once session + data is fully loaded
+  const [isBootstrapping, setIsBootstrapping] = useState(true)
   const [activeSettingsSection, setActiveSettingsSection] = useState(SETTINGS_SECTIONS[0]?.id ?? 'general')
   const [authEmailLookupValue, setAuthEmailLookupValue] = useState('')
   const [authEmailLookupResult, setAuthEmailLookupResult] = useState<boolean | null>(null)
@@ -2122,7 +2114,7 @@ const nextThemeLabel = theme === 'dark' ? 'light' : 'dark'
           tabIndex={-1}
           hidden={activeTab !== 'goals'}
         >
-          <GoalsPage />
+          {!isBootstrapping && <GoalsPage />}
         </section>
 
         <section
@@ -2133,7 +2125,7 @@ const nextThemeLabel = theme === 'dark' ? 'light' : 'dark'
           tabIndex={-1}
           hidden={activeTab !== 'focus'}
         >
-          <FocusPage viewportWidth={viewportWidth} />
+          {!isBootstrapping && <FocusPage viewportWidth={viewportWidth} />}
         </section>
 
         <section
@@ -2144,7 +2136,7 @@ const nextThemeLabel = theme === 'dark' ? 'light' : 'dark'
           tabIndex={-1}
           hidden={activeTab !== 'reflection'}
         >
-          <ReflectionPage />
+          {!isBootstrapping && <ReflectionPage />}
         </section>
       </main>
       {settingsOpen ? (
