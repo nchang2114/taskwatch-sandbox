@@ -1036,6 +1036,8 @@ function MainApp() {
       if (typeof window !== 'undefined') {
         try {
           window.localStorage.removeItem('taskwatch_app_timezone')
+          // Dispatch custom event to notify same-tab components (storage events only fire cross-tab)
+          window.dispatchEvent(new CustomEvent('taskwatch-timezone-reset'))
         } catch {}
       }
       

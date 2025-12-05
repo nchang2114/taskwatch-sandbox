@@ -3444,6 +3444,7 @@ export default function ReflectionPage() {
   
   // Listen for timezone being cleared (e.g., on sign-out) and reset in-memory state
   useEffect(() => {
+    // Handle cross-tab storage changes
     const handleStorageChange = (event: StorageEvent) => {
       if (event.key === APP_TIMEZONE_STORAGE_KEY) {
         // Timezone was changed or removed - sync in-memory state
@@ -3463,8 +3464,21 @@ export default function ReflectionPage() {
         }
       }
     }
+    
+    // Handle same-tab timezone reset (custom event from App.tsx on sign-in/sign-out)
+    const handleTimezoneReset = () => {
+      clearTimezoneCaches()
+      startTransition(() => {
+        setAppTimezone(null)
+      })
+    }
+    
     window.addEventListener('storage', handleStorageChange)
-    return () => window.removeEventListener('storage', handleStorageChange)
+    window.addEventListener('taskwatch-timezone-reset', handleTimezoneReset)
+    return () => {
+      window.removeEventListener('storage', handleStorageChange)
+      window.removeEventListener('taskwatch-timezone-reset', handleTimezoneReset)
+    }
   }, [appTimezone])
   
   // Timezone-aware time formatter for RAW UTC timestamps
