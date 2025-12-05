@@ -1106,7 +1106,7 @@ export async function sortBucketTasksByDate(bucketId: string, direction: 'oldest
   // Using individual updates since Supabase doesn't support batch updates with different values per row
   await Promise.all(
     updates.map(({ id, sort_index }) =>
-      supabase
+      supabase!
         .from('tasks')
         .update({ sort_index })
         .eq('id', id)
