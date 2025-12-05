@@ -907,23 +907,28 @@ function MainApp() {
     }
 
     const alignLocalStoresForUser = async (userId: string | null): Promise<void> => {
+      console.log('[align] starting for userId:', userId)
       const previousUserId = lastAlignedUserIdRef.current
       const userChanged = previousUserId !== userId
+      console.log('[align] previousUserId:', previousUserId, 'userChanged:', userChanged)
       
       // Do not attempt to bootstrap/sync without a valid Supabase session
       // EXCEPT when signing out (userId is null) - we need to reset to guest
       const session = await ensureSingleUserSession()
       if (!session && userId) {
+        console.log('[align] no session, returning early')
         return
       }
 
       // If user hasn't changed and no migration needed, skip alignment
       if (!userChanged) {
+        console.log('[align] user unchanged, skipping')
         return
       }
 
       // Check if alignment was already completed by another tab
       if (userId && isAlignmentComplete(userId)) {
+        console.log('[align] alignment already complete')
         lastAlignedUserIdRef.current = userId
         return
       }
@@ -1066,6 +1071,7 @@ function MainApp() {
     }
 
     const bootstrapSession = async () => {
+      console.log('[bootstrap] starting')
       // Clear the signing-out flag at the start of a fresh page load
       // This flag is only meant to block alignment during the immediate sign-out reload
       if (typeof window !== 'undefined') {
@@ -1082,14 +1088,19 @@ function MainApp() {
       if (!session) {
         session = await restoreSessionFromCache()
       }
+      console.log('[bootstrap] calling applySessionUser 1')
       await applySessionUser(session?.user ?? null)
+      console.log('[bootstrap] applySessionUser 1 done')
       try {
         const { data } = await client.auth.getUser()
         const resolvedUser = data?.user ?? session?.user ?? null
+        console.log('[bootstrap] calling applySessionUser 2')
         await applySessionUser(resolvedUser)
+        console.log('[bootstrap] applySessionUser 2 done')
       } catch {}
       
       // Bootstrap complete - all data is loaded, ready to show the app
+      console.log('[bootstrap] complete, setting isSigningIn=false')
       if (mounted) {
         setIsSigningIn(false)
       }
