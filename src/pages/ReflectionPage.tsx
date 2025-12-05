@@ -3481,10 +3481,17 @@ export default function ReflectionPage() {
     })
   }, [appTimezone])
   
-  // Timezone-aware time formatter - uses DEFERRED app timezone for calendar rendering
+  // Timezone-aware time formatter for RAW UTC timestamps
+  // This applies timezone conversion during display formatting
   const formatTime = useCallback((timestamp: number) => {
     return formatTimeOfDay(timestamp, deferredAppTimezone)
   }, [deferredAppTimezone])
+  
+  // Format an already-adjusted timestamp (no timezone conversion needed)
+  // Use this for previewStart/previewEnd values which are already timezone-shifted
+  const formatAdjustedTime = useCallback((adjustedTimestamp: number) => {
+    return formatTimeOfDay(adjustedTimestamp) // No timezone - just format as local time
+  }, [])
   
   // Get display name for current effective timezone (uses immediate value for UI)
   const effectiveTimezoneDisplay = useMemo(() => {
@@ -3528,6 +3535,17 @@ export default function ReflectionPage() {
     }
     return result
   }, [deferredAppTimezone])
+  
+  // Reverse of adjustTimestampForTimezone - converts display time back to UTC for storage
+  // When creating/editing entries in a custom timezone, the visual position is in "display space"
+  // (already adjusted for the app timezone). Before saving, we need to un-adjust back to UTC.
+  const unadjustTimestampForTimezone = useCallback((displayTimestamp: number): number => {
+    if (!appTimezone) return displayTimestamp
+    const systemTz = getCurrentSystemTimezone()
+    if (systemTz === appTimezone) return displayTimestamp
+    // Subtract instead of add (reverse of adjustTimestampForTimezone)
+    return displayTimestamp - getTimezoneOffsetMs(displayTimestamp, systemTz, appTimezone)
+  }, [appTimezone])
   
   type CalendarViewMode = 'day' | '3d' | 'week' | 'month' | 'year'
   const [calendarView, setCalendarView] = useState<CalendarViewMode>('3d')
@@ -10062,10 +10080,10 @@ useEffect(() => {
           const isPlanned = !!(info.entry as any).futureSession
           
           // Guide tasks (repeating rules) should show original local times, not timezone-adjusted
-          // Actual sessions should use timezone-adjusted times
+          // Actual sessions: previewStart/previewEnd are already timezone-adjusted, use formatAdjustedTime
           const rangeLabel = isGuide
             ? `${formatTimeOfDay(info.previewStart)} — ${formatTimeOfDay(info.previewEnd)}`
-            : `${formatTime(info.previewStart)} — ${formatTime(info.previewEnd)}`
+            : `${formatAdjustedTime(info.previewStart)} — ${formatAdjustedTime(info.previewEnd)}`
 
           const duration = Math.max(info.end - info.start, 1)
           const durationScore = Math.max(0, Math.round((DAY_DURATION_MS - duration) / MINUTE_MS))
@@ -10384,15 +10402,21 @@ useEffect(() => {
             const preview = dragPreviewRef.current
             if (s && preview && preview.entryId === s.entryId && (preview.startedAt !== s.initialStart || preview.endedAt !== s.initialEnd)) {
               dragPreventClickRef.current = true
+              // For existing entries, the drag calculation uses system timezone dayStarts,
+              // so the result is already in the correct space - no unadjust needed.
+              // Only guide materializations (which create new entries from visual position) might need adjustment,
+              // but they use the entry's original timestamps, so they're also correct.
+              const finalStartedAt = preview.startedAt
+              const finalEndedAt = preview.endedAt
               if (guideMaterialization) {
                 const { realEntry, ruleId, ymd } = guideMaterialization
                 flushSync(() => {
                   updateHistory((current) => {
                     const materialized = {
                       ...realEntry,
-                      startedAt: preview.startedAt,
-                      endedAt: preview.endedAt,
-                      elapsed: Math.max(preview.endedAt - preview.startedAt, 1),
+                      startedAt: finalStartedAt,
+                      endedAt: finalEndedAt,
+                      elapsed: Math.max(finalEndedAt - finalStartedAt, 1),
                     }
                     const next = [...current, materialized]
                     next.sort((a, b) => a.startedAt - b.startedAt)
@@ -10400,7 +10424,7 @@ useEffect(() => {
                   })
                 })
                 try {
-                  void upsertRepeatingException({ routineId: ruleId, occurrenceDate: ymd, action: 'rescheduled', newStartedAt: preview.startedAt, newEndedAt: preview.endedAt, notes: null })
+                  void upsertRepeatingException({ routineId: ruleId, occurrenceDate: ymd, action: 'rescheduled', newStartedAt: finalStartedAt, newEndedAt: finalEndedAt, notes: null })
                   void evaluateAndMaybeRetireRule(ruleId)
                 } catch {}
               } else if (s) {
@@ -10412,7 +10436,7 @@ useEffect(() => {
                     const next = [...current]
                     const nowTs = Date.now()
                     const wasInPast = target.startedAt <= nowTs
-                    const nowInPast = preview.startedAt <= nowTs
+                    const nowInPast = finalStartedAt <= nowTs
                     const crossedBoundary = wasInPast !== nowInPast
                     const isFuture =
                       pendingNewHistoryId && target.id === pendingNewHistoryId ? true
@@ -10421,8 +10445,8 @@ useEffect(() => {
                       : target.futureSession && nowInPast ? false
                       : target.futureSession
                     const isTimezoneMarkerEntry = target.bucketName?.trim() === TIMEZONE_CHANGE_MARKER
-                    const finalEndedAt = isTimezoneMarkerEntry ? preview.startedAt : preview.endedAt
-                    next[idx] = { ...target, startedAt: preview.startedAt, endedAt: finalEndedAt, elapsed: Math.max(finalEndedAt - preview.startedAt, 1), futureSession: isFuture }
+                    const finalEnd = isTimezoneMarkerEntry ? finalStartedAt : finalEndedAt
+                    next[idx] = { ...target, startedAt: finalStartedAt, endedAt: finalEnd, elapsed: Math.max(finalEnd - finalStartedAt, 1), futureSession: isFuture }
                     return next
                   })
                 })
@@ -10612,13 +10636,17 @@ useEffect(() => {
                       try { (pev.currentTarget as any).releasePointerCapture?.(pointerId) } catch {}
                       const preview = dragPreviewRef.current
                       if (moved && preview && preview.entryId === bar.entry.id && (preview.startedAt !== initialStart || preview.endedAt !== initialEnd)) {
+                        // Use preview values directly - they're already computed in system timezone space
+                        // (dayStarts uses system local time, so no unadjust needed for existing entries)
+                        const finalStartedAt = preview.startedAt
+                        const finalEndedAt = preview.endedAt
                         flushSync(() => {
                           updateHistory((current) => {
                             const idx = current.findIndex((h) => h.id === bar.entry.id)
                             if (idx === -1) return current
                             const target = current[idx]
                             const next = [...current]
-                            next[idx] = { ...target, startedAt: preview.startedAt, endedAt: preview.endedAt, elapsed: Math.max(preview.endedAt - preview.startedAt, 1) }
+                            next[idx] = { ...target, startedAt: finalStartedAt, endedAt: finalEndedAt, elapsed: Math.max(finalEndedAt - finalStartedAt, 1) }
                             return next
                           })
                         })
@@ -10919,9 +10947,10 @@ useEffect(() => {
                       try { targetEl.releasePointerCapture?.(pointerId) } catch {}
                       const preview = dragPreviewRef.current
                       if (preview && preview.entryId === 'new-entry') {
-                        const startedAt = Math.min(preview.startedAt, preview.endedAt)
-                        const endedAt = Math.max(preview.startedAt, preview.endedAt)
-                        const elapsed = Math.max(endedAt - startedAt, MIN_SESSION_DURATION_DRAG_MS)
+                        // Convert from display time back to UTC for storage
+                        const rawStartedAt = unadjustTimestampForTimezone(Math.min(preview.startedAt, preview.endedAt))
+                        const rawEndedAt = unadjustTimestampForTimezone(Math.max(preview.startedAt, preview.endedAt))
+                        const elapsed = Math.max(rawEndedAt - rawStartedAt, MIN_SESSION_DURATION_DRAG_MS)
                         const newId = makeHistoryId()
                         const newEntry: HistoryEntry = {
                           id: newId,
@@ -10932,8 +10961,8 @@ useEffect(() => {
                           bucketId: null,
                           taskId: null,
                           elapsed,
-                          startedAt,
-                          endedAt,
+                          startedAt: rawStartedAt,
+                          endedAt: rawEndedAt,
                           goalSurface: LIFE_ROUTINES_SURFACE,
                           bucketSurface: null,
                           notes: '',
@@ -11220,7 +11249,8 @@ useEffect(() => {
                       if (endClamped <= startClamped) return null
                       const topPct = ((startClamped - dayStart) / DAY_DURATION_MS) * 100
                       const heightPct = Math.max(((endClamped - startClamped) / DAY_DURATION_MS) * 100, (MINUTE_MS / DAY_DURATION_MS) * 100)
-                      const label = `${formatTime(startClamped)} — ${formatTime(endClamped)}`
+                      // Drag preview values are computed from dayStarts (system timezone), so format as local
+                      const label = `${formatAdjustedTime(startClamped)} — ${formatAdjustedTime(endClamped)}`
                       return (
                         <div
                           className="calendar-event calendar-event--dragging"
@@ -12930,10 +12960,17 @@ useEffect(() => {
 
       const preview = dragPreviewRef.current
       if (state.hasMoved && preview) {
-        if (state.entryId === 'new-entry') {
-          const startedAt = Math.min(preview.startedAt, preview.endedAt)
-          const endedAt = Math.max(preview.startedAt, preview.endedAt)
-          const elapsed = Math.max(endedAt - startedAt, MIN_SESSION_DURATION_DRAG_MS)
+        // For NEW entries: preview is in display time, need to unadjust for storage
+        // For EXISTING entries: preview is already in system timezone space (dayStarts uses system local time)
+        const isNewEntry = state.entryId === 'new-entry'
+        const rawStartedAt = isNewEntry
+          ? unadjustTimestampForTimezone(Math.min(preview.startedAt, preview.endedAt))
+          : Math.min(preview.startedAt, preview.endedAt)
+        const rawEndedAt = isNewEntry
+          ? unadjustTimestampForTimezone(Math.max(preview.startedAt, preview.endedAt))
+          : Math.max(preview.startedAt, preview.endedAt)
+        if (isNewEntry) {
+          const elapsed = Math.max(rawEndedAt - rawStartedAt, MIN_SESSION_DURATION_DRAG_MS)
           const newEntry: HistoryEntry = {
             id: makeHistoryId(),
             taskName: '',
@@ -12943,8 +12980,8 @@ useEffect(() => {
             bucketId: null,
             taskId: null,
             elapsed,
-            startedAt,
-            endedAt,
+            startedAt: rawStartedAt,
+            endedAt: rawEndedAt,
             goalSurface: LIFE_ROUTINES_SURFACE,
             bucketSurface: null,
             notes: '',
@@ -12969,15 +13006,15 @@ useEffect(() => {
                 return current
               }
               const target = current[index]
-              if (target.startedAt === preview.startedAt && target.endedAt === preview.endedAt) {
+              if (target.startedAt === rawStartedAt && target.endedAt === rawEndedAt) {
                 return current
               }
               const next = [...current]
               next[index] = {
                 ...target,
-                startedAt: preview.startedAt,
-                endedAt: preview.endedAt,
-                elapsed: Math.max(preview.endedAt - preview.startedAt, 1),
+                startedAt: rawStartedAt,
+                endedAt: rawEndedAt,
+                elapsed: Math.max(rawEndedAt - rawStartedAt, 1),
               }
               return next
             })
@@ -12985,8 +13022,8 @@ useEffect(() => {
           if (selectedHistoryIdRef.current === state.entryId) {
             setHistoryDraft((draft) => ({
               ...draft,
-              startedAt: preview.startedAt,
-              endedAt: preview.endedAt,
+              startedAt: rawStartedAt,
+              endedAt: rawEndedAt,
             }))
           }
         }
