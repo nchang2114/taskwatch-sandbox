@@ -131,6 +131,7 @@ export interface TaskItem {
   notes?: string | null
   subtasks?: TaskSubtask[]
   createdAt?: string
+  sortIndex?: number
 }
 
 type TaskSubtask = {
@@ -8909,23 +8910,23 @@ export default function GoalsPage(): ReactElement {
     // Try API first (for logged-in users)
     const result = await apiSortBucketTasksByDate(bucketId, direction)
     if (result) {
-      // Update local state with the new sort_index values from API
+      // Update local state with the new sort_index values from API and reorder tasks
       setGoals((gs) =>
         gs.map((g) =>
           g.id === goalId
             ? {
                 ...g,
-                buckets: g.buckets.map((b) =>
-                  b.id === bucketId
-                    ? {
-                        ...b,
-                        tasks: b.tasks.map((t) => {
-                          const updatedIndex = result.find((r) => r.id === t.id)?.sort_index
-                          return updatedIndex !== undefined ? { ...t, sortIndex: updatedIndex } : t
-                        }),
-                      }
-                    : b,
-                ),
+                buckets: g.buckets.map((b) => {
+                  if (b.id !== bucketId) return b
+                  // Update sortIndex values
+                  const updatedTasks = b.tasks.map((t) => {
+                    const updatedIndex = result.find((r) => r.id === t.id)?.sort_index
+                    return updatedIndex !== undefined ? { ...t, sortIndex: updatedIndex } : t
+                  })
+                  // Sort the array by the new sortIndex values
+                  const sorted = [...updatedTasks].sort((a, c) => (a.sortIndex ?? 0) - (c.sortIndex ?? 0))
+                  return { ...b, tasks: sorted }
+                }),
               }
             : g,
         ),
