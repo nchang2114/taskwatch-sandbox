@@ -9970,7 +9970,6 @@ useEffect(() => {
             let mainGhost: HTMLDivElement | null = null
             allOriginalEls.forEach((el, idx) => {
               const elRect = el.getBoundingClientRect()
-              const elComputed = window.getComputedStyle(el)
               
               // DEBUG: Log positions
               console.log('=== DRAG DEBUG ===')
