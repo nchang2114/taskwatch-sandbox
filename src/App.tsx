@@ -2494,6 +2494,8 @@ function AuthCallbackScreen(): React.ReactElement {
             window.localStorage.removeItem('nc-taskwatch-current-task-source')
             window.localStorage.removeItem('nc-taskwatch-stopwatch-v1')
           } catch {}
+          // Wait 7 seconds before redirecting to give data time to load
+          await new Promise(resolve => setTimeout(resolve, 7000))
           window.location.replace('/')
         }
       }
