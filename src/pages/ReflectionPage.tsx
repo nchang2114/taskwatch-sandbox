@@ -9920,16 +9920,17 @@ useEffect(() => {
   let holdCancelled = false
         // Track guide materialization info to defer state update until drag completes
         let guideMaterialization: { realEntry: HistoryEntry; ruleId: string; ymd: string } | null = null
-        // Prevent page scroll immediately during hold period (before activation)
-        setPageScrollLock(true, 'full')
+        // NOTE: Don't lock scroll on pointer down - it can cause layout shifts.
+        // We'll lock scroll only when activateDrag() is called after the hold completes.
         const activateDrag = () => {
           const s = calendarEventDragRef.current
           if (!s || s.activated) return
           s.activated = true
           // Clear any calendar pan state to prevent panning while dragging
           calendarDragRef.current = null
-          // Lock page scroll while dragging an event FIRST, before any DOM changes
-          setPageScrollLock(true, 'full')
+          // NOTE: Don't lock scroll yet - it can cause layout shifts.
+          // We'll lock scroll AFTER creating ghosts at the correct positions.
+          
           // If dragging a guide (repeating) entry, prepare materialization but don't update state yet
           // This prevents React re-render from breaking pointer capture during drag
           if (entry.id.startsWith('repeat:')) {
@@ -9960,6 +9961,10 @@ useEffect(() => {
           // Find ALL DOM elements for this entry (multi-day sessions have multiple elements)
           const allOriginalEls = document.querySelectorAll<HTMLDivElement>(`[data-entry-id="${entry.id}"]`)
           
+          // Force a synchronous layout to ensure all pending style changes are applied
+          // before we read bounding rects
+          void document.body.offsetHeight
+          
           if (allOriginalEls.length > 0) {
             // Create ghosts for ALL parts of the session (handles multi-day)
             let mainGhost: HTMLDivElement | null = null
@@ -9967,31 +9972,74 @@ useEffect(() => {
               const elRect = el.getBoundingClientRect()
               const elComputed = window.getComputedStyle(el)
               
+              // DEBUG: Log positions
+              console.log('=== DRAG DEBUG ===')
+              console.log('Original element rect:', { top: elRect.top, left: elRect.left, width: elRect.width, height: elRect.height })
+              console.log('Original inline style:', el.getAttribute('style'))
+              
+              // Debug child element positions
+              const contentEl = el.querySelector('.calendar-event__content') as HTMLElement | null
+              const titleEl = el.querySelector('.calendar-event__title') as HTMLElement | null
+              if (contentEl) {
+                const contentRect = contentEl.getBoundingClientRect()
+                console.log('Original content rect:', { top: contentRect.top, left: contentRect.left })
+              }
+              if (titleEl) {
+                const titleRect = titleEl.getBoundingClientRect()
+                console.log('Original title rect:', { top: titleRect.top, left: titleRect.left })
+              }
+              
               // Clone the element for the ghost
               const ghost = el.cloneNode(true) as HTMLDivElement
               
-              // Remove the cloned percentage-based positioning styles
-              ghost.style.removeProperty('top')
-              ghost.style.removeProperty('left')
-              ghost.style.removeProperty('width')
-              ghost.style.removeProperty('height')
+              // Clear ALL inline styles from the clone, then set our fixed positioning
+              ghost.removeAttribute('style')
               
-              // Set positioning for fixed placement with exact pixel dimensions
-              ghost.style.position = 'fixed'
-              ghost.style.left = `${elRect.left}px`
-              ghost.style.top = `${elRect.top}px`
-              ghost.style.width = `${elRect.width}px`
-              ghost.style.height = `${elRect.height}px`
-              ghost.style.minHeight = `${elRect.height}px`
-              ghost.style.maxHeight = `${elRect.height}px`
-              ghost.style.margin = '0'
-              ghost.style.transform = 'none'
-              ghost.style.zIndex = '10000'
-              ghost.style.pointerEvents = 'none'
-              ghost.style.overflow = 'hidden'
+              // Build fresh styles using cssText to ensure no inherited inline styles
+              ghost.style.cssText = `
+                position: fixed !important;
+                box-sizing: border-box !important;
+                left: ${elRect.left}px !important;
+                top: ${elRect.top}px !important;
+                width: ${elRect.width}px !important;
+                height: ${elRect.height}px !important;
+                margin: 0 !important;
+                transform: none !important;
+                z-index: 999999;
+                pointer-events: none;
+                overflow: hidden;
+                border-radius: ${elComputed.borderRadius};
+                color: ${elComputed.color};
+                padding: ${elComputed.padding};
+                font-size: ${elComputed.fontSize};
+                line-height: ${elComputed.lineHeight};
+                box-shadow: ${elComputed.boxShadow};
+                background: ${elComputed.background};
+              `
               
-              // Ensure box-shadow matches
-              ghost.style.boxShadow = elComputed.boxShadow
+              // Append to document.body for proper fixed positioning
+              // Note: The now-line may appear below the ghost during drag due to stacking contexts
+              document.body.appendChild(ghost)
+              
+              const ghostRect = ghost.getBoundingClientRect()
+              console.log('Ghost rect after append:', { top: ghostRect.top, left: ghostRect.left, width: ghostRect.width, height: ghostRect.height })
+              console.log('OUTER SHIFT:', { topDiff: ghostRect.top - elRect.top, leftDiff: ghostRect.left - elRect.left })
+              
+              // Debug ghost child element positions
+              const ghostContentEl = ghost.querySelector('.calendar-event__content') as HTMLElement | null
+              const ghostTitleEl = ghost.querySelector('.calendar-event__title') as HTMLElement | null
+              if (ghostContentEl && contentEl) {
+                const ghostContentRect = ghostContentEl.getBoundingClientRect()
+                const contentRect = contentEl.getBoundingClientRect()
+                console.log('Ghost content rect:', { top: ghostContentRect.top, left: ghostContentRect.left })
+                console.log('CONTENT SHIFT:', { topDiff: ghostContentRect.top - contentRect.top, leftDiff: ghostContentRect.left - contentRect.left })
+              }
+              if (ghostTitleEl && titleEl) {
+                const ghostTitleRect = ghostTitleEl.getBoundingClientRect()
+                const titleRect = titleEl.getBoundingClientRect()
+                console.log('Ghost title rect:', { top: ghostTitleRect.top, left: ghostTitleRect.left })
+                console.log('TITLE SHIFT:', { topDiff: ghostTitleRect.top - titleRect.top, leftDiff: ghostTitleRect.left - titleRect.left })
+              }
               
               // Remove data-entry-id so it's not affected by querySelectorAll
               ghost.removeAttribute('data-entry-id')
@@ -10009,8 +10057,6 @@ useEffect(() => {
                 ghost.classList.add('calendar-event-ghost-continuation')
               }
               
-              document.body.appendChild(ghost)
-              
               // Hide the original element
               el.style.opacity = '0'
             })
@@ -10018,6 +10064,46 @@ useEffect(() => {
             if (mainGhost) {
               s.ghostEl = mainGhost
             }
+            
+            // Create a now-line clone in document.body so it appears above the ghost
+            // (both will be in the same stacking context)
+            const nowLine = calendarNowLineRef.current
+            if (nowLine && nowLine.style.display !== 'none') {
+              const nowRect = nowLine.getBoundingClientRect()
+              if (nowRect.width > 0 && nowRect.height > 0) {
+                const nowClone = document.createElement('div')
+                nowClone.className = 'calendar-now-line-clone'
+                nowClone.style.cssText = `
+                  position: fixed;
+                  left: ${nowRect.left}px;
+                  top: ${nowRect.top}px;
+                  width: ${nowRect.width}px;
+                  height: ${nowRect.height}px;
+                  background: linear-gradient(90deg, #ef4444 0%, #ec4899 100%);
+                  z-index: 9999999;
+                  pointer-events: none;
+                `
+                // Add the triangle pointer
+                const triangle = document.createElement('div')
+                triangle.style.cssText = `
+                  position: absolute;
+                  left: 0;
+                  top: 50%;
+                  transform: translateY(-50%);
+                  width: 0;
+                  height: 0;
+                  border-top: 6px solid transparent;
+                  border-bottom: 6px solid transparent;
+                  border-left: 10px solid #ef4444;
+                `
+                nowClone.appendChild(triangle)
+                document.body.appendChild(nowClone)
+              }
+            }
+            
+            // NOW lock scroll - after all ghosts are created and positioned
+            // This prevents layout shifts from affecting ghost positioning
+            setPageScrollLock(true, 'full')
           }
         }
         const onMove = (e: PointerEvent) => {
@@ -10286,7 +10372,7 @@ useEffect(() => {
                   continuationGhost.style.height = `${height}px`
                   continuationGhost.style.minHeight = `${height}px`
                   continuationGhost.style.maxHeight = `${height}px`
-                  continuationGhost.style.zIndex = '10000'
+                  continuationGhost.style.zIndex = '1000' // Lower than calendar-now-line (2000000)
                   continuationGhost.style.pointerEvents = 'none'
                   
                   // Update time text
@@ -10474,11 +10560,14 @@ useEffect(() => {
                 if (ghost) {
                   try { ghost.remove() } catch {}
                 }
-                // Also remove continuation ghost if it exists
-                const continuationGhost = document.querySelector('.calendar-event-ghost-continuation')
-                if (continuationGhost) {
-                  try { continuationGhost.remove() } catch {}
-                }
+                // Also remove continuation ghosts if they exist
+                document.querySelectorAll('.calendar-event-ghost-continuation').forEach(el => {
+                  try { el.remove() } catch {}
+                })
+                // Remove now-line clone
+                document.querySelectorAll('.calendar-now-line-clone').forEach(el => {
+                  try { el.remove() } catch {}
+                })
                 // Restore ALL original elements for this entry (multi-day sessions have multiple DOM elements)
                 const allOriginalEls = document.querySelectorAll(`[data-entry-id="${entryId}"]`)
                 allOriginalEls.forEach((el) => {
@@ -10495,11 +10584,14 @@ useEffect(() => {
             if (ghost) {
               try { ghost.remove() } catch {}
             }
-            // Also remove continuation ghost if it exists
-            const continuationGhost = document.querySelector('.calendar-event-ghost-continuation')
-            if (continuationGhost) {
-              try { continuationGhost.remove() } catch {}
-            }
+            // Also remove continuation ghosts if they exist
+            document.querySelectorAll('.calendar-event-ghost-continuation').forEach(el => {
+              try { el.remove() } catch {}
+            })
+            // Remove now-line clone
+            document.querySelectorAll('.calendar-now-line-clone').forEach(el => {
+              try { el.remove() } catch {}
+            })
             // Restore ALL original elements for this entry (multi-day sessions have multiple DOM elements)
             const allOriginalEls = document.querySelectorAll(`[data-entry-id="${entryId}"]`)
             allOriginalEls.forEach((el) => {
