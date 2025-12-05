@@ -3442,6 +3442,31 @@ export default function ReflectionPage() {
     })
   }, [appTimezone])
   
+  // Listen for timezone being cleared (e.g., on sign-out) and reset in-memory state
+  useEffect(() => {
+    const handleStorageChange = (event: StorageEvent) => {
+      if (event.key === APP_TIMEZONE_STORAGE_KEY) {
+        // Timezone was changed or removed - sync in-memory state
+        const newValue = event.newValue
+        if (!newValue || newValue === '') {
+          // Timezone was cleared (sign-out) - reset to system default
+          clearTimezoneCaches()
+          startTransition(() => {
+            setAppTimezone(null)
+          })
+        } else if (newValue !== appTimezone) {
+          // Timezone was changed from another tab - sync
+          clearTimezoneCaches()
+          startTransition(() => {
+            setAppTimezone(newValue)
+          })
+        }
+      }
+    }
+    window.addEventListener('storage', handleStorageChange)
+    return () => window.removeEventListener('storage', handleStorageChange)
+  }, [appTimezone])
+  
   // Timezone-aware time formatter for RAW UTC timestamps
   // This applies timezone conversion during display formatting
   const formatTime = useCallback((timestamp: number) => {

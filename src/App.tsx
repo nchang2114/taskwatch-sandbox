@@ -1031,6 +1031,14 @@ function MainApp() {
         } catch {}
       }
       
+      // Reset app timezone to system default on auth state changes (sign-in/sign-out)
+      // This prevents stale timezone overrides from carrying over between sessions
+      if (typeof window !== 'undefined') {
+        try {
+          window.localStorage.removeItem('taskwatch_app_timezone')
+        } catch {}
+      }
+      
       const profile = deriveProfileFromSupabaseUser(user ?? null)
       
       // Fetch all data BEFORE updating the profile (which triggers UI change)
@@ -1278,6 +1286,9 @@ function MainApp() {
         window.localStorage.removeItem('nc-taskwatch-current-task')
         window.localStorage.removeItem('nc-taskwatch-current-task-source')
         window.localStorage.removeItem('nc-taskwatch-stopwatch-v1')
+        
+        // Clear app timezone override so it resets to system default on next load
+        window.localStorage.removeItem('taskwatch_app_timezone')
         
         // Clear alignment tracking so next sign-in runs fresh alignment
         window.localStorage.removeItem('nc-taskwatch-align-complete')
