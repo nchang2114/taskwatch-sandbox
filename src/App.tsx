@@ -338,7 +338,16 @@ function MainApp() {
   const [authVerifyStatus, setAuthVerifyStatus] = useState<string | null>(null)
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [isSigningOut, setIsSigningOut] = useState(false)
-  const [isBootstrapping, setIsBootstrapping] = useState(true)
+  // Show sign-in modal during initial bootstrap if returning from OAuth redirect
+  const [isBootstrapping, setIsBootstrapping] = useState(() => {
+    // Check if we're returning from an OAuth redirect (has hash or code param)
+    if (typeof window !== 'undefined') {
+      const hasAuthCallback = window.location.hash.includes('access_token') || 
+                              window.location.search.includes('code=')
+      return hasAuthCallback
+    }
+    return false
+  })
   const [activeSettingsSection, setActiveSettingsSection] = useState(SETTINGS_SECTIONS[0]?.id ?? 'general')
   const [authEmailLookupValue, setAuthEmailLookupValue] = useState('')
   const [authEmailLookupResult, setAuthEmailLookupResult] = useState<boolean | null>(null)
@@ -1993,17 +2002,6 @@ const nextThemeLabel = theme === 'dark' ? 'light' : 'dark'
     return <SignOutScreen />
   }
 
-  if (isBootstrapping) {
-    return (
-      <div className="app-loading">
-        <div className="app-loading__content">
-          <p className="app-loading__title">Taskwatch</p>
-          <p className="app-loading__subtitle">Loading...</p>
-        </div>
-      </div>
-    )
-  }
-
   return (
     <div className="page">
       <header className={headerClassName}>
@@ -2182,7 +2180,7 @@ const nextThemeLabel = theme === 'dark' ? 'light' : 'dark'
           </div>
         </div>
       ) : null}
-      {authModalOpen ? (
+      {(authModalOpen || isBootstrapping) ? (
         <div className="auth-modal-overlay" role="dialog" aria-modal="true" aria-label="Sign in to Taskwatch">
           <div className="auth-modal" ref={authModalRef}>
             {authEmailStage === 'create' ? (
