@@ -1641,8 +1641,11 @@ useEffect(() => {
           snapshot.sessionMeta?.taskLabel ?? fallbackTaskName,
         ) ?? snapshot
 
-      const focusSnapshot = normalizeSnapshot(buildModeSnapshotForPersistence('focus'), currentTaskName || '')
-      const breakSnapshot = normalizeSnapshot(buildModeSnapshotForPersistence('break'), '')
+      // Use mode-specific fallback task names to avoid cross-contamination
+      const focusFallback = timeMode === 'focus' ? currentTaskName : modeStateRef.current.focus.taskName
+      const breakFallback = timeMode === 'break' ? currentTaskName : modeStateRef.current.break.taskName
+      const focusSnapshot = normalizeSnapshot(buildModeSnapshotForPersistence('focus'), focusFallback || '')
+      const breakSnapshot = normalizeSnapshot(buildModeSnapshotForPersistence('break'), breakFallback || '')
 
       modeStateRef.current = {
         focus: focusSnapshot,
@@ -1674,6 +1677,15 @@ useEffect(() => {
       const raw = window.localStorage.getItem(STOPWATCH_STORAGE_KEY)
       if (!raw) {
         debugStopwatch('hydrate: no stored stopwatch state')
+        // Sync modeStateRef.current.focus with the initial focusSource state
+        // This ensures the focus snapshot has the correct source from the start
+        const initialSource = readStoredFocusSource()
+        if (initialSource) {
+          modeStateRef.current.focus = {
+            ...modeStateRef.current.focus,
+            source: initialSource,
+          }
+        }
         hasHydratedStopwatchRef.current = true
         return
       }
@@ -5860,6 +5872,14 @@ useEffect(() => {
       setFocusSource(nextSource)
       setCustomTaskDraft(taskName)
       setIsSelectorOpen(false)
+
+      // Also update the current mode's snapshot in modeStateRef
+      modeStateRef.current[activeTimeModeRef.current] = {
+        ...modeStateRef.current[activeTimeModeRef.current],
+        taskName,
+        customTaskDraft: taskName,
+        source: nextSource,
+      }
 
       if (detail.autoStart) {
         const now = Date.now()
