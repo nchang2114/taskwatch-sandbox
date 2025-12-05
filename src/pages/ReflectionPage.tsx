@@ -2138,10 +2138,16 @@ const InspectorDateInput = ({ value, onChange, ariaLabel }: InspectorDateInputPr
   today.setHours(0, 0, 0, 0)
 
   const handleSelect = (date: Date) => {
-    const next = new Date(date.getFullYear(), date.getMonth(), date.getDate())
-    const current = new Date(value)
-    next.setHours(current.getHours(), current.getMinutes(), current.getSeconds(), current.getMilliseconds())
-    onChange(next.getTime())
+    // Get the midnight of the selected date (in system timezone, as the calendar operates in system TZ)
+    const selectedDayMidnight = new Date(date.getFullYear(), date.getMonth(), date.getDate()).getTime()
+    // Get the midnight of the current value's day (using system TZ interpretation)
+    const currentDate = new Date(value)
+    const currentDayMidnight = new Date(currentDate.getFullYear(), currentDate.getMonth(), currentDate.getDate()).getTime()
+    // Calculate the time-of-day offset from midnight (this works in display coordinates)
+    const timeOfDayOffset = value - currentDayMidnight
+    // Apply the same time offset to the new day
+    const nextTs = selectedDayMidnight + timeOfDayOffset
+    onChange(nextTs)
     setOpen(false)
   }
 
@@ -2404,11 +2410,12 @@ const InspectorTimeInput = ({
       const nextTs = alignedAnchorTimestamp + offsetMinutes * 60000
       onChange(nextTs)
     } else {
-      const next = new Date(value)
-      const hoursPart = Math.floor(minutes / 60)
-      const minutesPart = minutes % 60
-      next.setHours(hoursPart, minutesPart, 0, 0)
-      onChange(next.getTime())
+      // Compute day start in display coordinates and add selected minutes.
+      // This avoids timezone issues with setHours() which uses system timezone.
+      const dayStart = new Date(value)
+      dayStart.setHours(0, 0, 0, 0)
+      const nextTs = dayStart.getTime() + minutes * 60000
+      onChange(nextTs)
     }
     setOpen(false)
     // Suppress the date picker opening for a brief moment after time selection
@@ -6342,12 +6349,15 @@ const [showInlineExtras, setShowInlineExtras] = useState(false)
       didUpdateHistory = true
       return next
     })
+    // After saving, reset draft timestamps to null so future saves read from the entry
+    // (which has the canonical storage-space values). This prevents double-unadjusting
+    // if save is called multiple times.
     const normalizedDraft: HistoryDraftState = {
       taskName: nextTaskName,
       goalName: normalizedGoalName,
       bucketName: normalizedBucketName,
-      startedAt: nextStartedAt,
-      endedAt: nextEndedAt,
+      startedAt: null,
+      endedAt: null,
       notes: nextNotes,
       subtasks: cloneHistorySubtasks(nextSubtasks),
       timezoneFrom: draft.timezoneFrom,
