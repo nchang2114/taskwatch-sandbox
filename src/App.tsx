@@ -1232,6 +1232,11 @@ function MainApp() {
         window.localStorage.removeItem('nc-taskwatch-task-details-v1')
         window.localStorage.removeItem('nc-taskwatch-flags')
         
+        // Clear focus task state so defaults are shown on reload
+        window.localStorage.removeItem('nc-taskwatch-current-task')
+        window.localStorage.removeItem('nc-taskwatch-current-task-source')
+        window.localStorage.removeItem('nc-taskwatch-stopwatch-v1')
+        
         // Clear alignment tracking so next sign-in runs fresh alignment
         window.localStorage.removeItem('nc-taskwatch-align-complete')
         window.localStorage.removeItem('nc-taskwatch-align-lock')
@@ -2410,6 +2415,12 @@ function AuthCallbackScreen(): React.ReactElement {
       }
       finally {
         if (!cancelled) {
+          // Clear focus task state on sign-in so user starts with default presets
+          try {
+            window.localStorage.removeItem('nc-taskwatch-current-task')
+            window.localStorage.removeItem('nc-taskwatch-current-task-source')
+            window.localStorage.removeItem('nc-taskwatch-stopwatch-v1')
+          } catch {}
           window.location.replace('/')
         }
       }

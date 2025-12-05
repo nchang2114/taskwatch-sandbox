@@ -473,12 +473,12 @@ const historiesAreEqual = (a: HistoryEntry[], b: HistoryEntry[]): boolean => {
 
 const getStoredTaskName = (): string => {
   if (typeof window === 'undefined') {
-    return 'New Task'
+    return ''
   }
 
   const stored = window.localStorage.getItem(CURRENT_TASK_STORAGE_KEY)
   if (!stored) {
-    return 'New Task'
+    return ''
   }
 
   const trimmed = stored.trim()
@@ -924,9 +924,9 @@ export function FocusPage({ viewportWidth: _viewportWidth }: FocusPageProps) {
       lastCommittedElapsed: 0,
     },
     break: {
-      taskName: 'Break',
+      taskName: '',
       source: null,
-      customTaskDraft: 'Break',
+      customTaskDraft: '',
       elapsed: 0,
       sessionStart: null,
       isRunning: false,
@@ -1407,6 +1407,8 @@ useEffect(() => {
 
   useEffect(() => {
     if (typeof window === 'undefined') return
+    // Only persist task name for focus mode - break mode has its own separate state
+    if (timeMode !== 'focus') return
 
     const trimmed = currentTaskName.trim()
     const value = trimmed.length > 0 ? trimmed : ''
@@ -1416,10 +1418,12 @@ useEffect(() => {
     } catch (error) {
       logWarn('Failed to persist current task name', error)
     }
-  }, [currentTaskName])
+  }, [currentTaskName, timeMode])
 
   useEffect(() => {
     if (typeof window === 'undefined') return
+    // Only persist focus source for focus mode
+    if (timeMode !== 'focus') return
     try {
       if (focusSource) {
         window.localStorage.setItem(CURRENT_TASK_SOURCE_KEY, JSON.stringify(focusSource))
@@ -1429,7 +1433,7 @@ useEffect(() => {
     } catch (error) {
       logWarn('Failed to persist current task source', error)
     }
-  }, [focusSource])
+  }, [focusSource, timeMode])
 
   useEffect(() => {
     activeTimeModeRef.current = timeMode
@@ -1637,8 +1641,8 @@ useEffect(() => {
           snapshot.sessionMeta?.taskLabel ?? fallbackTaskName,
         ) ?? snapshot
 
-      const focusSnapshot = normalizeSnapshot(buildModeSnapshotForPersistence('focus'), currentTaskName || 'New Task')
-      const breakSnapshot = normalizeSnapshot(buildModeSnapshotForPersistence('break'), 'Break')
+      const focusSnapshot = normalizeSnapshot(buildModeSnapshotForPersistence('focus'), currentTaskName || '')
+      const breakSnapshot = normalizeSnapshot(buildModeSnapshotForPersistence('break'), '')
 
       modeStateRef.current = {
         focus: focusSnapshot,
@@ -1675,12 +1679,12 @@ useEffect(() => {
       }
       debugStopwatch('hydrate: raw payload', raw)
       const parsed = JSON.parse(raw)
-      const fallbackFocus = initialTaskName || 'New Task'
+      const fallbackFocus = initialTaskName || ''
       const focusSnapshot =
         sanitizeStoredModeSnapshot(parsed?.modes?.focus, fallbackFocus, fallbackFocus) ??
         modeStateRef.current.focus
       const breakSnapshot =
-        sanitizeStoredModeSnapshot(parsed?.modes?.break, 'Break', 'Break') ?? modeStateRef.current.break
+        sanitizeStoredModeSnapshot(parsed?.modes?.break, '', '') ?? modeStateRef.current.break
       modeStateRef.current = {
         focus: focusSnapshot,
         break: breakSnapshot,
@@ -4588,6 +4592,7 @@ useEffect(() => {
 
   const currentTaskLower = normalizedCurrentTask.toLocaleLowerCase()
   const isDefaultTask = normalizedCurrentTask.length === 0
+  const defaultTaskPlaceholder = timeMode === 'focus' ? 'Click to choose a focus task…' : 'Click to choose a break task...'
   // Use activeFocusCandidate first (live from goals snapshot) for difficulty/priority,
   // fall back to focusSource (stored state) if not available
   const focusDifficulty =
@@ -6125,7 +6130,7 @@ useEffect(() => {
                             .filter(Boolean)
                             .join(' ')}
                         >
-                          {isDefaultTask ? 'Choose a focus task' : safeTaskName}
+                          {isDefaultTask ? defaultTaskPlaceholder : safeTaskName}
                         </span>
                       </span>
                       {focusGoalName && focusBucketName ? (
@@ -6781,7 +6786,7 @@ useEffect(() => {
                       .filter(Boolean)
                       .join(' ')}
                   >
-                    {isDefaultTask ? 'Choose a focus task' : safeTaskName}
+                    {isDefaultTask ? defaultTaskPlaceholder : safeTaskName}
                   </span>
                 </span>
                 {focusGoalName && focusBucketName ? (
