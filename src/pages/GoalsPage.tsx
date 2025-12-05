@@ -5539,6 +5539,7 @@ export default function GoalsPage(): ReactElement {
   const [dashboardSelectedGoalId, setDashboardSelectedGoalId] = useState<string | null>(null)
   const [goals, setGoals] = useState<Goal[]>(() => {
     const stored = readStoredGoalsSnapshot()
+    console.log('[GoalsPage] initializing goals state, stored snapshot length:', stored.length, 'names:', stored.map(s => s.name))
     if (stored.length > 0) {
       // Reconcile the stored snapshot to local Goal shape, then stamp a
       // synthetic updatedAt onto subtasks so the first remote refresh cannot
