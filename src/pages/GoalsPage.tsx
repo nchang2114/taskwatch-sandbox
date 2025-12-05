@@ -2478,6 +2478,7 @@ interface GoalRowProps {
   onManageArchivedBuckets: () => void
   onDeleteCompletedTasks: (bucketId: string) => void
   onSortBucketByDate: (bucketId: string, direction: 'oldest' | 'newest') => void
+  sortingBucketId: string | null
   onToggleBucketFavorite: (bucketId: string) => void
   onUpdateBucketSurface: (goalId: string, bucketId: string, surface: BucketSurfaceStyle) => void
   bucketExpanded: Record<string, boolean>
@@ -2748,6 +2749,7 @@ const GoalRow: React.FC<GoalRowProps> = ({
   onManageArchivedBuckets,
   onDeleteCompletedTasks,
   onSortBucketByDate,
+  sortingBucketId,
   onToggleBucketFavorite,
   onUpdateBucketSurface,
   bucketExpanded,
@@ -4086,6 +4088,7 @@ const GoalRow: React.FC<GoalRowProps> = ({
                                       showDetails && isDetailsOpen && 'goal-task-row--expanded',
                                       showDetails && hasDetailsContent && 'goal-task-row--has-details',
                                       isDeleteRevealed && 'goal-task-row--delete-revealed',
+                                      sortingBucketId === b.id && 'goal-task-row--sorting',
                                     )}
                                     draggable
                                     onContextMenu={(event) => {
@@ -5821,6 +5824,7 @@ export default function GoalsPage(): ReactElement {
     return initial
   })
   const [bucketDrafts, setBucketDrafts] = useState<Record<string, string>>({})
+  const [sortingBucketId, setSortingBucketId] = useState<string | null>(null)
   const bucketDraftRefs = useRef(new Map<string, HTMLInputElement>())
   const submittingBucketDrafts = useRef(new Set<string>())
   const [taskDrafts, setTaskDrafts] = useState<Record<string, string>>({})
@@ -8907,6 +8911,12 @@ export default function GoalsPage(): ReactElement {
 
   const sortBucketByDate = async (goalId: string, bucketId: string, direction: 'oldest' | 'newest') => {
     const STEP = 1024
+    // Start sorting animation
+    setSortingBucketId(bucketId)
+    
+    // Small delay to let animation start before state update
+    await new Promise(resolve => setTimeout(resolve, 50))
+    
     // Try API first (for logged-in users)
     const result = await apiSortBucketTasksByDate(bucketId, direction)
     if (result) {
@@ -8936,6 +8946,8 @@ export default function GoalsPage(): ReactElement {
             : g,
         ),
       )
+      // Clear animation after a short delay
+      setTimeout(() => setSortingBucketId(null), 300)
     } else {
       // Guest mode: sort tasks locally by createdAt within priority groups
       setGoals((gs) =>
@@ -8965,6 +8977,8 @@ export default function GoalsPage(): ReactElement {
             : g,
         ),
       )
+      // Clear animation after a short delay
+      setTimeout(() => setSortingBucketId(null), 300)
     }
   }
 
@@ -12716,6 +12730,7 @@ const normalizedSearch = searchTerm.trim().toLowerCase()
                         onManageArchivedBuckets={() => openArchivedManager(dashboardSelectedGoal.id)}
                         onDeleteCompletedTasks={(bucketId) => deleteCompletedTasks(dashboardSelectedGoal.id, bucketId)}
                         onSortBucketByDate={(bucketId, direction) => sortBucketByDate(dashboardSelectedGoal.id, bucketId, direction)}
+                        sortingBucketId={sortingBucketId}
                         onToggleBucketFavorite={(bucketId) => toggleBucketFavorite(dashboardSelectedGoal.id, bucketId)}
                         onUpdateBucketSurface={(goalId, bucketId, surface) => updateBucketSurface(goalId, bucketId, surface)}
                         bucketExpanded={bucketExpanded}
@@ -12855,6 +12870,7 @@ const normalizedSearch = searchTerm.trim().toLowerCase()
                     onManageArchivedBuckets={() => openArchivedManager(g.id)}
                     onDeleteCompletedTasks={(bucketId) => deleteCompletedTasks(g.id, bucketId)}
                     onSortBucketByDate={(bucketId, direction) => sortBucketByDate(g.id, bucketId, direction)}
+                    sortingBucketId={sortingBucketId}
                     onToggleBucketFavorite={(bucketId) => toggleBucketFavorite(g.id, bucketId)}
                     onUpdateBucketSurface={(goalId, bucketId, surface) => updateBucketSurface(goalId, bucketId, surface)}
                     bucketExpanded={bucketExpanded}
@@ -12992,6 +13008,7 @@ const normalizedSearch = searchTerm.trim().toLowerCase()
                         onManageArchivedBuckets={() => openArchivedManager(g.id)}
                         onDeleteCompletedTasks={(bucketId) => deleteCompletedTasks(g.id, bucketId)}
                         onSortBucketByDate={(bucketId, direction) => sortBucketByDate(g.id, bucketId, direction)}
+                        sortingBucketId={sortingBucketId}
                         onToggleBucketFavorite={(bucketId) => toggleBucketFavorite(g.id, bucketId)}
                         onUpdateBucketSurface={(goalId, bucketId, surface) => updateBucketSurface(goalId, bucketId, surface)}
                         bucketExpanded={bucketExpanded}
