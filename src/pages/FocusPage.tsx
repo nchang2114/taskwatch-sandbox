@@ -917,7 +917,7 @@ export function FocusPage({ viewportWidth: _viewportWidth }: FocusPageProps) {
       elapsed: 0,
       sessionStart: null,
       isRunning: false,
-      sessionMeta: createEmptySessionMetadata(initialTaskName || 'Focus Session'),
+      sessionMeta: createEmptySessionMetadata(initialTaskName || 'Click to choose a focus task…'),
       currentSessionKey: null,
       lastLoggedSessionKey: null,
       lastTick: null,
@@ -930,7 +930,7 @@ export function FocusPage({ viewportWidth: _viewportWidth }: FocusPageProps) {
       elapsed: 0,
       sessionStart: null,
       isRunning: false,
-      sessionMeta: createEmptySessionMetadata('Break'),
+      sessionMeta: createEmptySessionMetadata('Click to choose a break task…'),
       currentSessionKey: null,
       lastLoggedSessionKey: null,
       lastTick: null,
@@ -1584,7 +1584,8 @@ useEffect(() => {
   }, [isSelectorOpen])
 
   const normalizedCurrentTask = useMemo(() => currentTaskName.trim(), [currentTaskName])
-  const safeTaskName = normalizedCurrentTask.length > 0 ? normalizedCurrentTask : 'New Task'
+  const defaultTaskName = timeMode === 'focus' ? 'Click to choose a focus task…' : 'Click to choose a break task…'
+  const safeTaskName = normalizedCurrentTask.length > 0 ? normalizedCurrentTask : defaultTaskName
   const sessionMetadataRef = useRef<SessionMetadata>(createEmptySessionMetadata(safeTaskName))
   const elapsedSeconds = Math.floor(elapsed / 1000)
   const computeCurrentElapsed = useCallback(
@@ -1641,11 +1642,14 @@ useEffect(() => {
           snapshot.sessionMeta?.taskLabel ?? fallbackTaskName,
         ) ?? snapshot
 
-      // Use mode-specific fallback task names to avoid cross-contamination
-      const focusFallback = timeMode === 'focus' ? currentTaskName : modeStateRef.current.focus.taskName
-      const breakFallback = timeMode === 'break' ? currentTaskName : modeStateRef.current.break.taskName
-      const focusSnapshot = normalizeSnapshot(buildModeSnapshotForPersistence('focus'), focusFallback || '')
-      const breakSnapshot = normalizeSnapshot(buildModeSnapshotForPersistence('break'), breakFallback || '')
+      // Build snapshots - for the active mode, use current state; for inactive mode, use stored snapshot
+      // This ensures modes don't cross-contaminate each other
+      const focusSnapshot = timeMode === 'focus'
+        ? normalizeSnapshot(buildModeSnapshotForPersistence('focus'), currentTaskName || '')
+        : modeStateRef.current.focus  // Keep the stored focus snapshot unchanged when in break mode
+      const breakSnapshot = timeMode === 'break'
+        ? normalizeSnapshot(buildModeSnapshotForPersistence('break'), currentTaskName || '')
+        : modeStateRef.current.break  // Keep the stored break snapshot unchanged when in focus mode
 
       modeStateRef.current = {
         focus: focusSnapshot,
