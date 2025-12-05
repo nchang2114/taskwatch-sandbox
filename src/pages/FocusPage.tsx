@@ -4526,6 +4526,8 @@ useEffect(() => {
       bucketId: sessionBucketId,
       taskId: sessionTaskId,
       updatedAt: Date.now(),
+      // Include the active placeholder entry ID so ReflectionPage can filter it from calendar
+      activeSessionEntryId: activeSessionEntryIdRef.current,
     }
 
     try {
@@ -5263,6 +5265,8 @@ useEffect(() => {
         // Restore metadata and clear lock to allow resuming/logging same task
         sessionMetadataRef.current = preservedMeta
         lastLoggedSessionKeyRef.current = null
+        // Clear the active entry ID so resume creates a new placeholder
+        activeSessionEntryIdRef.current = null
       }
 
       setIsRunning(false)
@@ -5278,16 +5282,17 @@ useEffect(() => {
       setIsRunning(true)
       lastTickRef.current = null
       
-      // If we are starting fresh (elapsed 0), ensure committed is 0 and create placeholder entry
+      // Create placeholder entry for this run segment (fresh start or resume)
+      // Each Start→Pause cycle creates its own session entry
+      const metadata = elapsed === 0 ? deriveSessionMetadata() : sessionMetadataRef.current
       if (elapsed === 0) {
         lastCommittedElapsedRef.current = 0
-        const metadata = deriveSessionMetadata()
         sessionMetadataRef.current = metadata
         currentSessionKeyRef.current = metadata.sessionKey
         lastLoggedSessionKeyRef.current = null
-        // Create placeholder entry in DB immediately (1-min duration, will be updated when session ends)
-        createPlaceholderSessionEntry(metadata, now)
       }
+      // Create placeholder entry in DB immediately (1-min duration, will be updated when session ends)
+      createPlaceholderSessionEntry(metadata, now)
     }
   }
 

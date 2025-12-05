@@ -3036,6 +3036,8 @@ type ActiveSessionState = {
   committedElapsed?: number
   isRunning: boolean
   updatedAt: number
+  // ID of the placeholder history entry currently being recorded (hidden from UI)
+  activeSessionEntryId?: string | null
 }
 
 const resolveGoalMetadata = (
@@ -3121,6 +3123,8 @@ const sanitizeActiveSession = (value: unknown): ActiveSessionState | null => {
   const rawIsRunning = Boolean(candidate.isRunning)
   const isRunning = rawIsRunning
   const updatedAt = typeof candidate.updatedAt === 'number' ? candidate.updatedAt : Date.now()
+  const rawActiveSessionEntryId = typeof candidate.activeSessionEntryId === 'string' ? candidate.activeSessionEntryId.trim() : ''
+  const activeSessionEntryId = rawActiveSessionEntryId.length > 0 ? rawActiveSessionEntryId : null
   return {
     taskName,
     goalName,
@@ -3135,6 +3139,7 @@ const sanitizeActiveSession = (value: unknown): ActiveSessionState | null => {
     committedElapsed,
     isRunning,
     updatedAt,
+    activeSessionEntryId,
   }
 }
 
@@ -6671,6 +6676,11 @@ useEffect(() => {
     const totalElapsed = baseElapsed + runningElapsed
     const effectiveElapsed = Math.max(0, totalElapsed - committedElapsed)
     if (effectiveElapsed <= 0) {
+      // Still filter out the placeholder entry even if no effective elapsed
+      const placeholderEntryId = activeSession.activeSessionEntryId
+      if (placeholderEntryId) {
+        return baseHistory.filter((entry) => entry.id !== placeholderEntryId)
+      }
       return baseHistory
     }
     const defaultStart = now - effectiveElapsed
@@ -6703,7 +6713,11 @@ useEffect(() => {
       notes: '',
       subtasks: [],
     }
-    const filteredHistory = baseHistory.filter((entry) => entry.id !== activeEntry.id)
+    // Filter out the synthetic active-session entry and the placeholder entry being recorded
+    const placeholderEntryId = activeSession.activeSessionEntryId
+    const filteredHistory = baseHistory.filter(
+      (entry) => entry.id !== activeEntry.id && entry.id !== placeholderEntryId,
+    )
     return [activeEntry, ...filteredHistory]
   }, [historyWithTaskNotes, activeSession, nowTick])
 
