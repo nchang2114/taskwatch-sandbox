@@ -42,7 +42,7 @@ import {
   syncLifeRoutinesWithSupabase,
   type LifeRoutineConfig,
 } from '../lib/lifeRoutines'
-import {
+import { 
   CURRENT_SESSION_EVENT_NAME,
   CURRENT_SESSION_STORAGE_KEY,
   HISTORY_EVENT_NAME,
