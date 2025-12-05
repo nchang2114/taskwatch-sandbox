@@ -935,6 +935,7 @@ function MainApp() {
 
       // Acquire lock to prevent multiple tabs from aligning simultaneously
       if (userId && !acquireAlignLock(userId)) {
+        console.log('[align] could not acquire lock, another tab is handling')
         // Another tab is handling alignment
         // Just update tracking - the winning tab will sync data via storage events
         lastAlignedUserIdRef.current = userId
@@ -952,6 +953,8 @@ function MainApp() {
         }
         return
       }
+      
+      console.log('[align] acquired lock, proceeding with sync')
 
       try {
         let migrated = false
@@ -979,10 +982,12 @@ function MainApp() {
             ensureGoalsUser(userId)
             await ensureRepeatingRulesUser(userId)
             // Pre-fetch goals and history from Supabase so calendar renders correctly immediately
+            console.log('[align] starting sync (migrated path)')
             await Promise.all([
               syncGoalsSnapshotFromSupabase(),
               syncHistoryWithSupabase(),
             ])
+            console.log('[align] sync complete (migrated path)')
           } else {
             // User already bootstrapped, just fetch from DB
             // Don't reset - just ensure user data is loaded
@@ -992,10 +997,12 @@ function MainApp() {
             ensureGoalsUser(userId)
             await ensureRepeatingRulesUser(userId)
             // Pre-fetch goals and history from Supabase so calendar renders correctly immediately
+            console.log('[align] starting sync (non-migrated path)')
             await Promise.all([
               syncGoalsSnapshotFromSupabase(),
               syncHistoryWithSupabase(),
             ])
+            console.log('[align] sync complete (non-migrated path)')
           }
         } else {
           // Guest mode - just ensure defaults exist if no data
