@@ -7,7 +7,6 @@ export const GOALS_SNAPSHOT_STORAGE_KEY = STORAGE_KEY
 const EVENT_NAME = 'nc-taskwatch:goals-update'
 export const GOALS_SNAPSHOT_REQUEST_EVENT = 'nc-taskwatch:goals-snapshot-request'
 export const GOALS_SNAPSHOT_USER_KEY = 'nc-taskwatch-goals-user'
-export const GOALS_USER_EVENT = 'nc-taskwatch:goals-user-change'
 export const GOALS_GUEST_USER_ID = '__guest__'
 
 export type GoalTaskSubtaskSnapshot = {
@@ -326,10 +325,6 @@ export const ensureGoalsUser = (
       window.dispatchEvent(event)
     } catch {}
   }
-  // Dispatch user change event to notify listeners (e.g., FocusPage) to refresh
-  try {
-    window.dispatchEvent(new CustomEvent(GOALS_USER_EVENT, { detail: normalized }))
-  } catch {}
 }
 
 export const readGoalsSnapshotOwner = (): string | null => readStoredGoalsSnapshotUserId()

@@ -34,7 +34,6 @@ import {
   type GoalTaskSnapshot,
   GOALS_SNAPSHOT_USER_KEY,
   GOALS_GUEST_USER_ID,
-  GOALS_USER_EVENT,
 } from '../lib/goalsSync'
 import {
   DEFAULT_SURFACE_STYLE,
@@ -963,7 +962,6 @@ export function FocusPage({ viewportWidth: _viewportWidth }: FocusPageProps) {
   )
   const [quickListItems, setQuickListItems] = useState<QuickItem[]>(() => readStoredQuickList())
   const [quickListOwnerSignal, setQuickListOwnerSignal] = useState(0)
-  const [goalsOwnerSignal, setGoalsOwnerSignal] = useState(0)
   const [quickListExpanded, setQuickListExpanded] = useState(false)
   const [quickListRemoteIds, setQuickListRemoteIds] = useState<{ goalId: string; bucketId: string } | null>(null)
   const quickListRefreshInFlightRef = useRef(false)
@@ -1020,23 +1018,6 @@ export function FocusPage({ viewportWidth: _viewportWidth }: FocusPageProps) {
     window.addEventListener('storage', handleStorage)
     return () => {
       window.removeEventListener(QUICK_LIST_USER_EVENT, bump as EventListener)
-      window.removeEventListener('storage', handleStorage)
-    }
-  }, [])
-  useEffect(() => {
-    if (typeof window === 'undefined') {
-      return
-    }
-    const bump = () => setGoalsOwnerSignal((value) => value + 1)
-    const handleStorage = (event: StorageEvent) => {
-      if (event.key === GOALS_SNAPSHOT_USER_KEY) {
-        bump()
-      }
-    }
-    window.addEventListener(GOALS_USER_EVENT, bump as EventListener)
-    window.addEventListener('storage', handleStorage)
-    return () => {
-      window.removeEventListener(GOALS_USER_EVENT, bump as EventListener)
       window.removeEventListener('storage', handleStorage)
     }
   }, [])
@@ -1148,25 +1129,6 @@ export function FocusPage({ viewportWidth: _viewportWidth }: FocusPageProps) {
     }
     refreshQuickListFromSupabase('owner-change')
   }, [quickListOwnerSignal, refreshQuickListFromSupabase])
-  useEffect(() => {
-    if (goalsOwnerSignal === 0) {
-      return
-    }
-    try {
-      setGoalsSnapshot(readStoredGoalsSnapshot())
-    } catch {}
-    const ownerId = (() => {
-      try {
-        return window.localStorage.getItem(GOALS_SNAPSHOT_USER_KEY)
-      } catch {
-        return null
-      }
-    })()
-    if (!ownerId || ownerId === GOALS_GUEST_USER_ID) {
-      return
-    }
-    refreshGoalsSnapshotFromSupabase('owner-change')
-  }, [goalsOwnerSignal, refreshGoalsSnapshotFromSupabase])
   const [focusSource, setFocusSource] = useState<FocusSource | null>(() => readStoredFocusSource())
   const [isCompletingFocus, setIsCompletingFocus] = useState(false)
   void _viewportWidth
