@@ -4017,6 +4017,22 @@ const [showInlineExtras, setShowInlineExtras] = useState(false)
   const calendarTouchAction = 'none'
   // Ref to the session name input inside the calendar editor modal (for autofocus on new entries)
   const calendarEditorNameInputRef = useRef<HTMLInputElement | null>(null)
+  // Track when we should auto-focus the name input (for touch devices that need immediate focus)
+  const pendingNameInputFocusRef = useRef(false)
+  
+  // Callback ref for the name input that focuses immediately on mount when pending
+  const calendarEditorNameInputCallbackRef = useCallback((node: HTMLInputElement | null) => {
+    calendarEditorNameInputRef.current = node
+    if (node && pendingNameInputFocusRef.current) {
+      pendingNameInputFocusRef.current = false
+      // Focus synchronously - critical for touch devices to show keyboard
+      try {
+        node.focus()
+        const len = node.value?.length ?? 0
+        node.setSelectionRange(len, len)
+      } catch {}
+    }
+  }, [])
 
   const isInspectorInteractiveTarget = useCallback((target: HTMLElement | null) => {
     if (!target) return false
@@ -10976,9 +10992,19 @@ useEffect(() => {
                           })
                         })
                         setPendingNewHistoryId(newId)
-                        setTimeout(() => {
+                        // Open editor synchronously to maintain user gesture chain for touch keyboard
+                        flushSync(() => {
                           openCalendarInspector(newEntry)
-                        }, 0)
+                        })
+                        // Focus the input immediately after flushSync renders the modal
+                        const input = calendarEditorNameInputRef.current
+                        if (input) {
+                          try {
+                            input.focus()
+                            const len = input.value?.length ?? 0
+                            input.setSelectionRange(len, len)
+                          } catch {}
+                        }
                       }
                       calendarEventDragRef.current = null
                       dragPreviewRef.current = null
@@ -12459,14 +12485,16 @@ useEffect(() => {
     return () => document.removeEventListener('keydown', onKeyDown as EventListener)
   }, [calendarEditorEntryId, handleCancelHistoryEdit])
 
-  // When opening the calendar editor, if this is a freshly created (pending) entry,
-  // focus the session name input and place the caret at the end.
+  // Fallback focus effect for desktop - the callback ref handles immediate focus for touch devices,
+  // but this useEffect serves as a backup for cases where the input is already mounted.
   useEffect(() => {
     if (!calendarEditorEntryId) return
     if (!pendingNewHistoryId || pendingNewHistoryId !== calendarEditorEntryId) return
+    // If the pending flag is still set, the callback ref hasn't fired yet - skip fallback
+    if (pendingNameInputFocusRef.current) return
     const focusLater = () => {
       const input = calendarEditorNameInputRef.current
-      if (input) {
+      if (input && document.activeElement !== input) {
         try {
           input.focus()
           const len = input.value?.length ?? 0
@@ -12548,7 +12576,7 @@ useEffect(() => {
               <input
                 className="history-timeline__field-input"
                 type="text"
-                ref={calendarEditorNameInputRef}
+                ref={calendarEditorNameInputCallbackRef}
                 value={historyDraft.taskName}
                 placeholder="Describe the focus block"
                 onChange={handleHistoryFieldChange('taskName')}
@@ -12995,9 +13023,19 @@ useEffect(() => {
             })
           })
           setPendingNewHistoryId(newEntry.id)
-          setTimeout(() => {
-            handleStartEditingHistoryEntry(newEntry)
-          }, 0)
+          // Open editor synchronously to maintain user gesture chain for touch keyboard
+          flushSync(() => {
+            openCalendarInspector(newEntry)
+          })
+          // Focus the input immediately after flushSync renders the modal
+          const input = calendarEditorNameInputRef.current
+          if (input) {
+            try {
+              input.focus()
+              const len = input.value?.length ?? 0
+              input.setSelectionRange(len, len)
+            } catch {}
+          }
         } else {
           flushSync(() => {
             updateHistory((current) => {
