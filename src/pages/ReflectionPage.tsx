@@ -255,8 +255,10 @@ const createHistoryDraftFromEntry = (entry?: HistoryEntry | null): HistoryDraftS
   taskName: entry?.taskName ?? '',
   goalName: entry?.goalName ?? '',
   bucketName: entry?.bucketName ?? '',
-  startedAt: entry?.startedAt ?? null,
-  endedAt: entry?.endedAt ?? null,
+  // Keep timestamps as null - they are derived from the entry with timezone adjustment at render time
+  // Only set when user explicitly changes via picker
+  startedAt: null,
+  endedAt: null,
   notes: entry?.notes ?? '',
   subtasks: entry ? cloneHistorySubtasks(entry.subtasks) : [],
   timezoneFrom: entry?.timezoneFrom ?? '',
@@ -6277,8 +6279,12 @@ const [showInlineExtras, setShowInlineExtras] = useState(false)
     const nextBucketName = draft.bucketName.trim()
     let nextNotes = draft.notes
     const nextSubtasks = cloneHistorySubtasks(draft.subtasks)
-    const draftStartedAt = draft.startedAt ?? selectedHistoryEntry.startedAt
-    const draftEndedAt = draft.endedAt ?? selectedHistoryEntry.endedAt
+    
+    // Draft timestamps are in display-space (adjusted for app timezone) when set by the user.
+    // We need to unadjust them back to storage-space for saving.
+    // If draft.startedAt is null, we fall back to entry's existing (storage-space) timestamp.
+    const draftStartedAt = draft.startedAt !== null ? unadjustTimestampForTimezone(draft.startedAt) : selectedHistoryEntry.startedAt
+    const draftEndedAt = draft.endedAt !== null ? unadjustTimestampForTimezone(draft.endedAt) : selectedHistoryEntry.endedAt
     let nextStartedAt = Number.isFinite(draftStartedAt) ? draftStartedAt : selectedHistoryEntry.startedAt
     let nextEndedAt = Number.isFinite(draftEndedAt) ? draftEndedAt : selectedHistoryEntry.endedAt
     if (!Number.isFinite(nextStartedAt)) {
@@ -6483,6 +6489,7 @@ const [showInlineExtras, setShowInlineExtras] = useState(false)
     selectedHistoryId,
     setPendingNewHistoryId,
     updateHistory,
+    unadjustTimestampForTimezone,
   ])
 
   useEffect(() => {
@@ -9648,8 +9655,8 @@ useEffect(() => {
             const rawStart = isPreviewed ? dragPreview.startedAt : entry.startedAt
             const rawEnd = isPreviewed ? dragPreview.endedAt : entry.endedAt
             
-            // For actual sessions (not guides), adjust timestamps for app timezone
-            // Guide tasks (repeating rules) should stay in their original scheduled time
+            // Guide tasks show at their scheduled local time (not timezone-adjusted)
+            // Real sessions are timezone-adjusted so they appear in app timezone
             const isGuideEntry = entry.id.startsWith('repeat:')
             const previewStart = isGuideEntry ? rawStart : adjustTimestampForTimezone(rawStart)
             const previewEnd = isGuideEntry ? rawEnd : adjustTimestampForTimezone(rawEnd)
@@ -10095,8 +10102,8 @@ useEffect(() => {
           const isGuide = info.entry.id.startsWith('repeat:')
           const isPlanned = !!(info.entry as any).futureSession
           
-          // Guide tasks (repeating rules) should show original local times, not timezone-adjusted
-          // Actual sessions: previewStart/previewEnd are already timezone-adjusted, use formatAdjustedTime
+          // Guides show at scheduled local time (format without timezone)
+          // Real sessions are timezone-adjusted (format as local since already adjusted)
           const rangeLabel = isGuide
             ? `${formatTimeOfDay(info.previewStart)} — ${formatTimeOfDay(info.previewEnd)}`
             : `${formatAdjustedTime(info.previewStart)} — ${formatAdjustedTime(info.previewEnd)}`
@@ -10418,21 +10425,23 @@ useEffect(() => {
             const preview = dragPreviewRef.current
             if (s && preview && preview.entryId === s.entryId && (preview.startedAt !== s.initialStart || preview.endedAt !== s.initialEnd)) {
               dragPreventClickRef.current = true
-              // For existing entries, the drag calculation uses system timezone dayStarts,
-              // so the result is already in the correct space - no unadjust needed.
-              // Only guide materializations (which create new entries from visual position) might need adjustment,
-              // but they use the entry's original timestamps, so they're also correct.
-              const finalStartedAt = preview.startedAt
-              const finalEndedAt = preview.endedAt
+              // For existing entries (non-guides), the drag calculation uses system timezone dayStarts,
+              // and real sessions are displayed with timezone adjustment, so no conversion needed.
+              // For guide materializations: the preview is in system timezone space (where the guide was displayed),
+              // but the resulting session will be timezone-adjusted for display. So we need to unadjust
+              // the preview values so the saved session appears at the same visual position.
               if (guideMaterialization) {
                 const { realEntry, ruleId, ymd } = guideMaterialization
+                // Unadjust so that adjust(stored) = preview position (where user dropped it)
+                const storedStartedAt = unadjustTimestampForTimezone(preview.startedAt)
+                const storedEndedAt = unadjustTimestampForTimezone(preview.endedAt)
                 flushSync(() => {
                   updateHistory((current) => {
                     const materialized = {
                       ...realEntry,
-                      startedAt: finalStartedAt,
-                      endedAt: finalEndedAt,
-                      elapsed: Math.max(finalEndedAt - finalStartedAt, 1),
+                      startedAt: storedStartedAt,
+                      endedAt: storedEndedAt,
+                      elapsed: Math.max(storedEndedAt - storedStartedAt, 1),
                     }
                     const next = [...current, materialized]
                     next.sort((a, b) => a.startedAt - b.startedAt)
@@ -10440,10 +10449,13 @@ useEffect(() => {
                   })
                 })
                 try {
-                  void upsertRepeatingException({ routineId: ruleId, occurrenceDate: ymd, action: 'rescheduled', newStartedAt: finalStartedAt, newEndedAt: finalEndedAt, notes: null })
+                  void upsertRepeatingException({ routineId: ruleId, occurrenceDate: ymd, action: 'rescheduled', newStartedAt: storedStartedAt, newEndedAt: storedEndedAt, notes: null })
                   void evaluateAndMaybeRetireRule(ruleId)
                 } catch {}
               } else if (s) {
+                // Existing real entry - preview values are already correct
+                const finalStartedAt = preview.startedAt
+                const finalEndedAt = preview.endedAt
                 flushSync(() => {
                   updateHistory((current) => {
                     const idx = current.findIndex((h) => h.id === s.entryId)
@@ -10468,16 +10480,28 @@ useEffect(() => {
                 })
               }
             } else if (guideMaterialization && s) {
+              // Guide held but not moved - materialize at same visual position
+              // realEntry has guide's system timezone times, unadjust for storage
               const { realEntry, ruleId, ymd } = guideMaterialization
+              const storedStartedAt = unadjustTimestampForTimezone(realEntry.startedAt)
+              const storedEndedAt = unadjustTimestampForTimezone(realEntry.endedAt)
+              const materializedEntry = {
+                ...realEntry,
+                startedAt: storedStartedAt,
+                endedAt: storedEndedAt,
+                elapsed: Math.max(storedEndedAt - storedStartedAt, 1),
+                // originalTime must match the guide's time for suppression lookup to work
+                originalTime: realEntry.startedAt,
+              }
               flushSync(() => {
                 updateHistory((current) => {
-                  const next = [...current, realEntry]
+                  const next = [...current, materializedEntry]
                   next.sort((a, b) => a.startedAt - b.startedAt)
                   return next
                 })
               })
               try {
-                void upsertRepeatingException({ routineId: ruleId, occurrenceDate: ymd, action: 'rescheduled', newStartedAt: realEntry.startedAt, newEndedAt: realEntry.endedAt, notes: null })
+                void upsertRepeatingException({ routineId: ruleId, occurrenceDate: ymd, action: 'rescheduled', newStartedAt: storedStartedAt, newEndedAt: storedEndedAt, notes: null })
                 void evaluateAndMaybeRetireRule(ruleId)
               } catch {}
               dragPreventClickRef.current = true
@@ -11192,10 +11216,17 @@ useEffect(() => {
                             const ruleId = parts[1]
                             const dayStart = Number(parts[2])
                             const ymd = formatLocalYmd(dayStart)
+                            // Guide shows at scheduled local time, unadjust for storage so displayed position matches
+                            const storedStartedAt = unadjustTimestampForTimezone(ev.entry.startedAt)
+                            const storedEndedAt = unadjustTimestampForTimezone(ev.entry.endedAt)
                             const newEntry: HistoryEntry = {
                               ...ev.entry,
                               id: makeHistoryId(),
+                              startedAt: storedStartedAt,
+                              endedAt: storedEndedAt,
+                              elapsed: Math.max(storedEndedAt - storedStartedAt, 1),
                               repeatingSessionId: ruleId,
+                              // originalTime must match guide's time for suppression lookup
                               originalTime: ev.entry.startedAt,
                             }
                             updateHistory((current) => {
@@ -12234,13 +12265,24 @@ useEffect(() => {
                   className="history-timeline__action-button history-timeline__action-button--primary"
                   onClick={() => {
                     if (!parsedGuide) return
-                  const newEntry: HistoryEntry = {
-                    ...entry,
-                    id: makeHistoryId(),
-                    repeatingSessionId: parsedGuide.ruleId,
-                    originalTime: entry.startedAt,
-                    futureSession: false,
-                  }
+                    // Guide shows at its scheduled local time (e.g., 11 AM) without timezone adjustment.
+                    // The confirmed session will be timezone-adjusted for display.
+                    // To make it appear at the same visual position (11 AM), we need to unadjust:
+                    // stored = unadjust(guideTime) so that adjust(stored) = guideTime
+                    const storedStartedAt = unadjustTimestampForTimezone(entry.startedAt)
+                    const storedEndedAt = unadjustTimestampForTimezone(entry.endedAt)
+                    const newEntry: HistoryEntry = {
+                      ...entry,
+                      id: makeHistoryId(),
+                      startedAt: storedStartedAt,
+                      endedAt: storedEndedAt,
+                      elapsed: Math.max(storedEndedAt - storedStartedAt, 1),
+                      repeatingSessionId: parsedGuide.ruleId,
+                      // originalTime must match the guide's time for suppression lookup to work
+                      // (confirmedKeySet uses formatLocalYmd(originalTime) to match guide's dayStart)
+                      originalTime: entry.startedAt,
+                      futureSession: false,
+                    }
                     updateHistory((current) => {
                       const next = [...current, newEntry]
                       next.sort((a, b) => a.startedAt - b.startedAt)
@@ -12268,12 +12310,16 @@ useEffect(() => {
                   onClick={async () => {
                     if (!parsedGuide) return
                     // Create a zero-duration entry to mark this occurrence as resolved without rendering
+                    // Use unadjusted time so it matches the guide's visual position
+                    const storedStartedAt = unadjustTimestampForTimezone(entry.startedAt)
                     const zeroEntry: HistoryEntry = {
                       ...entry,
                       id: makeHistoryId(),
-                      endedAt: entry.startedAt,
+                      startedAt: storedStartedAt,
+                      endedAt: storedStartedAt,
                       elapsed: 0,
                       repeatingSessionId: parsedGuide.ruleId,
+                      // originalTime must match the guide's time for suppression lookup to work
                       originalTime: entry.startedAt,
                     }
                     updateHistory((current) => {
@@ -12518,9 +12564,14 @@ useEffect(() => {
       currentGoal.toLowerCase() === LIFE_ROUTINES_NAME.toLowerCase() &&
       currentBucket === TIMEZONE_CHANGE_MARKER
     
-    // Resolve current values
-    const startBase = entry.startedAt
-    const endBase = entry.endedAt
+    // Guide entries (repeat:xxx IDs) display without timezone adjustment
+    // Real sessions are timezone-adjusted for display
+    const isGuideEntry = entry.id.startsWith('repeat:')
+    const adjustForDisplay = (ts: number) => isGuideEntry ? ts : adjustTimestampForTimezone(ts)
+    
+    // Resolve current values - adjust base times for display in the inputs
+    const startBase = adjustForDisplay(entry.startedAt)
+    const endBase = adjustForDisplay(entry.endedAt)
     const resolvedStart = resolveTimestamp(historyDraft.startedAt, startBase)
     const resolvedEnd = resolveTimestamp(historyDraft.endedAt, endBase)
     const shiftStartAndPreserveDuration = (nextStart: number) => {
@@ -12780,6 +12831,7 @@ useEffect(() => {
       document.body,
     )
   }, [
+    adjustTimestampForTimezone,
     calendarEditorEntryId,
     history,
     historyDraft.bucketName,
@@ -12787,6 +12839,8 @@ useEffect(() => {
     historyDraft.taskName,
     historyDraft.notes,
     historyDraft.subtasks,
+    historyDraft.startedAt,
+    historyDraft.endedAt,
     availableBucketOptions.length,
     bucketDropdownId,
     bucketDropdownOptions,
@@ -13199,8 +13253,13 @@ useEffect(() => {
   let calendarInspectorPanel: ReactElement | null = null
   if (calendarInspectorEntryId !== null) {
     if (inspectorEntry) {
-      const startBase = inspectorEntry.startedAt
-      const endBase = inspectorEntry.endedAt
+      // Guide entries (repeat:xxx IDs) display without timezone adjustment
+      // Real sessions are timezone-adjusted for display
+      const isInspectorGuide = inspectorEntry.id.startsWith('repeat:')
+      const adjustForDisplay = (ts: number) => isInspectorGuide ? ts : adjustTimestampForTimezone(ts)
+      
+      const startBase = adjustForDisplay(inspectorEntry.startedAt)
+      const endBase = adjustForDisplay(inspectorEntry.endedAt)
       const resolvedStart = resolveTimestamp(historyDraft.startedAt, startBase)
       const resolvedEnd = resolveTimestamp(historyDraft.endedAt, endBase)
       const shiftStartAndPreserveDuration = (nextStart: number) => {
