@@ -13,10 +13,10 @@ import { AUTH_SESSION_STORAGE_KEY } from './lib/authStorage'
 import { readCachedSessionTokens } from './lib/authStorage'
 import { ensureQuickListUser } from './lib/quickList'
 import { ensureLifeRoutineUser } from './lib/lifeRoutines'
-import { ensureHistoryUser } from './lib/sessionHistory'
+import { ensureHistoryUser, syncHistoryWithSupabase } from './lib/sessionHistory'
 import { ensureRepeatingRulesUser } from './lib/repeatingSessions'
 import { bootstrapGuestDataIfNeeded } from './lib/bootstrap'
-import { ensureGoalsUser } from './lib/goalsSync'
+import { ensureGoalsUser, syncGoalsSnapshotFromSupabase } from './lib/goalsSync'
 
 type Theme = 'light' | 'dark'
 type TabKey = 'goals' | 'focus' | 'reflection'
@@ -964,6 +964,11 @@ function MainApp() {
             ensureHistoryUser(userId)
             ensureGoalsUser(userId)
             await ensureRepeatingRulesUser(userId)
+            // Pre-fetch goals and history from Supabase so calendar renders correctly immediately
+            await Promise.all([
+              syncGoalsSnapshotFromSupabase(),
+              syncHistoryWithSupabase(),
+            ])
           } else {
             // User already bootstrapped, just fetch from DB
             // Don't reset - just ensure user data is loaded
@@ -972,6 +977,11 @@ function MainApp() {
             ensureHistoryUser(userId)
             ensureGoalsUser(userId)
             await ensureRepeatingRulesUser(userId)
+            // Pre-fetch goals and history from Supabase so calendar renders correctly immediately
+            await Promise.all([
+              syncGoalsSnapshotFromSupabase(),
+              syncHistoryWithSupabase(),
+            ])
           }
         } else {
           // Guest mode - just ensure defaults exist if no data
