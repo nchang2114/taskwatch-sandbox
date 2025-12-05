@@ -2474,30 +2474,53 @@ function AuthCallbackScreen(): React.ReactElement {
       }
       const url = new URL(window.location.href)
       const hasAuthCode = Boolean(url.searchParams.get('code'))
+      let session = null
       try {
         if (hasAuthCode) {
-          const { error } = await supabase.auth.exchangeCodeForSession(window.location.href)
+          const { data, error } = await supabase.auth.exchangeCodeForSession(window.location.href)
           if (error) {
             await supabase.auth.getSession().catch(() => {})
+          } else {
+            session = data?.session
           }
         } else {
-          await supabase.auth.getSession().catch(() => {})
+          const { data } = await supabase.auth.getSession()
+          session = data?.session
         }
       } catch {
-        await supabase.auth.getSession().catch(() => {})
+        const { data } = await supabase.auth.getSession().catch(() => ({ data: null }))
+        session = data?.session
       }
-      finally {
-        if (!cancelled) {
-          // Clear focus task state on sign-in so user starts with default presets
-          try {
-            window.localStorage.removeItem('nc-taskwatch-current-task')
-            window.localStorage.removeItem('nc-taskwatch-current-task-source')
-            window.localStorage.removeItem('nc-taskwatch-stopwatch-v1')
-          } catch {}
-          // Wait 7 seconds before redirecting to give data time to load
-          await new Promise(resolve => setTimeout(resolve, 7000))
-          window.location.replace('/')
-        }
+      
+      // Now that we're authenticated, pre-fetch all the user's data before redirecting
+      if (session?.user?.id && !cancelled) {
+        console.log('[AuthCallback] authenticated, pre-fetching user data...')
+        const userId = session.user.id
+        
+        // Set up user in all the stores
+        ensureQuickListUser(userId)
+        ensureLifeRoutineUser(userId)
+        ensureHistoryUser(userId)
+        ensureGoalsUser(userId)
+        await ensureRepeatingRulesUser(userId)
+        
+        // Fetch goals and history from Supabase so they're in localStorage
+        console.log('[AuthCallback] fetching goals and history...')
+        await Promise.all([
+          syncGoalsSnapshotFromSupabase(),
+          syncHistoryWithSupabase(),
+        ])
+        console.log('[AuthCallback] data fetch complete')
+      }
+      
+      if (!cancelled) {
+        // Clear focus task state on sign-in so user starts with default presets
+        try {
+          window.localStorage.removeItem('nc-taskwatch-current-task')
+          window.localStorage.removeItem('nc-taskwatch-current-task-source')
+          window.localStorage.removeItem('nc-taskwatch-stopwatch-v1')
+        } catch {}
+        window.location.replace('/')
       }
     }
     finalize().catch(() => {})
