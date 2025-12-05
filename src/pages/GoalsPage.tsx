@@ -460,7 +460,7 @@ const makeGoalSubtaskInputId = (taskId: string, subtaskId: string): string =>
 const SHOW_TASK_DETAILS = true as const
 
 // Toggle sort animation on/off (set to false to disable the shuffle animation when sorting)
-const ENABLE_SORT_ANIMATION = false as const
+const ENABLE_SORT_ANIMATION = true as const
 
 // Auto-size a textarea to fit its content without requiring focus
 const autosizeTextArea = (el: HTMLTextAreaElement | null) => {
