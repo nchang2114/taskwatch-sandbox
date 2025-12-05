@@ -338,7 +338,6 @@ function MainApp() {
   const [authVerifyStatus, setAuthVerifyStatus] = useState<string | null>(null)
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [isSigningOut, setIsSigningOut] = useState(false)
-  const [isLoadingUserData, setIsLoadingUserData] = useState(false)
   const [activeSettingsSection, setActiveSettingsSection] = useState(SETTINGS_SECTIONS[0]?.id ?? 'general')
   const [authEmailLookupValue, setAuthEmailLookupValue] = useState('')
   const [authEmailLookupResult, setAuthEmailLookupResult] = useState<boolean | null>(null)
@@ -1025,20 +1024,13 @@ function MainApp() {
       
       const profile = deriveProfileFromSupabaseUser(user ?? null)
       
-      // If signing in (not signing out), show loading state while we fetch data
-      if (profile && mounted) {
-        setIsLoadingUserData(true)
-        // Keep auth modal open to show loading state
-        setAuthModalOpen(true)
-      }
-      
       // Fetch all data BEFORE updating the profile (which triggers UI change)
+      // Keep the auth modal open during this time - user just sees the sign-in screen
       await alignLocalStoresForUser(user?.id ?? null)
       
       // Now that data is ready, update the profile and close the modal
       if (mounted) {
         setUserProfile(profile)
-        setIsLoadingUserData(false)
         if (profile) {
           setAuthModalOpen(false)
         }
@@ -2176,23 +2168,7 @@ const nextThemeLabel = theme === 'dark' ? 'light' : 'dark'
       {authModalOpen ? (
         <div className="auth-modal-overlay" role="dialog" aria-modal="true" aria-label="Sign in to Taskwatch">
           <div className="auth-modal" ref={authModalRef}>
-            {isLoadingUserData ? (
-              <div className="auth-loading">
-                <div className="auth-loading__header">
-                  <div>
-                    <p className="auth-modal__title">Loading your data...</p>
-                    <p className="auth-modal__subtitle">Setting everything up for you.</p>
-                  </div>
-                </div>
-                <div className="auth-loading__spinner" aria-label="Loading">
-                  <svg viewBox="0 0 24 24" className="auth-loading__icon">
-                    <circle cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="2" fill="none" strokeDasharray="31.4 31.4" strokeLinecap="round">
-                      <animateTransform attributeName="transform" type="rotate" from="0 12 12" to="360 12 12" dur="1s" repeatCount="indefinite" />
-                    </circle>
-                  </svg>
-                </div>
-              </div>
-            ) : authEmailStage === 'create' ? (
+            {authEmailStage === 'create' ? (
               <form className="auth-create" onSubmit={handleAuthCreateSubmit}>
                 <div className="auth-create__header">
                   <div>
