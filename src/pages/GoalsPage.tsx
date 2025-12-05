@@ -36,6 +36,7 @@ import {
   deleteGoalMilestone as apiDeleteGoalMilestone,
   fetchGoalCreatedAt as apiFetchGoalCreatedAt,
   setGoalMilestonesShown as apiSetGoalMilestonesShown,
+  sortBucketTasksByDate as apiSortBucketTasksByDate,
 } from '../lib/goalsApi'
 import {
   DEFAULT_SURFACE_STYLE,
@@ -129,6 +130,7 @@ export interface TaskItem {
   priority?: boolean
   notes?: string | null
   subtasks?: TaskSubtask[]
+  createdAt?: string
 }
 
 type TaskSubtask = {
@@ -892,6 +894,7 @@ function reconcileGoalsWithSnapshot(snapshot: GoalSnapshot[], current: Goal[]): 
               completed: task.completed,
               difficulty: task.difficulty,
               priority: task.priority ?? existingTask?.priority ?? false,
+              createdAt: (task as any).createdAt ?? existingTask?.createdAt,
               // Preserve non-empty existing notes when incoming is empty/unknown
               notes: resolvedNotes,
               // Snapshot is authoritative: do not resurrect subtasks when it is empty
@@ -2473,6 +2476,7 @@ interface GoalRowProps {
   archivedBucketCount: number
   onManageArchivedBuckets: () => void
   onDeleteCompletedTasks: (bucketId: string) => void
+  onSortBucketByDate: (bucketId: string, direction: 'oldest' | 'newest') => void
   onToggleBucketFavorite: (bucketId: string) => void
   onUpdateBucketSurface: (goalId: string, bucketId: string, surface: BucketSurfaceStyle) => void
   bucketExpanded: Record<string, boolean>
@@ -2742,6 +2746,7 @@ const GoalRow: React.FC<GoalRowProps> = ({
   archivedBucketCount,
   onManageArchivedBuckets,
   onDeleteCompletedTasks,
+  onSortBucketByDate,
   onToggleBucketFavorite,
   onUpdateBucketSurface,
   bucketExpanded,
@@ -3407,6 +3412,29 @@ const GoalRow: React.FC<GoalRowProps> = ({
                 }}
               >
                 Delete all completed tasks
+              </button>
+              <div className="goal-menu__divider" />
+              <button
+                type="button"
+                className="goal-menu__item"
+                onClick={(event) => {
+                  event.stopPropagation()
+                  setBucketMenuOpenId(null)
+                  onSortBucketByDate(activeBucketForMenu.id, 'oldest')
+                }}
+              >
+                Sort by oldest first
+              </button>
+              <button
+                type="button"
+                className="goal-menu__item"
+                onClick={(event) => {
+                  event.stopPropagation()
+                  setBucketMenuOpenId(null)
+                  onSortBucketByDate(activeBucketForMenu.id, 'newest')
+                }}
+              >
+                Sort by newest first
               </button>
               <div className="goal-menu__divider" />
               <button
@@ -8876,6 +8904,57 @@ export default function GoalsPage(): ReactElement {
     apiDeleteCompletedTasksInBucket(bucketId).catch(() => {})
   }
 
+  const sortBucketByDate = async (goalId: string, bucketId: string, direction: 'oldest' | 'newest') => {
+    const STEP = 1024
+    // Try API first (for logged-in users)
+    const result = await apiSortBucketTasksByDate(bucketId, direction)
+    if (result) {
+      // Update local state with the new sort_index values from API
+      setGoals((gs) =>
+        gs.map((g) =>
+          g.id === goalId
+            ? {
+                ...g,
+                buckets: g.buckets.map((b) =>
+                  b.id === bucketId
+                    ? {
+                        ...b,
+                        tasks: b.tasks.map((t) => {
+                          const updatedIndex = result.find((r) => r.id === t.id)?.sort_index
+                          return updatedIndex !== undefined ? { ...t, sortIndex: updatedIndex } : t
+                        }),
+                      }
+                    : b,
+                ),
+              }
+            : g,
+        ),
+      )
+    } else {
+      // Guest mode: sort tasks locally by createdAt
+      setGoals((gs) =>
+        gs.map((g) =>
+          g.id === goalId
+            ? {
+                ...g,
+                buckets: g.buckets.map((b) => {
+                  if (b.id !== bucketId) return b
+                  const sorted = [...b.tasks].sort((a, c) => {
+                    const dateA = new Date(a.createdAt || 0).getTime()
+                    const dateC = new Date(c.createdAt || 0).getTime()
+                    return direction === 'oldest' ? dateA - dateC : dateC - dateA
+                  })
+                  // Reassign sortIndex values
+                  const reindexed = sorted.map((t, idx) => ({ ...t, sortIndex: (idx + 1) * STEP }))
+                  return { ...b, tasks: reindexed }
+                }),
+              }
+            : g,
+        ),
+      )
+    }
+  }
+
   const toggleBucketExpanded = (bucketId: string) => {
     setBucketExpanded((current) => ({
       ...current,
@@ -10725,7 +10804,7 @@ const normalizedSearch = searchTerm.trim().toLowerCase()
     }
 
     const temporaryId = `temp_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`
-    const optimisticTask: TaskItem = { id: temporaryId, text: trimmed, completed: false, difficulty: 'none' }
+    const optimisticTask: TaskItem = { id: temporaryId, text: trimmed, completed: false, difficulty: 'none', createdAt: new Date().toISOString() }
 
     setGoals((gs) =>
       gs.map((g) =>
@@ -12623,6 +12702,7 @@ const normalizedSearch = searchTerm.trim().toLowerCase()
                         archivedBucketCount={dashboardSelectedGoal.buckets.filter((bucket) => bucket.archived).length}
                         onManageArchivedBuckets={() => openArchivedManager(dashboardSelectedGoal.id)}
                         onDeleteCompletedTasks={(bucketId) => deleteCompletedTasks(dashboardSelectedGoal.id, bucketId)}
+                        onSortBucketByDate={(bucketId, direction) => sortBucketByDate(dashboardSelectedGoal.id, bucketId, direction)}
                         onToggleBucketFavorite={(bucketId) => toggleBucketFavorite(dashboardSelectedGoal.id, bucketId)}
                         onUpdateBucketSurface={(goalId, bucketId, surface) => updateBucketSurface(goalId, bucketId, surface)}
                         bucketExpanded={bucketExpanded}
@@ -12761,6 +12841,7 @@ const normalizedSearch = searchTerm.trim().toLowerCase()
                     archivedBucketCount={g.buckets.filter((bucket) => bucket.archived).length}
                     onManageArchivedBuckets={() => openArchivedManager(g.id)}
                     onDeleteCompletedTasks={(bucketId) => deleteCompletedTasks(g.id, bucketId)}
+                    onSortBucketByDate={(bucketId, direction) => sortBucketByDate(g.id, bucketId, direction)}
                     onToggleBucketFavorite={(bucketId) => toggleBucketFavorite(g.id, bucketId)}
                     onUpdateBucketSurface={(goalId, bucketId, surface) => updateBucketSurface(goalId, bucketId, surface)}
                     bucketExpanded={bucketExpanded}
@@ -12897,6 +12978,7 @@ const normalizedSearch = searchTerm.trim().toLowerCase()
                         archivedBucketCount={g.buckets.filter((bucket) => bucket.archived).length}
                         onManageArchivedBuckets={() => openArchivedManager(g.id)}
                         onDeleteCompletedTasks={(bucketId) => deleteCompletedTasks(g.id, bucketId)}
+                        onSortBucketByDate={(bucketId, direction) => sortBucketByDate(g.id, bucketId, direction)}
                         onToggleBucketFavorite={(bucketId) => toggleBucketFavorite(g.id, bucketId)}
                         onUpdateBucketSurface={(goalId, bucketId, surface) => updateBucketSurface(goalId, bucketId, surface)}
                         bucketExpanded={bucketExpanded}
