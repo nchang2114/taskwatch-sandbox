@@ -8923,8 +8923,13 @@ export default function GoalsPage(): ReactElement {
                     const updatedIndex = result.find((r) => r.id === t.id)?.sort_index
                     return updatedIndex !== undefined ? { ...t, sortIndex: updatedIndex } : t
                   })
-                  // Sort the array by the new sortIndex values
-                  const sorted = [...updatedTasks].sort((a, c) => (a.sortIndex ?? 0) - (c.sortIndex ?? 0))
+                  // Sort: priority first (desc), then by sortIndex (asc)
+                  const sorted = [...updatedTasks].sort((a, c) => {
+                    const priorityA = a.priority ? 1 : 0
+                    const priorityC = c.priority ? 1 : 0
+                    if (priorityA !== priorityC) return priorityC - priorityA // priority first
+                    return (a.sortIndex ?? 0) - (c.sortIndex ?? 0) // then by sortIndex
+                  })
                   return { ...b, tasks: sorted }
                 }),
               }
@@ -8932,7 +8937,7 @@ export default function GoalsPage(): ReactElement {
         ),
       )
     } else {
-      // Guest mode: sort tasks locally by createdAt
+      // Guest mode: sort tasks locally by createdAt within priority groups
       setGoals((gs) =>
         gs.map((g) =>
           g.id === goalId
@@ -8940,12 +8945,19 @@ export default function GoalsPage(): ReactElement {
                 ...g,
                 buckets: g.buckets.map((b) => {
                   if (b.id !== bucketId) return b
-                  const sorted = [...b.tasks].sort((a, c) => {
+                  // Separate priority and non-priority tasks
+                  const priorityTasks = b.tasks.filter(t => t.priority)
+                  const nonPriorityTasks = b.tasks.filter(t => !t.priority)
+                  // Sort each group by createdAt
+                  const sortByDate = (a: TaskItem, c: TaskItem) => {
                     const dateA = new Date(a.createdAt || 0).getTime()
                     const dateC = new Date(c.createdAt || 0).getTime()
                     return direction === 'oldest' ? dateA - dateC : dateC - dateA
-                  })
-                  // Reassign sortIndex values
+                  }
+                  priorityTasks.sort(sortByDate)
+                  nonPriorityTasks.sort(sortByDate)
+                  // Combine and reassign sortIndex values
+                  const sorted = [...priorityTasks, ...nonPriorityTasks]
                   const reindexed = sorted.map((t, idx) => ({ ...t, sortIndex: (idx + 1) * STEP }))
                   return { ...b, tasks: reindexed }
                 }),

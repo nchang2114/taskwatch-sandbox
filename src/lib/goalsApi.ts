@@ -1080,21 +1080,31 @@ export async function sortBucketTasksByDate(bucketId: string, direction: 'oldest
   
   const STEP = 1024
   
-  // Fetch all tasks in the bucket with their created_at
+  // Fetch all tasks in the bucket with their created_at and priority
   const { data: tasks, error } = await supabase
     .from('tasks')
-    .select('id, created_at')
+    .select('id, created_at, priority')
     .eq('bucket_id', bucketId)
     .eq('user_id', userId)
   
   if (error || !tasks || tasks.length === 0) return null
   
-  // Sort tasks by created_at
-  const sorted = [...tasks].sort((a, b) => {
+  // Separate priority and non-priority tasks
+  const priorityTasks = tasks.filter(t => t.priority)
+  const nonPriorityTasks = tasks.filter(t => !t.priority)
+  
+  // Sort each group by created_at
+  const sortByDate = (a: typeof tasks[0], b: typeof tasks[0]) => {
     const dateA = new Date(a.created_at || 0).getTime()
     const dateB = new Date(b.created_at || 0).getTime()
     return direction === 'oldest' ? dateA - dateB : dateB - dateA
-  })
+  }
+  
+  priorityTasks.sort(sortByDate)
+  nonPriorityTasks.sort(sortByDate)
+  
+  // Combine: priority tasks first, then non-priority
+  const sorted = [...priorityTasks, ...nonPriorityTasks]
   
   // Build batch updates with new sort_index values
   const updates = sorted.map((task, index) => ({
