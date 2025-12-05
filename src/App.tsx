@@ -1031,9 +1031,14 @@ function MainApp() {
         } catch {}
       }
       
-      // Reset app timezone to system default on auth state changes (sign-in/sign-out)
-      // This prevents stale timezone overrides from carrying over between sessions
-      if (typeof window !== 'undefined') {
+      // Check if user ID actually changed (sign-in or sign-out, not just page refresh)
+      const newUserId = user?.id ?? null
+      const previousUserId = lastAlignedUserIdRef.current
+      const userActuallyChanged = previousUserId !== newUserId && previousUserId !== undefined
+      
+      // Reset app timezone to system default ONLY on actual auth changes (sign-in/sign-out)
+      // Not on page refresh where user stays the same
+      if (userActuallyChanged && typeof window !== 'undefined') {
         try {
           window.localStorage.removeItem('taskwatch_app_timezone')
           // Dispatch custom event to notify same-tab components (storage events only fire cross-tab)
