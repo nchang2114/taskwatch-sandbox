@@ -9992,30 +9992,17 @@ useEffect(() => {
               // Clone the element for the ghost
               const ghost = el.cloneNode(true) as HTMLDivElement
               
-              // Clear ALL inline styles from the clone, then set our fixed positioning
-              ghost.removeAttribute('style')
-              
-              // Build fresh styles using cssText to ensure no inherited inline styles
-              ghost.style.cssText = `
-                position: fixed !important;
-                box-sizing: border-box !important;
-                left: ${elRect.left}px !important;
-                top: ${elRect.top}px !important;
-                width: ${elRect.width}px !important;
-                height: ${elRect.height}px !important;
-                margin: 0 !important;
-                transform: none !important;
-                z-index: 999999;
-                pointer-events: none;
-                overflow: hidden;
-                border-radius: ${elComputed.borderRadius};
-                color: ${elComputed.color};
-                padding: ${elComputed.padding};
-                font-size: ${elComputed.fontSize};
-                line-height: ${elComputed.lineHeight};
-                box-shadow: ${elComputed.boxShadow};
-                background: ${elComputed.background};
-              `
+              // Override ONLY the positioning properties, keep everything else (including child styles)
+              // This preserves the original appearance while converting to fixed positioning
+              ghost.style.position = 'fixed'
+              ghost.style.left = `${elRect.left}px`
+              ghost.style.top = `${elRect.top}px`
+              ghost.style.width = `${elRect.width}px`
+              ghost.style.height = `${elRect.height}px`
+              ghost.style.margin = '0'
+              ghost.style.transform = 'none'
+              ghost.style.zIndex = '999999'
+              ghost.style.pointerEvents = 'none'
               
               // Append to document.body for proper fixed positioning
               // Note: The now-line may appear below the ghost during drag due to stacking contexts
