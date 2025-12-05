@@ -338,6 +338,7 @@ function MainApp() {
   const [authVerifyStatus, setAuthVerifyStatus] = useState<string | null>(null)
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [isSigningOut, setIsSigningOut] = useState(false)
+  const [isBootstrapping, setIsBootstrapping] = useState(true)
   const [activeSettingsSection, setActiveSettingsSection] = useState(SETTINGS_SECTIONS[0]?.id ?? 'general')
   const [authEmailLookupValue, setAuthEmailLookupValue] = useState('')
   const [authEmailLookupResult, setAuthEmailLookupResult] = useState<boolean | null>(null)
@@ -1079,6 +1080,11 @@ function MainApp() {
         const resolvedUser = data?.user ?? session?.user ?? null
         await applySessionUser(resolvedUser)
       } catch {}
+      
+      // Bootstrap complete - all data is loaded, ready to show the app
+      if (mounted) {
+        setIsBootstrapping(false)
+      }
     }
 
     // Track last session check to debounce rapid auth changes
@@ -1985,6 +1991,17 @@ const nextThemeLabel = theme === 'dark' ? 'light' : 'dark'
 
   if (isSigningOut) {
     return <SignOutScreen />
+  }
+
+  if (isBootstrapping) {
+    return (
+      <div className="app-loading">
+        <div className="app-loading__content">
+          <p className="app-loading__title">Taskwatch</p>
+          <p className="app-loading__subtitle">Loading...</p>
+        </div>
+      </div>
+    )
   }
 
   return (
