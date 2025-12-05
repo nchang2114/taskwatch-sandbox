@@ -907,35 +907,29 @@ function MainApp() {
     }
 
     const alignLocalStoresForUser = async (userId: string | null): Promise<void> => {
-      console.log('[align] starting for userId:', userId)
       const previousUserId = lastAlignedUserIdRef.current
       const userChanged = previousUserId !== userId
-      console.log('[align] previousUserId:', previousUserId, 'userChanged:', userChanged)
       
       // Do not attempt to bootstrap/sync without a valid Supabase session
       // EXCEPT when signing out (userId is null) - we need to reset to guest
       const session = await ensureSingleUserSession()
       if (!session && userId) {
-        console.log('[align] no session, returning early')
         return
       }
 
       // If user hasn't changed and no migration needed, skip alignment
       if (!userChanged) {
-        console.log('[align] user unchanged, skipping')
         return
       }
 
       // Check if alignment was already completed by another tab
       if (userId && isAlignmentComplete(userId)) {
-        console.log('[align] alignment already complete')
         lastAlignedUserIdRef.current = userId
         return
       }
 
       // Acquire lock to prevent multiple tabs from aligning simultaneously
       if (userId && !acquireAlignLock(userId)) {
-        console.log('[align] could not acquire lock, another tab is handling')
         // Another tab is handling alignment
         // Just update tracking - the winning tab will sync data via storage events
         lastAlignedUserIdRef.current = userId
@@ -953,8 +947,6 @@ function MainApp() {
         }
         return
       }
-      
-      console.log('[align] acquired lock, proceeding with sync')
 
       try {
         let migrated = false
@@ -982,12 +974,10 @@ function MainApp() {
             ensureGoalsUser(userId)
             await ensureRepeatingRulesUser(userId)
             // Pre-fetch goals and history from Supabase so calendar renders correctly immediately
-            console.log('[align] starting sync (migrated path)')
             await Promise.all([
               syncGoalsSnapshotFromSupabase(),
               syncHistoryWithSupabase(),
             ])
-            console.log('[align] sync complete (migrated path)')
           } else {
             // User already bootstrapped, just fetch from DB
             // Don't reset - just ensure user data is loaded
@@ -997,12 +987,10 @@ function MainApp() {
             ensureGoalsUser(userId)
             await ensureRepeatingRulesUser(userId)
             // Pre-fetch goals and history from Supabase so calendar renders correctly immediately
-            console.log('[align] starting sync (non-migrated path)')
             await Promise.all([
               syncGoalsSnapshotFromSupabase(),
               syncHistoryWithSupabase(),
             ])
-            console.log('[align] sync complete (non-migrated path)')
           }
         } else {
           // Guest mode - just ensure defaults exist if no data
@@ -1078,7 +1066,6 @@ function MainApp() {
     }
 
     const bootstrapSession = async () => {
-      console.log('[bootstrap] starting')
       // Clear the signing-out flag at the start of a fresh page load
       // This flag is only meant to block alignment during the immediate sign-out reload
       if (typeof window !== 'undefined') {
@@ -1095,19 +1082,14 @@ function MainApp() {
       if (!session) {
         session = await restoreSessionFromCache()
       }
-      console.log('[bootstrap] calling applySessionUser 1')
       await applySessionUser(session?.user ?? null)
-      console.log('[bootstrap] applySessionUser 1 done')
       try {
         const { data } = await client.auth.getUser()
         const resolvedUser = data?.user ?? session?.user ?? null
-        console.log('[bootstrap] calling applySessionUser 2')
         await applySessionUser(resolvedUser)
-        console.log('[bootstrap] applySessionUser 2 done')
       } catch {}
       
       // Bootstrap complete - all data is loaded, ready to show the app
-      console.log('[bootstrap] complete, setting isSigningIn=false')
       if (mounted) {
         setIsSigningIn(false)
       }
@@ -2491,7 +2473,6 @@ function AuthCallbackScreen(): React.ReactElement {
       
       // Now that we're authenticated, pre-fetch all the user's data before redirecting
       if (session?.user?.id && !cancelled) {
-        console.log('[AuthCallback] authenticated, pre-fetching user data...')
         const userId = session.user.id
         
         // Set up user in all the stores
@@ -2502,12 +2483,10 @@ function AuthCallbackScreen(): React.ReactElement {
         await ensureRepeatingRulesUser(userId)
         
         // Fetch goals and history from Supabase so they're in localStorage
-        console.log('[AuthCallback] fetching goals and history...')
         await Promise.all([
           syncGoalsSnapshotFromSupabase(),
           syncHistoryWithSupabase(),
         ])
-        console.log('[AuthCallback] data fetch complete')
       }
       
       if (!cancelled) {

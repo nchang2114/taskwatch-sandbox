@@ -338,31 +338,24 @@ export const readGoalsSnapshotOwner = (): string | null => readStoredGoalsSnapsh
  */
 export const syncGoalsSnapshotFromSupabase = async (): Promise<GoalSnapshot[] | null> => {
   const owner = readStoredGoalsSnapshotUserId()
-  console.log('[syncGoalsSnapshot] starting, owner:', owner)
   if (!owner || owner === GOALS_GUEST_USER_ID) {
     // Guest users don't sync from Supabase
-    console.log('[syncGoalsSnapshot] skipping - guest or no owner')
     return null
   }
   try {
-    console.log('[syncGoalsSnapshot] fetching goals from Supabase...')
     const result = await fetchGoalsHierarchy()
-    console.log('[syncGoalsSnapshot] fetched goals:', result?.goals?.length ?? 0)
     if (!result?.goals || result.goals.length === 0) {
       return null
     }
     // Convert the fetched goals to snapshot format
     const snapshot = createGoalsSnapshot(result.goals)
-    console.log('[syncGoalsSnapshot] created snapshot:', snapshot.length)
     if (snapshot.length > 0) {
       // Always publish - force update even if signature matches
       // This ensures components get the latest data after bootstrap
       publishGoalsSnapshot(snapshot)
-      console.log('[syncGoalsSnapshot] published snapshot')
     }
     return snapshot
-  } catch (err) {
-    console.error('[syncGoalsSnapshot] error:', err)
+  } catch {
     return null
   }
 }
