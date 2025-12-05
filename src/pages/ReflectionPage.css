@@ -4125,8 +4125,3 @@ html[data-theme='dark'] .custom-recur__ghost {
 html[data-theme='dark'] .custom-recur__primary {
   box-shadow: 0 10px 22px rgba(46, 109, 255, 0.28);
 }
-
-/* During ghost drag, remove will-change from calendar-days so now-line can escape stacking context */
-.calendar-days.dragging-ghost {
-  will-change: auto;
-}
