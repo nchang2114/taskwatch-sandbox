@@ -2005,6 +2005,42 @@ html[data-theme='light'] .settings-panel__group {
   color: var(--text-primary);
   font-size: 0.9rem;
   cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.settings-panel__chip:hover {
+  background: rgba(148, 164, 255, 0.15);
+  border-color: rgba(148, 164, 255, 0.7);
+}
+
+.settings-panel__chip--warning {
+  border-color: rgba(255, 180, 100, 0.5);
+  color: #ffb464;
+}
+
+.settings-panel__chip--warning:hover {
+  background: rgba(255, 180, 100, 0.15);
+  border-color: rgba(255, 180, 100, 0.7);
+}
+
+html[data-theme='light'] .settings-panel__chip--warning {
+  border-color: rgba(245, 140, 40, 0.6);
+  color: #e88020;
+}
+
+html[data-theme='light'] .settings-panel__chip--warning:hover {
+  background: rgba(245, 140, 40, 0.12);
+  border-color: rgba(245, 140, 40, 0.8);
+}
+
+.settings-panel__chip--danger {
+  border-color: rgba(255, 100, 100, 0.5);
+  color: #ff6464;
+}
+
+.settings-panel__chip--danger:hover {
+  background: rgba(255, 100, 100, 0.15);
+  border-color: rgba(255, 100, 100, 0.7);
 }
 
 .settings-panel__toggle-wrapper {
