@@ -12,7 +12,6 @@ import {
   FALLBACK_GOAL_COLOR,
 } from './goalsApi'
 import { pushLifeRoutinesToSupabase, type LifeRoutineConfig } from './lifeRoutines'
-import { readGoalsSnapshotOwner, GOALS_GUEST_USER_ID } from './goalsSync'
 import { QUICK_LIST_GOAL_NAME } from './quickListRemote'
 import { DEFAULT_SURFACE_STYLE, ensureServerBucketStyle } from './surfaceStyles'
 import { bulkInsertSnapbackTriggers, type SnapbackTriggerPayload } from './snapbackApi'
@@ -163,11 +162,9 @@ const migrateGoalsSnapshot = async (): Promise<void> => {
   if (typeof window !== 'undefined') {
     snapshotRaw = window.localStorage.getItem('nc-taskwatch-bootstrap-snapshot::goals')
     if (!snapshotRaw) {
-      // Fall back to regular snapshot if bootstrap snapshot doesn't exist
-      const owner = readGoalsSnapshotOwner()
-      if (!owner || owner === GOALS_GUEST_USER_ID) {
-        snapshotRaw = window.localStorage.getItem('nc-taskwatch-goals-snapshot')
-      }
+      // Fall back to regular snapshot - don't check owner since AuthCallbackScreen
+      // may have already set it to the real user ID before bootstrap runs
+      snapshotRaw = window.localStorage.getItem('nc-taskwatch-goals-snapshot')
     }
   }
   
