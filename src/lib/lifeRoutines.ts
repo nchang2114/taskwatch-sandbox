@@ -370,9 +370,10 @@ const mapDbRowToRoutine = (row: LifeRoutineDbRow): LifeRoutineConfig | null => {
 
 export const pushLifeRoutinesToSupabase = async (
   routines: LifeRoutineConfig[],
-  options?: { strict?: boolean },
+  options?: { strict?: boolean; skipOrphanDelete?: boolean },
 ): Promise<void> => {
   const strict = Boolean(options?.strict)
+  const skipOrphanDelete = Boolean(options?.skipOrphanDelete)
   const fail = (message: string, err?: unknown) => {
     if (strict) {
       throw err instanceof Error ? err : new Error(message)
@@ -421,6 +422,11 @@ export const pushLifeRoutinesToSupabase = async (
       fail('Failed to upsert life routines', upsertError)
       return
     }
+  }
+
+  // Skip orphan deletion during bootstrap (no remote data exists yet)
+  if (skipOrphanDelete) {
+    return
   }
 
   const remoteIds = new Set((remoteIdsData ?? []).map((row) => row.id))

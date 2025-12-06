@@ -929,7 +929,7 @@ function MainApp() {
         return
       }
 
-      // If user hasn't changed and no migration needed, skip alignment
+      // If user hasn't changed, skip alignment
       if (!userChanged) {
         return
       }
@@ -945,64 +945,16 @@ function MainApp() {
         // Another tab is handling alignment
         // Just update tracking - the winning tab will sync data via storage events
         lastAlignedUserIdRef.current = userId
-        
-        // Still need to set the user ID in each module so they know which user to track
-        // but DON'T trigger syncs (they'll get data via storage events from the winning tab)
-        if (typeof window !== 'undefined') {
-          try {
-            window.localStorage.setItem('nc-taskwatch-quicklist-user-id', userId)
-            window.localStorage.setItem('nc-taskwatch-life-routine-user-id', userId)
-            window.localStorage.setItem('nc-taskwatch-session-history-user-id', userId)
-            window.localStorage.setItem('nc-taskwatch-goals-user-id', userId)
-            window.localStorage.setItem('nc-taskwatch-repeating-rules-user-id', userId)
-          } catch {}
-        }
         return
       }
 
       try {
-        let migrated = false
-        try {
-          migrated = await bootstrapGuestDataIfNeeded(userId)
-        } catch (error) {
-          console.error('[bootstrap] failed during alignLocalStoresForUser', error)
-        }
-
         if (userId) {
-          if (migrated) {
-            // Bootstrap cleared guest data, now initialize user data from DB
-            // Clear history/repeating first to prevent stale guest data from syncing
-            if (typeof window !== 'undefined') {
-              try {
-                window.localStorage.removeItem('nc-taskwatch-history')
-                window.localStorage.removeItem('nc-taskwatch-current-session')
-                window.localStorage.removeItem('nc-taskwatch-session-history::__guest__')
-                window.localStorage.removeItem('nc-taskwatch-repeating-rules::__guest__')
-              } catch {}
-            }
-            ensureQuickListUser(userId)
-            ensureLifeRoutineUser(userId)
-            ensureHistoryUser(userId)
-            ensureGoalsUser(userId)
-            await ensureRepeatingRulesUser(userId)
-            // Pre-fetch goals and history from Supabase so calendar renders correctly immediately
-            await Promise.all([
-              syncGoalsSnapshotFromSupabase(),
-              syncHistoryWithSupabase(),
-            ])
-          } else {
-            // User already bootstrapped, just fetch from DB
-            // Don't reset - just ensure user data is loaded
-            ensureQuickListUser(userId)
-            ensureLifeRoutineUser(userId)
-            ensureHistoryUser(userId)
-            ensureGoalsUser(userId)
-            await ensureRepeatingRulesUser(userId)
-            // Pre-fetch goals and history from Supabase so calendar renders correctly immediately
-            await Promise.all([
-              syncGoalsSnapshotFromSupabase(),
-              syncHistoryWithSupabase(),
-            ])
+          // Signed-in user: bootstrap handles everything (migrate if needed, clear, sync)
+          try {
+            await bootstrapGuestDataIfNeeded(userId)
+          } catch (error) {
+            console.error('[bootstrap] failed during alignLocalStoresForUser', error)
           }
         } else {
           // Guest mode - just ensure defaults exist if no data

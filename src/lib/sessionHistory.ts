@@ -1640,10 +1640,19 @@ export const hasRemoteHistory = async (): Promise<boolean> => {
 export const pushAllHistoryToSupabase = async (
   ruleIdMap?: Record<string, string>,
   seedTimestamp?: number,
-  options?: { skipRemoteCheck?: boolean; strict?: boolean },
+  options?: {
+    skipRemoteCheck?: boolean
+    strict?: boolean
+    goalIdMap?: Record<string, string>
+    bucketIdMap?: Record<string, string>
+    taskIdMap?: Record<string, string>
+  },
 ): Promise<void> => {
   const skipRemoteCheck = Boolean(options?.skipRemoteCheck)
   const strict = Boolean(options?.strict)
+  const goalIdMap = options?.goalIdMap ?? {}
+  const bucketIdMap = options?.bucketIdMap ?? {}
+  const taskIdMap = options?.taskIdMap ?? {}
   const fail = (message: string, err?: unknown) => {
     if (strict) {
       throw err instanceof Error ? err : new Error(message)
@@ -1686,9 +1695,22 @@ export const pushAllHistoryToSupabase = async (
     writeHistoryRecords(records)
   }
   const normalizedRecords = sortRecordsForStorage(records).map((record, index) => {
+    // Remap IDs from guest demo IDs to real UUIDs
     let mappedRepeatingId = record.repeatingSessionId
     if (ruleIdMap && record.repeatingSessionId && ruleIdMap[record.repeatingSessionId]) {
       mappedRepeatingId = ruleIdMap[record.repeatingSessionId]
+    }
+    let mappedGoalId = record.goalId
+    if (record.goalId && goalIdMap[record.goalId]) {
+      mappedGoalId = goalIdMap[record.goalId]
+    }
+    let mappedBucketId = record.bucketId
+    if (record.bucketId && bucketIdMap[record.bucketId]) {
+      mappedBucketId = bucketIdMap[record.bucketId]
+    }
+    let mappedTaskId = record.taskId
+    if (record.taskId && taskIdMap[record.taskId]) {
+      mappedTaskId = taskIdMap[record.taskId]
     }
     const createdAt =
       typeof record.createdAt === 'number'
@@ -1700,6 +1722,9 @@ export const pushAllHistoryToSupabase = async (
       ...record,
       createdAt,
       repeatingSessionId: mappedRepeatingId,
+      goalId: mappedGoalId,
+      bucketId: mappedBucketId,
+      taskId: mappedTaskId,
       pendingAction: null,
     }
   })
