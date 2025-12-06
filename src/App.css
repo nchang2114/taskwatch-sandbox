@@ -1840,7 +1840,7 @@ html[data-theme='light'] .shortcuts-panel__footer {
 }
 
 html[data-theme='light'] .settings-panel__sidebar {
-  background: rgba(248, 250, 255, 0.92);
+  background: rgba(245, 247, 252, 0.96);
 }
 
 .settings-panel__sidebar-header {
@@ -2005,6 +2005,33 @@ html[data-theme='light'] .settings-panel__group {
   color: var(--text-primary);
   font-size: 0.9rem;
   cursor: pointer;
+}
+
+.settings-panel__toggle-wrapper {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.settings-panel__toggle-label {
+  font-size: 0.875rem;
+  color: var(--text-secondary);
+}
+
+.settings-panel__text-toggle {
+  padding: 0.5rem 1rem;
+  border: 1px solid rgba(148, 164, 255, 0.4);
+  border-radius: 8px;
+  background: transparent;
+  color: var(--text-primary);
+  font-size: 0.9rem;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.settings-panel__text-toggle:hover {
+  background: rgba(148, 164, 255, 0.15);
+  border-color: rgba(148, 164, 255, 0.6);
 }
 
 .settings-panel__row--actions .settings-panel__row-actions {

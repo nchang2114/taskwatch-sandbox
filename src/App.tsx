@@ -1859,9 +1859,15 @@ const nextThemeLabel = theme === 'dark' ? 'light' : 'dark'
             <div className="settings-panel__row">
               <div>
                 <p className="settings-panel__row-title">Appearance</p>
-                <p className="settings-panel__row-subtitle">Match Taskwatch with your OS preference.</p>
+                <p className="settings-panel__row-subtitle">Choose between light and dark mode.</p>
               </div>
-              <button type="button" className="settings-panel__chip">System ▾</button>
+              <button
+                type="button"
+                className="settings-panel__text-toggle"
+                onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')}
+              >
+                {theme === 'dark' ? '☾ Dark' : '☀ Light'}
+              </button>
             </div>
             <div className="settings-panel__row">
               <div>
