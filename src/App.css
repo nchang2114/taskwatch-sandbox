@@ -1283,6 +1283,19 @@ html[data-theme='light'] .nav-links--drawer {
   opacity: 0.8;
 }
 
+.profile-menu__link-action--danger {
+  color: #ff6b6b;
+}
+
+.profile-menu__link-action--danger:hover,
+.profile-menu__link-action--danger:focus-visible {
+  background: rgba(255, 107, 107, 0.12);
+}
+
+.profile-menu__link-help-wrapper {
+  position: relative;
+}
+
 .profile-help {
   position: relative;
 }

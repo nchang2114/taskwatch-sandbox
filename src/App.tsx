@@ -214,6 +214,11 @@ const HELP_MENU_ITEMS: Array<{ id: string; label: string; icon: ReactNode; url?:
   },
 ]
 
+// Guest help menu - excludes release notes and terms & policies (shown separately in guest menu)
+const GUEST_HELP_MENU_ITEMS = HELP_MENU_ITEMS.filter(
+  (item) => item.id !== 'release-notes' && item.id !== 'terms'
+)
+
 const SETTINGS_SECTIONS: Array<{ id: string; label: string; description?: string; icon: ReactNode }> = [
   {
     id: 'general',
@@ -1875,62 +1880,37 @@ const nextThemeLabel = theme === 'dark' ? 'light' : 'dark'
           </div>
         </div>
         <hr className="profile-menu__divider" />
-        <div className="profile-menu__section profile-menu__section--settings">
-          <div className="profile-menu__section-label">Settings</div>
-          <div className="profile-menu__actions">
-            <button type="button" className="profile-menu__action" role="menuitem" onClick={() => openSettingsPanel()}>
-              <span className="profile-menu__action-title">Settings</span>
-              <span className="profile-menu__action-subtitle">Theme, focus tools, and surfaces</span>
-            </button>
-            <button type="button" className="profile-menu__action" role="menuitem" onClick={() => openSettingsPanel('account')}>
-              <span className="profile-menu__action-title">Account</span>
-              <span className="profile-menu__action-subtitle">
-                Email, Subscription, Notifications, Apps &amp; Connectors, Data Controls
-              </span>
-            </button>
-            <button
-              type="button"
-              className="profile-menu__action profile-menu__action--accent"
-              role="menuitem"
-              onClick={closeProfileMenu}
-            >
-              <span className="profile-menu__action-title">Upgrade your plan…</span>
-            </button>
-          </div>
-        </div>
-        <hr className="profile-menu__divider" />
-        <div className="profile-menu__section profile-menu__section--help">
-          <div className="profile-menu__section-label">Help</div>
-          <div className="profile-help">
-            <button
-              type="button"
-              className="profile-help-button"
-              aria-haspopup="menu"
-              aria-expanded={profileHelpMenuOpen}
-              aria-controls={profileHelpMenuId}
-              onClick={() => setProfileHelpMenuOpen((open) => !open)}
-              ref={profileHelpButtonRef}
-            >
-              <span className="profile-help-button__icon" aria-hidden="true">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
-                  <circle cx="12" cy="12" r="8" />
-                  <path d="M9.5 9.5a2.5 2.5 0 1 1 3 2.4c-.6.3-1 .9-1 1.6v.5" />
-                  <circle cx="12" cy="17" r="0.5" fill="currentColor" stroke="none" />
-                </svg>
-              </span>
-              <span className="profile-help-button__label">Help</span>
-              <svg
-                className="profile-help-button__chevron"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="1.6"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                aria-hidden="true"
-              >
-                <path d="M10 8l4 4-4 4" />
+        <div className="profile-menu__section profile-menu__section--links">
+          <button type="button" className="profile-menu__link-action" role="menuitem" onClick={() => openSettingsPanel()}>
+            <svg className="profile-menu__link-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
+              <circle cx="12" cy="12" r="3" />
+              <path d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42" />
+            </svg>
+            <span>Settings</span>
+          </button>
+          <button type="button" className="profile-menu__link-action" role="menuitem" onClick={() => openSettingsPanel('account')}>
+            <svg className="profile-menu__link-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
+              <circle cx="12" cy="9" r="3.4" />
+              <path d="M6 18c.8-3.1 3.4-4.5 6-4.5s5.2 1.4 6 4.5" />
+            </svg>
+            <span>Account</span>
+          </button>
+          <button type="button" className="profile-menu__link-action" role="menuitem" onClick={() => window.open('https://genzero.vercel.app/taskwatch/pricing', '_blank', 'noopener,noreferrer')}>
+            <svg className="profile-menu__link-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
+              <circle cx="12" cy="12" r="8" />
+              <path d="M12 8v4l2.5 1.5" />
+              <path d="M16 16l2 2" />
+            </svg>
+            <span>Upgrade your plan</span>
+          </button>
+          <div className="profile-menu__link-help-wrapper">
+            <button type="button" className="profile-menu__link-action" role="menuitem" onClick={() => setProfileHelpMenuOpen((open) => !open)} ref={profileHelpButtonRef}>
+              <svg className="profile-menu__link-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
+                <circle cx="12" cy="12" r="8" />
+                <path d="M9.5 9.5a2.5 2.5 0 1 1 3 2.4c-.6.3-1 .9-1 1.6v.5" />
+                <circle cx="12" cy="17" r="0.5" fill="currentColor" stroke="none" />
               </svg>
+              <span>Help</span>
             </button>
             {profileHelpMenuOpen ? (
               <div className="profile-help-menu" role="menu" id={profileHelpMenuId} ref={profileHelpMenuRef}>
@@ -1951,16 +1931,22 @@ const nextThemeLabel = theme === 'dark' ? 'light' : 'dark'
               </div>
             ) : null}
           </div>
-          <div className="profile-menu__actions">
-            <button
-              type="button"
-              className="profile-menu__action profile-menu__action--danger"
-              role="menuitem"
-              onClick={handleLogOut}
-            >
-              <span className="profile-menu__action-title">Log out…</span>
-            </button>
-          </div>
+        </div>
+        <hr className="profile-menu__divider" />
+        <div className="profile-menu__section profile-menu__section--links">
+          <button
+            type="button"
+            className="profile-menu__link-action profile-menu__link-action--danger"
+            role="menuitem"
+            onClick={handleLogOut}
+          >
+            <svg className="profile-menu__link-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" />
+              <polyline points="16 17 21 12 16 7" />
+              <line x1="21" y1="12" x2="9" y2="12" />
+            </svg>
+            <span>Log out</span>
+          </button>
         </div>
       </>
     )
@@ -2034,7 +2020,7 @@ const nextThemeLabel = theme === 'dark' ? 'light' : 'dark'
           </button>
           {profileHelpMenuOpen ? (
             <div className="profile-help-menu profile-help-menu--guest" role="menu" id={profileHelpMenuId} ref={profileHelpMenuRef}>
-              {HELP_MENU_ITEMS.map((item) => (
+              {GUEST_HELP_MENU_ITEMS.map((item) => (
                 <button
                   key={item.id}
                   type="button"
