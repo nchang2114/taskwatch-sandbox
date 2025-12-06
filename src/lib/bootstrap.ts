@@ -1,6 +1,6 @@
 import { supabase, ensureSingleUserSession } from './supabaseClient'
 import type { QuickItem } from './quickList'
-import { ensureQuickListRemoteStructures, generateUuid } from './quickListRemote'
+import { ensureQuickListRemoteStructures, generateUuid, syncQuickListFromSupabase } from './quickListRemote'
 import {
   createTask,
   updateTaskNotes,
@@ -39,6 +39,7 @@ export const runAllSyncs = async (): Promise<void> => {
     syncLifeRoutinesWithSupabase(),
     syncRepeatingRulesFromSupabase(),
     syncSnapbackTriggersFromSupabase(),
+    syncQuickListFromSupabase(),
   ])
   console.log('[bootstrap] All syncs complete')
 }
