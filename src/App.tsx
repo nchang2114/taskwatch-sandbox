@@ -1870,13 +1870,12 @@ const nextThemeLabel = theme === 'dark' ? 'light' : 'dark'
           </div>
         </div>
         <hr className="profile-menu__divider" />
-        <div className="profile-menu__section profile-menu__section--sync">
-          <div className="profile-menu__section-label">Sync status</div>
-          <div className={`profile-menu__status profile-menu__status--${syncStatus}`} role="status" aria-live="polite">
-            <span className="profile-menu__status-icon" aria-hidden="true">
+        <div className="profile-menu__section profile-menu__section--links">
+          <div className={`profile-menu__link-status profile-menu__link-status--${syncStatus}`} role="status" aria-live="polite">
+            <span className="profile-menu__link-status-icon" aria-hidden="true">
               {syncStatusCopy.icon}
             </span>
-            <span className="profile-menu__status-text">{syncStatusCopy.label}</span>
+            <span>{syncStatusCopy.label}</span>
           </div>
         </div>
         <hr className="profile-menu__divider" />
