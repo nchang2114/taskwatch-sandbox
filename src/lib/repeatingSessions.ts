@@ -38,7 +38,7 @@ export const REPEATING_RULES_ACTIVATION_KEY = 'nc-taskwatch-repeating-activation
 // We also persist a local end-boundary override to ensure offline correctness.
 export const REPEATING_RULES_END_KEY = 'nc-taskwatch-repeating-end-map'
 const REPEATING_RULES_USER_KEY = 'nc-taskwatch-repeating-user'
-const REPEATING_RULES_GUEST_USER_ID = '__guest__'
+export const REPEATING_RULES_GUEST_USER_ID = '__guest__'
 
 const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
 export const isRepeatingRuleId = (value: string | undefined | null): value is string =>

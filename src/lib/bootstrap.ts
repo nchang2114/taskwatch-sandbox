@@ -17,7 +17,7 @@ import { GOALS_GUEST_USER_ID, GOALS_SNAPSHOT_STORAGE_KEY, createGoalsSnapshot, s
 import { QUICK_LIST_GOAL_NAME } from './quickListRemote'
 import { DEFAULT_SURFACE_STYLE, ensureServerBucketStyle } from './surfaceStyles'
 import { pushSnapbackTriggersToSupabase, syncSnapbackTriggersFromSupabase, type SnapbackTriggerPayload } from './snapbackApi'
-import { pushRepeatingRulesToSupabase, readLocalRepeatingRules, syncRepeatingRulesFromSupabase } from './repeatingSessions'
+import { pushRepeatingRulesToSupabase, syncRepeatingRulesFromSupabase, REPEATING_RULES_STORAGE_KEY, REPEATING_RULES_GUEST_USER_ID } from './repeatingSessions'
 import { pushAllHistoryToSupabase, syncHistoryWithSupabase, HISTORY_STORAGE_KEY, HISTORY_GUEST_USER_ID, sanitizeHistoryRecords } from './sessionHistory'
 
 // Type for ID mappings returned from migrations
@@ -469,11 +469,29 @@ const migrateGuestData = async (): Promise<void> => {
   await pushMilestonesToSupabase(goalIdMap)
 
   // 3. Migrate repeating rules and get rule ID map
-  const rules = readLocalRepeatingRules()
+  // Read directly from the guest key (not the current user's key)
+  const guestRulesKey = `${REPEATING_RULES_STORAGE_KEY}::${REPEATING_RULES_GUEST_USER_ID}`
+  const guestRulesRaw = typeof window !== 'undefined'
+    ? window.localStorage.getItem(guestRulesKey)
+    : null
+  
+  let rules: { id: string; [key: string]: unknown }[] = []
+  if (guestRulesRaw) {
+    try {
+      const parsed = JSON.parse(guestRulesRaw)
+      if (Array.isArray(parsed)) {
+        rules = parsed.filter((r: unknown) => r && typeof r === 'object' && typeof (r as any).id === 'string')
+      }
+      console.log('[bootstrap] Found', rules.length, 'guest repeating rules to migrate')
+    } catch {
+      console.warn('[bootstrap] Could not parse guest repeating rules')
+    }
+  }
+  
   let ruleIdMap: Record<string, string> = {}
   if (rules.length > 0) {
     console.log('[bootstrap] Migrating', rules.length, 'repeating rules')
-    ruleIdMap = await pushRepeatingRulesToSupabase(rules, { strict: true })
+    ruleIdMap = await pushRepeatingRulesToSupabase(rules as any, { strict: true })
     console.log('[bootstrap] Repeating rules migrated. ID remaps:', Object.keys(ruleIdMap).length)
   }
 
