@@ -716,7 +716,9 @@ function MainApp() {
         try {
           const guestRoutines = window.localStorage.getItem('nc-taskwatch-life-routines::__guest__')
           const guestQuickList = window.localStorage.getItem('nc-taskwatch-quicklist::__guest__')
-          const guestGoals = window.localStorage.getItem('nc-taskwatch-goals-snapshot::__guest__')
+          // Goals use a different storage pattern: snapshot at 'nc-taskwatch-goals-snapshot'
+          // with user ID stored separately at 'nc-taskwatch-goals-user'
+          const guestGoals = window.localStorage.getItem('nc-taskwatch-goals-snapshot')
           // Don't snapshot history or repeating rules - they have stale references
           
           console.log('[signup] Snapshotting guest data:', {
