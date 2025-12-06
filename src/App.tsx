@@ -15,7 +15,7 @@ import { ensureQuickListUser } from './lib/quickList'
 import { ensureLifeRoutineUser } from './lib/lifeRoutines'
 import { ensureHistoryUser, syncHistoryWithSupabase } from './lib/sessionHistory'
 import { ensureRepeatingRulesUser } from './lib/repeatingSessions'
-import { bootstrapGuestDataIfNeeded } from './lib/bootstrap'
+import { bootstrapGuestDataIfNeeded, clearAllLocalStorage } from './lib/bootstrap'
 import { ensureGoalsUser, syncGoalsSnapshotFromSupabase } from './lib/goalsSync'
 
 type Theme = 'light' | 'dark'
@@ -1240,75 +1240,8 @@ function MainApp() {
         window.localStorage.removeItem(AUTH_PROFILE_STORAGE_KEY)
       } catch {}
       
-      // Clear all user/guest data before reload for fresh defaults
-      try {
-        // Clear user ID tracking keys (forces guest mode on reload)
-        window.localStorage.removeItem('nc-taskwatch-life-routine-user-id')
-        window.localStorage.removeItem('nc-taskwatch-life-routines-user') // Alternative key
-        window.localStorage.removeItem('nc-taskwatch-quicklist-user-id')
-        window.localStorage.removeItem('nc-taskwatch-quick-list-user') // Alternative key
-        window.localStorage.removeItem('nc-taskwatch-history-user') // Correct key for history user
-        window.localStorage.removeItem('nc-taskwatch-goals-user-id')
-        window.localStorage.removeItem('nc-taskwatch-repeating-user') // Correct key for repeating rules user
-        
-        // Clear guest keys (both old and new format)
-        window.localStorage.removeItem('nc-taskwatch-life-routines::__guest__')
-        window.localStorage.removeItem('nc-taskwatch-life-routines-v1::__guest__')
-        window.localStorage.removeItem('nc-taskwatch-quicklist::__guest__')
-        window.localStorage.removeItem('nc-taskwatch-session-history::__guest__')
-        window.localStorage.removeItem('nc-taskwatch-repeating-rules::__guest__')
-        window.localStorage.removeItem('nc-taskwatch-goals-snapshot::__guest__')
-        
-        // Clear snapback guest data
-        window.localStorage.removeItem('nc-taskwatch-local-snapback-triggers')
-        window.localStorage.removeItem('nc-taskwatch-local-snap-plans')
-        
-        // Clear non-suffixed data keys (goals, tasks, history, etc.)
-        window.localStorage.removeItem('nc-taskwatch-goals-snapshot')
-        window.localStorage.removeItem('nc-taskwatch-quick-list-v1')
-        window.localStorage.removeItem('nc-taskwatch-history')
-        window.localStorage.removeItem('nc-taskwatch-repeating-rules')
-        window.localStorage.removeItem('nc-taskwatch-current-session')
-        window.localStorage.removeItem('nc-taskwatch-task-details-v1')
-        window.localStorage.removeItem('nc-taskwatch-flags')
-        
-        // Clear focus task state so defaults are shown on reload
-        window.localStorage.removeItem('nc-taskwatch-current-task')
-        window.localStorage.removeItem('nc-taskwatch-current-task-source')
-        window.localStorage.removeItem('nc-taskwatch-stopwatch-v1')
-        
-        // Clear app timezone override so it resets to system default on next load
-        window.localStorage.removeItem('taskwatch_app_timezone')
-        
-        // Clear last auth user tracking (used to detect sign-in/sign-out across page loads)
-        window.localStorage.removeItem('nc-taskwatch-last-auth-user-id')
-        
-        // Clear alignment tracking so next sign-in runs fresh alignment
-        window.localStorage.removeItem('nc-taskwatch-align-complete')
-        window.localStorage.removeItem('nc-taskwatch-align-lock')
-        
-        // Clear ALL goals-related keys (for any user)
-        const allKeys = Object.keys(window.localStorage)
-        allKeys.forEach(key => {
-          if (key.includes('goals-snapshot') || key.includes('task-details')) {
-            try { window.localStorage.removeItem(key) } catch {}
-          }
-        })
-        
-        // Clear ALL user-specific life routine keys (both formats)
-        const keysToRemove: string[] = []
-        for (let i = 0; i < window.localStorage.length; i++) {
-          const key = window.localStorage.key(i)
-          if (key && (
-            (key.startsWith('nc-taskwatch-life-routines::') && key !== 'nc-taskwatch-life-routines::__guest__') ||
-            (key.startsWith('nc-taskwatch-life-routines-v1::') && key !== 'nc-taskwatch-life-routines-v1::__guest__') ||
-            (key.startsWith('nc-taskwatch-repeating-rules::') && key !== 'nc-taskwatch-repeating-rules::__guest__')
-          )) {
-            keysToRemove.push(key)
-          }
-        }
-        keysToRemove.forEach(key => window.localStorage.removeItem(key))
-      } catch {}
+      // Clear all localStorage data for a fresh guest experience
+      clearAllLocalStorage()
       
       // Immediately reload - fresh page will have clean guest defaults
       window.location.reload()

@@ -44,8 +44,34 @@ export const runAllSyncs = async (): Promise<void> => {
 }
 
 /**
- * Clears all localStorage data. Called during bootstrap to ensure a clean slate
- * before syncing user data from the database.
+ * Clears only app data from localStorage, preserving auth tokens.
+ * All app keys start with 'nc-taskwatch-' prefix.
+ * Called during new user bootstrap to wipe guest/demo data before syncing.
+ */
+export const clearAppDataFromLocalStorage = (): void => {
+  if (typeof window === 'undefined') return
+  try {
+    console.log('[bootstrap] Clearing app data from localStorage (preserving auth)')
+    const keysToRemove: string[] = []
+    for (let i = 0; i < window.localStorage.length; i++) {
+      const key = window.localStorage.key(i)
+      if (key && key.startsWith('nc-taskwatch-')) {
+        keysToRemove.push(key)
+      }
+    }
+    keysToRemove.forEach((key) => {
+      window.localStorage.removeItem(key)
+    })
+    console.log(`[bootstrap] Cleared ${keysToRemove.length} app data keys`)
+  } catch (e) {
+    console.warn('[bootstrap] Failed to clear app data:', e)
+  }
+}
+
+/**
+ * Clears ALL localStorage data including auth tokens.
+ * Use this ONLY for sign-out (when you want to fully clear everything).
+ * For bootstrap/sync operations, use clearAppDataFromLocalStorage() instead.
  */
 export const clearAllLocalStorage = (): void => {
   if (typeof window === 'undefined') return
@@ -646,19 +672,17 @@ export const bootstrapGuestDataIfNeeded = async (userId: string | null | undefin
     const alreadyBootstrapped = Boolean(data?.bootstrap_completed)
     
     if (alreadyBootstrapped) {
-      // User already bootstrapped (returning user or another tab completed it)
-      // Clear localStorage and sync fresh data from DB
+      // User already bootstrapped (returning user on page refresh)
+      // Just sync to pick up any changes from other devices - don't clear anything
       console.log('[bootstrap] User already bootstrapped, syncing from DB')
-      clearAllLocalStorage()
       await runAllSyncs()
       return false
     }
     
     // New user: migrate guest data first
     if (!acquireBootstrapLock(userId)) {
-      // Another tab is handling bootstrap, just clear and sync
+      // Another tab is handling bootstrap, just sync
       console.log('[bootstrap] Another tab is bootstrapping, syncing from DB')
-      clearAllLocalStorage()
       await runAllSyncs()
       return false
     }
@@ -676,9 +700,9 @@ export const bootstrapGuestDataIfNeeded = async (userId: string | null | undefin
         throw updateError
       }
       
-      // Clear localStorage and sync fresh data from DB
-      console.log('[bootstrap] Migration complete, syncing from DB')
-      clearAllLocalStorage()
+      // Clear app data (not auth!) and sync fresh data from DB
+      console.log('[bootstrap] Migration complete, clearing app data and syncing from DB')
+      clearAppDataFromLocalStorage()
       await runAllSyncs()
       
       return true
