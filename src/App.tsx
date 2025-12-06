@@ -323,6 +323,7 @@ function MainApp() {
   const [authVerifyResending, setAuthVerifyResending] = useState(false)
   const [authVerifyStatus, setAuthVerifyStatus] = useState<string | null>(null)
   const [settingsOpen, setSettingsOpen] = useState(false)
+  const [featureModalOpen, setFeatureModalOpen] = useState(false)
   const [isSigningOut, setIsSigningOut] = useState(false)
   // Only show "Signing you in..." screen when returning from OAuth redirect
   const [isSigningIn, setIsSigningIn] = useState(() => {
@@ -416,11 +417,22 @@ function MainApp() {
     previousProfileRef.current = userProfile ?? null
   }, [userProfile])
 
+  const featureModalOpenRef = useRef(false)
+  
+  // Keep ref in sync with state so event handlers can access current value
+  useEffect(() => {
+    featureModalOpenRef.current = featureModalOpen
+  }, [featureModalOpen])
+
   useEffect(() => {
     if (!profileMenuOpen) {
       return
     }
     const handlePointerDown = (event: PointerEvent) => {
+      // Don't close profile menu if feature modal is open
+      if (featureModalOpenRef.current) {
+        return
+      }
       const target = event.target as Node | null
       if (profileMenuRef.current?.contains(target)) {
         return
@@ -431,6 +443,10 @@ function MainApp() {
       closeProfileMenu()
     }
     const handleKeyDown = (event: KeyboardEvent) => {
+      // Don't close profile menu via Escape if feature modal is open
+      if (featureModalOpenRef.current) {
+        return
+      }
       if (event.key === 'Escape') {
         closeProfileMenu()
         window.setTimeout(() => {
@@ -445,6 +461,8 @@ function MainApp() {
       document.removeEventListener('keydown', handleKeyDown)
     }
   }, [profileMenuOpen, closeProfileMenu])
+
+  const featureModalRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
     if (!profileHelpMenuOpen) {
@@ -1337,8 +1355,16 @@ function MainApp() {
     }
   }, [closeProfileMenu, setActiveTab, setIsSigningOut])
 
-  const handleHelpMenuItemSelect = useCallback((url?: string) => {
+  const handleHelpMenuItemSelect = useCallback((itemId: string, url?: string) => {
+    // Always close the help menu
     setProfileHelpMenuOpen(false)
+    // Items that show feature not implemented modal
+    const unimplementedItems = ['help-center', 'report-bug', 'download-apps']
+    if (unimplementedItems.includes(itemId)) {
+      // Show feature modal (profile menu stays open behind it)
+      setFeatureModalOpen(true)
+      return
+    }
     if (url) {
       window.open(url, '_blank', 'noopener,noreferrer')
     }
@@ -1917,7 +1943,7 @@ const nextThemeLabel = theme === 'dark' ? 'light' : 'dark'
                     type="button"
                     role="menuitem"
                     className="profile-help-menu__item"
-                    onClick={() => handleHelpMenuItemSelect(item.url)}
+                    onClick={() => handleHelpMenuItemSelect(item.id, item.url)}
                   >
                     <span className="profile-help-menu__item-icon" aria-hidden="true">
                       {item.icon}
@@ -2021,7 +2047,7 @@ const nextThemeLabel = theme === 'dark' ? 'light' : 'dark'
                   type="button"
                   role="menuitem"
                   className="profile-help-menu__item"
-                  onClick={() => handleHelpMenuItemSelect(item.url)}
+                  onClick={() => handleHelpMenuItemSelect(item.id, item.url)}
                 >
                   <span className="profile-help-menu__item-icon" aria-hidden="true">
                     {item.icon}
@@ -2254,6 +2280,20 @@ const nextThemeLabel = theme === 'dark' ? 'light' : 'dark'
               </nav>
             </aside>
             <section className="settings-panel__content">{renderSettingsContent()}</section>
+          </div>
+        </div>
+      ) : null}
+      {featureModalOpen ? (
+        <div className="feature-modal-overlay" role="dialog" aria-modal="true" aria-label="Feature not implemented" onClick={() => setFeatureModalOpen(false)}>
+          <div className="feature-modal" ref={featureModalRef} onClick={(e) => e.stopPropagation()}>
+            <div className="feature-modal__icon" aria-hidden="true">
+              🐦
+            </div>
+            <h2 className="feature-modal__title">Feature not implemented yet</h2>
+            <p className="feature-modal__text">Contact us via pigeon for any suggestions/inquiries.</p>
+            <button type="button" className="feature-modal__close" onClick={() => setFeatureModalOpen(false)}>
+              Got it
+            </button>
           </div>
         </div>
       ) : null}

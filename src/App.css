@@ -1516,6 +1516,88 @@ html[data-theme='light'] .profile-help-menu {
   z-index: 60;
 }
 
+/* Feature not implemented modal */
+.feature-modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(2, 5, 16, 0.68);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1.5rem;
+  z-index: 70;
+}
+
+html[data-theme='light'] .feature-modal-overlay {
+  background: rgba(80, 98, 168, 0.32);
+}
+
+.feature-modal {
+  background: var(--profile-menu-bg);
+  border: 1px solid rgba(148, 164, 255, 0.35);
+  border-radius: 1.25rem;
+  box-shadow: 0 30px 60px rgba(6, 10, 40, 0.5);
+  padding: 2rem 2.5rem;
+  text-align: center;
+  max-width: 340px;
+  width: 100%;
+}
+
+html[data-theme='light'] .feature-modal {
+  box-shadow: 0 30px 60px rgba(80, 98, 168, 0.25);
+}
+
+.feature-modal__icon {
+  font-size: 3rem;
+  margin-bottom: 1rem;
+}
+
+.feature-modal__title {
+  font-size: 1rem;
+  font-weight: 600;
+  color: var(--text-primary);
+  margin: 0 0 0.5rem;
+  white-space: nowrap;
+}
+
+.feature-modal__text {
+  font-size: 0.95rem;
+  color: var(--text-secondary);
+  margin: 0 0 1.5rem;
+  line-height: 1.5;
+}
+
+.feature-modal__close {
+  background: rgba(110, 126, 255, 0.18);
+  border: 1px solid rgba(148, 164, 255, 0.35);
+  border-radius: 0.6rem;
+  color: var(--text-primary);
+  font-size: 0.95rem;
+  font-weight: 600;
+  padding: 0.7rem 1.75rem;
+  cursor: pointer;
+  transition: background 160ms ease, border-color 160ms ease, transform 120ms ease;
+}
+
+.feature-modal__close:hover {
+  background: rgba(110, 126, 255, 0.32);
+  border-color: rgba(148, 164, 255, 0.5);
+}
+
+html[data-theme='light'] .feature-modal__close {
+  background: rgba(110, 126, 255, 0.12);
+  border-color: rgba(110, 126, 255, 0.3);
+}
+
+html[data-theme='light'] .feature-modal__close:hover {
+  background: rgba(110, 126, 255, 0.22);
+  border-color: rgba(110, 126, 255, 0.5);
+}
+
+.feature-modal__close:active {
+  transform: scale(0.97);
+}
+
 .settings-panel {
   width: min(760px, 100%);
   height: clamp(420px, 65vh, 560px);
