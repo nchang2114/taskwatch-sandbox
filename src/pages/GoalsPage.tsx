@@ -63,8 +63,6 @@ import {
   publishGoalsSnapshot,
   readStoredGoalsSnapshot,
   subscribeToGoalsSnapshot,
-  readGoalsSnapshotOwner,
-  GOALS_GUEST_USER_ID,
   type GoalSnapshot,
   GOALS_SNAPSHOT_REQUEST_EVENT,
 } from '../lib/goalsSync'
@@ -5610,10 +5608,7 @@ export default function GoalsPage(): ReactElement {
       }))
       return stamped
     }
-    // Only show demo goals for guest users - authenticated users start with empty goals
-    const owner = readGoalsSnapshotOwner()
-    const isGuest = !owner || owner === GOALS_GUEST_USER_ID
-    return isGuest ? DEFAULT_GOALS : []
+    return DEFAULT_GOALS
   })
   const latestGoalsRef = useRef(goals)
   // Drag cleanup refs (must be at top level for global cleanup useEffect)

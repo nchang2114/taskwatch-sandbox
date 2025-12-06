@@ -316,15 +316,14 @@ export const ensureGoalsUser = (
   if (current === normalized) {
     return
   }
+  const migratingFromGuest = current === GOALS_GUEST_USER_ID && normalized !== GOALS_GUEST_USER_ID
   setStoredGoalsSnapshotUserId(normalized)
   if (normalized === GOALS_GUEST_USER_ID) {
     if (current !== GOALS_GUEST_USER_ID && !options?.suppressGuestSnapshot) {
       const snapshot = getGuestSnapshot()
       publishGoalsSnapshot(snapshot)
     }
-  } else {
-    // Always clear localStorage when switching to authenticated user
-    // Goals will be fetched from Supabase via syncGoalsSnapshotFromSupabase
+  } else if (!migratingFromGuest) {
     try {
       window.localStorage.removeItem(GOALS_SNAPSHOT_STORAGE_KEY)
     } catch {}

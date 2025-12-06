@@ -52,7 +52,7 @@ const TAB_PANEL_IDS: Record<TabKey, string> = {
   goals: 'tab-panel-goals',
   focus: 'tab-panel-focus',
   reflection: 'tab-panel-reflection',
-}
+} 
 
 const ENABLE_TAB_SWIPE = false
 
@@ -716,9 +716,7 @@ function MainApp() {
         try {
           const guestRoutines = window.localStorage.getItem('nc-taskwatch-life-routines::__guest__')
           const guestQuickList = window.localStorage.getItem('nc-taskwatch-quicklist::__guest__')
-          // Goals use a different storage pattern: snapshot at 'nc-taskwatch-goals-snapshot'
-          // with user ID stored separately at 'nc-taskwatch-goals-user'
-          const guestGoals = window.localStorage.getItem('nc-taskwatch-goals-snapshot')
+          const guestGoals = window.localStorage.getItem('nc-taskwatch-goals-snapshot::__guest__')
           // Don't snapshot history or repeating rules - they have stale references
           
           console.log('[signup] Snapshotting guest data:', {
