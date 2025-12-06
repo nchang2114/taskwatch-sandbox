@@ -2311,13 +2311,7 @@ const nextThemeLabel = theme === 'dark' ? 'light' : 'dark'
   }
 
   if (isSigningIn) {
-    return (
-      <div className="app-loading">
-        <div className="app-loading__content">
-          <p className="app-loading__title">Signing you in...</p>
-        </div>
-      </div>
-    )
+    return <SignInScreen />
   }
 
   return (
@@ -2928,6 +2922,17 @@ function SignOutScreen(): React.ReactElement {
       <div className="auth-callback-panel">
         <p className="auth-callback-title">Signing you out…</p>
         <p className="auth-callback-text">Hang tight while we wrap things up.</p>
+      </div>
+    </div>
+  )
+}
+
+function SignInScreen(): React.ReactElement {
+  return (
+    <div className="auth-callback-screen">
+      <div className="auth-callback-panel">
+        <p className="auth-callback-title">Signing you in…</p>
+        <p className="auth-callback-text">Hang tight while we finish connecting your account.</p>
       </div>
     </div>
   )
