@@ -527,6 +527,11 @@ export const syncLifeRoutinesWithSupabase = async (): Promise<LifeRoutineConfig[
   if (!session) {
     return null
   }
+  
+  // Set user ID marker before any storage operations
+  // (important after localStorage.clear() during bootstrap)
+  setStoredLifeRoutineUserId(session.user.id)
+  
   // Default to preferring the remote snapshot. You can opt out by setting
   // VITE_PREFER_REMOTE_LIFE_ROUTINES=false in .env.local.
   const preferRemoteEnv = String((import.meta as any)?.env?.VITE_PREFER_REMOTE_LIFE_ROUTINES ?? 'true')
