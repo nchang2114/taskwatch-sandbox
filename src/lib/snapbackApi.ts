@@ -39,14 +39,14 @@ export async function getOrCreateTriggerByName(trigger_name: string): Promise<Db
   }
   
   // First try to find existing trigger
-  const { data: existing, error: findError } = await supabase
+  const { data: existing } = await supabase
     .from('snapback_overview')
     .select('id, user_id, trigger_name, cue_text, deconstruction_text, plan_text, sort_index, created_at, updated_at')
     .eq('user_id', session.user.id)
     .eq('trigger_name', trigger_name)
-    .single()
+    .maybeSingle()
   
-  if (existing && !findError) {
+  if (existing) {
     return existing as DbSnapbackOverview
   }
   
