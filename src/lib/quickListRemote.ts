@@ -101,6 +101,7 @@ export async function ensureQuickListRemoteStructures(): Promise<{ goalId: strin
           sort_index: 10_000_000,
           starred: false,
           goal_archive: true,
+          milestones_shown: false,
         }
         const { error: goalInsertError } = await supabase.from('goals').insert(goalPayload)
         if (goalInsertError) {
