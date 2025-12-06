@@ -45,17 +45,22 @@ export const runAllSyncs = async (): Promise<void> => {
 
 /**
  * Clears only app data from localStorage, preserving auth tokens.
- * All app keys start with 'nc-taskwatch-' prefix.
+ * All app keys start with 'nc-taskwatch-' prefix, but we exclude auth keys.
  * Called during new user bootstrap to wipe guest/demo data before syncing.
  */
 export const clearAppDataFromLocalStorage = (): void => {
   if (typeof window === 'undefined') return
+  // Keys to preserve (auth-related)
+  const AUTH_KEYS_TO_PRESERVE = [
+    'nc-taskwatch-supabase-session-v1',
+    'nc-taskwatch-last-auth-user-id',
+  ]
   try {
     console.log('[bootstrap] Clearing app data from localStorage (preserving auth)')
     const keysToRemove: string[] = []
     for (let i = 0; i < window.localStorage.length; i++) {
       const key = window.localStorage.key(i)
-      if (key && key.startsWith('nc-taskwatch-')) {
+      if (key && key.startsWith('nc-taskwatch-') && !AUTH_KEYS_TO_PRESERVE.includes(key)) {
         keysToRemove.push(key)
       }
     }
