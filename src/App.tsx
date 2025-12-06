@@ -1881,14 +1881,7 @@ const nextThemeLabel = theme === 'dark' ? 'light' : 'dark'
                 <p className="settings-panel__row-title">Time format</p>
                 <p className="settings-panel__row-subtitle">Choose 12-hour or 24-hour clock.</p>
               </div>
-              <button type="button" className="settings-panel__chip">12h ▾</button>
-            </div>
-            <div className="settings-panel__row">
-              <div>
-                <p className="settings-panel__row-title">Week start</p>
-                <p className="settings-panel__row-subtitle">First day of the week.</p>
-              </div>
-              <button type="button" className="settings-panel__chip">Sunday ▾</button>
+              <button type="button" className="settings-panel__text-toggle">12h</button>
             </div>
             <div className="settings-panel__row">
               <div>
@@ -1930,7 +1923,7 @@ const nextThemeLabel = theme === 'dark' ? 'light' : 'dark'
                 <p className="settings-panel__row-title">Show milliseconds on timers</p>
                 <p className="settings-panel__row-subtitle">Display milliseconds for precision timing.</p>
               </div>
-              <button type="button" className="settings-panel__chip">Off ▾</button>
+              <button type="button" className="settings-panel__text-toggle">Off</button>
             </div>
           </div>
         </>
@@ -1946,6 +1939,13 @@ const nextThemeLabel = theme === 'dark' ? 'light' : 'dark'
             </div>
           </header>
           <div className="settings-panel__group">
+            <div className="settings-panel__row">
+              <div>
+                <p className="settings-panel__row-title">Week start</p>
+                <p className="settings-panel__row-subtitle">First day of the week.</p>
+              </div>
+              <button type="button" className="settings-panel__chip">Sunday ▾</button>
+            </div>
             <div className="settings-panel__row">
               <div>
                 <p className="settings-panel__row-title">Default calendar view</p>
@@ -1979,21 +1979,21 @@ const nextThemeLabel = theme === 'dark' ? 'light' : 'dark'
                 <p className="settings-panel__row-title">Session reminders</p>
                 <p className="settings-panel__row-subtitle">Get notified before scheduled sessions.</p>
               </div>
-              <button type="button" className="settings-panel__chip">On ▾</button>
+              <button type="button" className="settings-panel__text-toggle">On</button>
             </div>
             <div className="settings-panel__row">
               <div>
                 <p className="settings-panel__row-title">Daily reflection reminder</p>
                 <p className="settings-panel__row-subtitle">Reminder to review your day.</p>
               </div>
-              <button type="button" className="settings-panel__chip">Off ▾</button>
+              <button type="button" className="settings-panel__text-toggle">Off</button>
             </div>
             <div className="settings-panel__row">
               <div>
                 <p className="settings-panel__row-title">Return to focus reminder</p>
                 <p className="settings-panel__row-subtitle">Nudge to get back on track after breaks.</p>
               </div>
-              <button type="button" className="settings-panel__chip">Off ▾</button>
+              <button type="button" className="settings-panel__text-toggle">Off</button>
             </div>
           </div>
         </>
