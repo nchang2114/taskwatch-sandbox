@@ -2501,11 +2501,30 @@ const InspectorTimeInput = ({
   const handleDoubleClick = () => {
     setEditValue(label)
     setIsEditing(true)
-    setTimeout(() => {
-      inputRef.current?.focus()
-      inputRef.current?.select()
-    }, 0)
   }
+
+  // Ref callback to focus and select when input mounts (only on first mount)
+  const hasSelectedRef = useRef(false)
+  const handleInputRef = (el: HTMLInputElement | null) => {
+    inputRef.current = el
+    if (el && !hasSelectedRef.current) {
+      hasSelectedRef.current = true
+      // Focus immediately
+      el.focus()
+      // Select all text - try multiple times to handle touch keyboard delays
+      el.setSelectionRange(0, el.value.length)
+      requestAnimationFrame(() => {
+        el.setSelectionRange(0, el.value.length)
+      })
+    }
+  }
+
+  // Reset the selection flag when editing ends
+  useEffect(() => {
+    if (!isEditing) {
+      hasSelectedRef.current = false
+    }
+  }, [isEditing])
 
   const commitEditRef = useRef<() => void>(() => {})
   commitEditRef.current = () => {
@@ -2579,8 +2598,15 @@ const InspectorTimeInput = ({
     <div className="inspector-picker">
       {isEditing ? (
         <input
-          ref={inputRef}
+          ref={handleInputRef}
           type="text"
+          inputMode="text"
+          enterKeyHint="done"
+          autoComplete="off"
+          autoCorrect="off"
+          autoCapitalize="off"
+          spellCheck={false}
+          autoFocus
           className="inspector-picker__button history-timeline__field-input history-timeline__field-input--editing"
           value={editValue}
           onChange={(e) => setEditValue(e.target.value)}
