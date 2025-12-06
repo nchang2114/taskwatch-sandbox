@@ -1,7 +1,7 @@
 import { ensureSingleUserSession, supabase } from './supabaseClient'
 import { ensureServerBucketStyle, DEFAULT_SURFACE_STYLE } from './surfaceStyles'
 import type { QuickItem, QuickSubtask } from './quickList'
-import { writeStoredQuickList, QUICK_LIST_GUEST_USER_ID, readQuickListOwnerId } from './quickList'
+import { writeStoredQuickList } from './quickList'
 
 export const QUICK_LIST_GOAL_NAME = 'Quick List (Hidden)'
 const QUICK_LIST_BUCKET_NAME = 'Quick List'
@@ -228,9 +228,9 @@ export async function fetchQuickListRemoteItems(): Promise<{
  * Called during bootstrap to populate the user's quick list after sign-in.
  */
 export async function syncQuickListFromSupabase(): Promise<QuickItem[] | null> {
-  // Only sync for authenticated users
-  const ownerId = readQuickListOwnerId()
-  if (!ownerId || ownerId === QUICK_LIST_GUEST_USER_ID) {
+  // Use authenticated session directly (localStorage may be stale during bootstrap)
+  const session = await ensureSingleUserSession()
+  if (!session?.user?.id) {
     return null
   }
   
