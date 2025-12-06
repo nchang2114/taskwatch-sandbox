@@ -2130,7 +2130,7 @@ const nextThemeLabel = theme === 'dark' ? 'light' : 'dark'
               <li>Payments (DW y'alls wont have to pay)</li>
               <li>GCAL imports</li>
             </ul>
-            <p>If you have suggestions or anything you’d like to see added, definitely let me know!</p>
+            <p>If you have suggestions or anything you’d like to see added, definitely let me know and I'll add them to the list!</p>
             <p>And on the off chance the app feels super slow or glitchy, try clearing your cookies & site data — and please tell me so I can squish some more bugs 😭.</p>
             <p>Once again, thanks everyone!!!</p>
           </div>
