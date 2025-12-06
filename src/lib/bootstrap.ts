@@ -12,7 +12,7 @@ import {
   FALLBACK_GOAL_COLOR,
 } from './goalsApi'
 import { pushLifeRoutinesToSupabase, type LifeRoutineConfig } from './lifeRoutines'
-import { readStoredGoalsSnapshot, readGoalsSnapshotOwner, GOALS_GUEST_USER_ID } from './goalsSync'
+import { readGoalsSnapshotOwner, GOALS_GUEST_USER_ID } from './goalsSync'
 import { QUICK_LIST_GOAL_NAME } from './quickListRemote'
 import { DEFAULT_SURFACE_STYLE, ensureServerBucketStyle } from './surfaceStyles'
 import { bulkInsertSnapbackTriggers, type SnapbackTriggerPayload } from './snapbackApi'
@@ -158,16 +158,42 @@ const uploadQuickListItems = async (items: QuickItem[]): Promise<void> => {
 }
 
 const migrateGoalsSnapshot = async (): Promise<void> => {
-  const owner = readGoalsSnapshotOwner()
-  if (owner && owner !== GOALS_GUEST_USER_ID) {
+  // Read from bootstrap-snapshot first (created at sign-up), fall back to regular snapshot
+  let snapshotRaw: string | null = null
+  if (typeof window !== 'undefined') {
+    snapshotRaw = window.localStorage.getItem('nc-taskwatch-bootstrap-snapshot::goals')
+    if (!snapshotRaw) {
+      // Fall back to regular snapshot if bootstrap snapshot doesn't exist
+      const owner = readGoalsSnapshotOwner()
+      if (!owner || owner === GOALS_GUEST_USER_ID) {
+        snapshotRaw = window.localStorage.getItem('nc-taskwatch-goals-snapshot')
+      }
+    }
+  }
+  
+  if (!snapshotRaw) {
+    console.log('[bootstrap] No goals snapshot found to migrate')
     return
   }
-  const snapshot = readStoredGoalsSnapshot().filter(
-    (goal) => goal.name?.trim() !== QUICK_LIST_GOAL_NAME,
-  )
+  
+  let snapshot: Array<any> = []
+  try {
+    const parsed = JSON.parse(snapshotRaw)
+    if (Array.isArray(parsed)) {
+      snapshot = parsed.filter((goal: any) => goal.name?.trim() !== QUICK_LIST_GOAL_NAME)
+    }
+  } catch (e) {
+    console.warn('[bootstrap] Could not parse goals snapshot:', e)
+    return
+  }
+  
   if (snapshot.length === 0) {
+    console.log('[bootstrap] Goals snapshot is empty after filtering')
     return
   }
+  
+  console.log('[bootstrap] Migrating', snapshot.length, 'goals to database')
+  
   if (!supabase) {
     throw new Error('Supabase client unavailable for goals migration')
   }
