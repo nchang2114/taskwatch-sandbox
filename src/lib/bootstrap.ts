@@ -657,16 +657,6 @@ const migrateGuestData = async (): Promise<void> => {
     }
   })
   
-  // Also ensure "Doomscrolling" default trigger exists (from sample history)
-  if (!triggersToMigrate.some((t) => t.trigger_name.toLowerCase() === 'doomscrolling')) {
-    triggersToMigrate.push({
-      trigger_name: 'Doomscrolling',
-      cue_text: '',
-      deconstruction_text: '',
-      plan_text: '',
-    })
-  }
-  
   if (triggersToMigrate.length > 0) {
     console.log('[bootstrap] Migrating', triggersToMigrate.length, 'snapback triggers to DB')
     await pushSnapbackTriggersToSupabase(triggersToMigrate, { skipDuplicateCheck: true })
