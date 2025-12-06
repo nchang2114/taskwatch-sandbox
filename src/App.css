@@ -1833,6 +1833,8 @@ html[data-theme='light'] .shortcuts-panel__footer {
 
 .settings-panel__sidebar {
   width: clamp(180px, 24vw, 220px);
+  min-width: 180px;
+  flex-shrink: 0;
   background: rgba(12, 18, 42, 0.5);
   border-right: 1px solid rgba(148, 164, 255, 0.15);
   display: flex;
@@ -2127,6 +2129,30 @@ html[data-theme='light'] .settings-panel__chip--warning:hover {
   border: 1px dashed rgba(148, 164, 255, 0.35);
   padding: 1.5rem;
   text-align: left;
+}
+
+.settings-panel__about-me {
+  padding: 0.5rem 0;
+  line-height: 1.5;
+}
+
+.settings-panel__about-me p {
+  margin: 0 0 0.75rem;
+  color: var(--settings-text);
+  font-size: 0.85rem;
+}
+
+.settings-panel__about-me ul {
+  margin: 0 0 0.75rem;
+  padding-left: 1.25rem;
+  color: var(--settings-text);
+  font-size: 0.85rem;
+  list-style-type: disc;
+}
+
+.settings-panel__about-me li {
+  margin: 0.25rem 0;
+  display: list-item;
 }
 
 .auth-modal-overlay {

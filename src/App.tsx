@@ -326,6 +326,7 @@ function MainApp() {
   const [featureModalOpen, setFeatureModalOpen] = useState(false)
   const [shortcutsPanelOpen, setShortcutsPanelOpen] = useState(false)
   const [shortcutsSearch, setShortcutsSearch] = useState('')
+  const [showMilliseconds, setShowMilliseconds] = useState(true)
   const [isSigningOut, setIsSigningOut] = useState(false)
   // Only show "Signing you in..." screen when returning from OAuth redirect
   const [isSigningIn, setIsSigningIn] = useState(() => {
@@ -1923,7 +1924,13 @@ const nextThemeLabel = theme === 'dark' ? 'light' : 'dark'
                 <p className="settings-panel__row-title">Show milliseconds on timers</p>
                 <p className="settings-panel__row-subtitle">Display milliseconds for precision timing.</p>
               </div>
-              <button type="button" className="settings-panel__text-toggle">Off</button>
+              <button
+                type="button"
+                className="settings-panel__text-toggle"
+                onClick={() => setShowMilliseconds(!showMilliseconds)}
+              >
+                {showMilliseconds ? 'On' : 'Off'}
+              </button>
             </div>
           </div>
         </>
@@ -1979,7 +1986,7 @@ const nextThemeLabel = theme === 'dark' ? 'light' : 'dark'
                 <p className="settings-panel__row-title">Session reminders</p>
                 <p className="settings-panel__row-subtitle">Get notified before scheduled sessions.</p>
               </div>
-              <button type="button" className="settings-panel__text-toggle">On</button>
+              <button type="button" className="settings-panel__text-toggle">Off</button>
             </div>
             <div className="settings-panel__row">
               <div>
@@ -2100,6 +2107,32 @@ const nextThemeLabel = theme === 'dark' ? 'light' : 'dark'
               </div>
               <button type="button" className="settings-panel__chip settings-panel__chip--danger">Delete</button>
             </div>
+          </div>
+        </>
+      )
+    }
+    if (activeSettingsSection === 'about-me') {
+      return (
+        <>
+          <header className="settings-panel__content-header">
+            <div>
+              <p className="settings-panel__content-title">About Me</p>
+              <p className="settings-panel__content-subtitle">A note from the creator.</p>
+            </div>
+          </header>
+          <div className="settings-panel__about-me">
+            <p>Hey everyone! <br></br> &nbsp; Thank you all so much for giving my app a try – <br></br> &nbsp; &nbsp; I really appreciate it a lot :D</p>
+            <p>I've spent the last 8 weeks building this thing nonstop and finally... <br></br> &nbsp; it's ready to test!</p>
+            <p>There are a lot of features (and prolly a few bugs :/ ) so pls Whatsapp me if you are confused or have any issues.</p>
+            <p>I'll be back at the start of Feb but down below are some things I'll fix up when I'm back.</p>
+            <ul>
+              <li>Notifications</li>
+              <li>Payments (DW y'alls wont have to pay)</li>
+              <li>GCAL imports</li>
+            </ul>
+            <p>If you have suggestions or anything you’d like to see added, definitely let me know!</p>
+            <p>And on the off chance the app feels super slow or glitchy, try clearing your cookies & site data — and please tell me so I can squish some more bugs 😭.</p>
+            <p>Once again, thanks everyone!!!</p>
           </div>
         </>
       )
@@ -2469,7 +2502,7 @@ const nextThemeLabel = theme === 'dark' ? 'light' : 'dark'
           tabIndex={-1}
           hidden={activeTab !== 'focus'}
         >
-          {!isSigningIn && <FocusPage viewportWidth={viewportWidth} />}
+          {!isSigningIn && <FocusPage viewportWidth={viewportWidth} showMilliseconds={showMilliseconds} />}
         </section>
 
         <section
