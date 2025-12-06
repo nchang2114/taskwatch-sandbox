@@ -259,13 +259,14 @@ export const ensureQuickListUser = (userId: string | null): void => {
   const normalized = normalizeQuickListUserId(userId)
   const current = readStoredQuickListUserId()
   if (current === normalized) return
-  const migratingFromGuest = current === QUICK_LIST_GUEST_USER_ID && normalized !== QUICK_LIST_GUEST_USER_ID
   setStoredQuickListUserId(normalized)
   if (normalized === QUICK_LIST_GUEST_USER_ID) {
     if (current !== QUICK_LIST_GUEST_USER_ID) {
       writeStoredQuickList(getDefaultQuickList())
     }
-  } else if (!migratingFromGuest) {
+  } else {
+    // Always clear when switching to a real user
+    // Bootstrap reads directly from ::__guest__ key, so this is safe
     writeStoredQuickList([])
   }
 }

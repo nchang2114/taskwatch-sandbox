@@ -326,16 +326,16 @@ export const ensureGoalsUser = (
   if (current === normalized) {
     return
   }
-  const migratingFromGuest = current === GOALS_GUEST_USER_ID && normalized !== GOALS_GUEST_USER_ID
   setStoredGoalsSnapshotUserId(normalized)
   if (normalized === GOALS_GUEST_USER_ID) {
     if (current !== GOALS_GUEST_USER_ID && !options?.suppressGuestSnapshot) {
       const snapshot = getGuestSnapshot()
       publishGoalsSnapshot(snapshot, normalized)
     }
-  } else if (!migratingFromGuest) {
+  } else {
+    // Always clear when switching to a real user
+    // Bootstrap reads directly from ::__guest__ key, so this is safe
     try {
-      // Clear the user-specific key
       window.localStorage.removeItem(storageKeyForUser(normalized))
     } catch {}
     try {
