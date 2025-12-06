@@ -456,10 +456,11 @@ function MainApp() {
         }, 0)
       }
     }
-    document.addEventListener('pointerdown', handlePointerDown)
+    // Use capture phase to detect clicks before they can be stopped by child components
+    document.addEventListener('pointerdown', handlePointerDown, true)
     document.addEventListener('keydown', handleKeyDown)
     return () => {
-      document.removeEventListener('pointerdown', handlePointerDown)
+      document.removeEventListener('pointerdown', handlePointerDown, true)
       document.removeEventListener('keydown', handleKeyDown)
     }
   }, [profileMenuOpen, closeProfileMenu])
