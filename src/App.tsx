@@ -141,21 +141,22 @@ const createHelpIcon = (children: ReactNode): ReactNode => (
   </svg>
 )
 
-const HELP_MENU_ITEMS: Array<{ id: string; label: string; icon: ReactNode }> = [
+const HELP_MENU_ITEMS: Array<{ id: string; label: string; icon: ReactNode; url?: string }> = [
   {
     id: 'help-center',
     label: 'Help center',
     icon: createHelpIcon(
       <>
         <circle cx="12" cy="12" r="8.5" />
-        <path d="M12 7.6a3 3 0 0 1 3 3c0 2-2.7 2.1-2.7 4v0.4" />
-        <circle cx="12" cy="17.4" r="0.9" fill="currentColor" stroke="none" />
+        <path d="M9.5 9.5a2.5 2.5 0 1 1 3 2.4c-.6.3-1 .9-1 1.6v.5" />
+        <circle cx="12" cy="17" r="0.5" fill="currentColor" stroke="none" />
       </>,
     ),
   },
   {
     id: 'release-notes',
     label: 'Release notes',
+    url: 'https://genzero.vercel.app/taskwatch/release-notes',
     icon: createHelpIcon(
       <>
         <path d="M8 4.5h8l3 3.2v11.3a1.5 1.5 0 0 1-1.5 1.5H8.5A1.5 1.5 0 0 1 7 18.5V6a1.5 1.5 0 0 1 1.5-1.5Z" />
@@ -168,6 +169,7 @@ const HELP_MENU_ITEMS: Array<{ id: string; label: string; icon: ReactNode }> = [
   {
     id: 'terms',
     label: 'Terms & policies',
+    url: 'https://genzero.vercel.app/taskwatch/policies',
     icon: createHelpIcon(
       <>
         <rect x="7" y="5.5" width="10" height="13" rx="1.6" />
@@ -1330,8 +1332,11 @@ function MainApp() {
     }
   }, [closeProfileMenu, setActiveTab, setIsSigningOut])
 
-  const handleHelpMenuItemSelect = useCallback(() => {
+  const handleHelpMenuItemSelect = useCallback((url?: string) => {
     setProfileHelpMenuOpen(false)
+    if (url) {
+      window.open(url, '_blank', 'noopener,noreferrer')
+    }
   }, [])
 
   const openSettingsPanel = useCallback((sectionId?: string) => {
@@ -1935,7 +1940,7 @@ const nextThemeLabel = theme === 'dark' ? 'light' : 'dark'
                     type="button"
                     role="menuitem"
                     className="profile-help-menu__item"
-                    onClick={handleHelpMenuItemSelect}
+                    onClick={() => handleHelpMenuItemSelect(item.url)}
                   >
                     <span className="profile-help-menu__item-icon" aria-hidden="true">
                       {item.icon}
@@ -2000,7 +2005,7 @@ const nextThemeLabel = theme === 'dark' ? 'light' : 'dark'
       </div>
       <hr className="profile-menu__divider" />
       <div className="profile-menu__section profile-menu__section--links">
-        <button type="button" className="profile-menu__link-action" role="menuitem">
+        <button type="button" className="profile-menu__link-action" role="menuitem" onClick={() => window.open('https://genzero.vercel.app/taskwatch/pricing', '_blank', 'noopener,noreferrer')}>
           <svg className="profile-menu__link-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
             <circle cx="12" cy="12" r="8" />
             <path d="M12 8v4l2.5 1.5" />
@@ -2008,6 +2013,9 @@ const nextThemeLabel = theme === 'dark' ? 'light' : 'dark'
           </svg>
           <span>See plans and pricing</span>
         </button>
+      </div>
+      <hr className="profile-menu__divider" />
+      <div className="profile-menu__section profile-menu__section--links">
         <button type="button" className="profile-menu__link-action" role="menuitem" onClick={() => openSettingsPanel()}>
           <svg className="profile-menu__link-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
             <circle cx="12" cy="12" r="3" />
@@ -2032,7 +2040,7 @@ const nextThemeLabel = theme === 'dark' ? 'light' : 'dark'
                   type="button"
                   role="menuitem"
                   className="profile-help-menu__item"
-                  onClick={handleHelpMenuItemSelect}
+                  onClick={() => handleHelpMenuItemSelect(item.url)}
                 >
                   <span className="profile-help-menu__item-icon" aria-hidden="true">
                     {item.icon}
@@ -2043,7 +2051,7 @@ const nextThemeLabel = theme === 'dark' ? 'light' : 'dark'
             </div>
           ) : null}
         </div>
-        <button type="button" className="profile-menu__link-action" role="menuitem">
+        <button type="button" className="profile-menu__link-action" role="menuitem" onClick={() => window.open('https://genzero.vercel.app/taskwatch/release-notes', '_blank', 'noopener,noreferrer')}>
           <svg className="profile-menu__link-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
             <path d="M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9l-6-6Z" />
             <path d="M14 3v6h6" />
@@ -2051,7 +2059,10 @@ const nextThemeLabel = theme === 'dark' ? 'light' : 'dark'
           </svg>
           <span>Release notes</span>
         </button>
-        <button type="button" className="profile-menu__link-action" role="menuitem">
+      </div>
+      <hr className="profile-menu__divider" />
+      <div className="profile-menu__section profile-menu__section--links">
+        <button type="button" className="profile-menu__link-action" role="menuitem" onClick={() => window.open('https://genzero.vercel.app/taskwatch/policies', '_blank', 'noopener,noreferrer')}>
           <svg className="profile-menu__link-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
             <rect x="5" y="4" width="14" height="17" rx="2" />
             <path d="M9 9h6M9 13h6M9 17h4" />

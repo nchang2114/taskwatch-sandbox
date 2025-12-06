@@ -1009,7 +1009,7 @@ html[data-theme='light'] .nav-links--drawer {
   width: min(360px, 82vw);
   display: flex;
   flex-direction: column;
-  gap: clamp(0.6rem, 2vw, 0.9rem);
+  gap: 0.5rem;
   padding: clamp(0.85rem, 3vw, 1.2rem);
   background: var(--profile-menu-bg);
   border: 1px solid var(--panel-border);
@@ -1351,15 +1351,15 @@ html[data-theme='light'] .nav-links--drawer {
   top: 0;
   right: calc(100% + clamp(0.5rem, 2vw, 0.8rem));
   left: auto;
-  min-width: clamp(200px, 38vw, 240px);
-  padding: 0.65rem;
-  border-radius: 0.9rem;
+  min-width: clamp(190px, 36vw, 220px);
+  padding: 0.55rem;
+  border-radius: 0.75rem;
   border: 1px solid var(--panel-border);
   background: var(--profile-menu-bg);
   box-shadow: 0 18px 30px rgba(8, 12, 32, 0.35);
   display: flex;
   flex-direction: column;
-  gap: 0.35rem;
+  gap: 0.2rem;
   z-index: 10;
 }
 
@@ -1370,12 +1370,13 @@ html[data-theme='light'] .profile-help-menu {
 .profile-help-menu__item {
   display: flex;
   align-items: center;
-  gap: 0.55rem;
+  gap: 0.6rem;
   border: none;
   background: transparent;
-  padding: 0.45rem 0.4rem;
-  border-radius: 0.65rem;
+  padding: 0.5rem 0.45rem;
+  border-radius: 0.5rem;
   color: var(--text-primary);
+  font-size: 0.925rem;
   cursor: pointer;
   transition: background 140ms ease;
 }
@@ -1391,8 +1392,8 @@ html[data-theme='light'] .profile-help-menu {
 }
 
 .profile-help-menu__item-icon {
-  width: 1.6rem;
-  height: 1.6rem;
+  width: 1.35rem;
+  height: 1.35rem;
   display: inline-flex;
   align-items: center;
   justify-content: center;
