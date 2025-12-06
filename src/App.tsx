@@ -2864,11 +2864,7 @@ function AuthCallbackScreen(): React.ReactElement {
           window.localStorage.removeItem('nc-taskwatch-current-task-source')
           window.localStorage.removeItem('nc-taskwatch-stopwatch-v1')
         } catch {}
-        // Small delay so the "Signing you in" screen feels intentional
-        await new Promise((resolve) => setTimeout(resolve, 1000))
-        if (!cancelled) {
-          window.location.replace('/')
-        }
+        window.location.replace('/')
       }
     }
     finalize().catch(() => {})
