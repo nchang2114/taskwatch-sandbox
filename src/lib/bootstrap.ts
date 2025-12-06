@@ -243,7 +243,7 @@ const migrateGoalsSnapshot = async (): Promise<void> => {
       goal_archive: Boolean(goal.archived),
       milestones_shown: typeof (goal as any).milestonesShown === 'boolean' ? (goal as any).milestonesShown : null,
     })
-    ;(goal.buckets ?? []).forEach((bucket, bucketIndex) => {
+    ;(goal.buckets ?? []).forEach((bucket: any, bucketIndex: number) => {
       const bucketId = (() => {
         if (bucket.id && bucketIdMap.has(bucket.id)) {
           return bucketIdMap.get(bucket.id)!
@@ -265,7 +265,7 @@ const migrateGoalsSnapshot = async (): Promise<void> => {
         buckets_card_style: surfaceStyle,
         bucket_archive: Boolean(bucket.archived),
       })
-      ;(bucket.tasks ?? []).forEach((task, taskIndex) => {
+      ;(bucket.tasks ?? []).forEach((task: any, taskIndex: number) => {
         const text = sanitizeTaskText(task.text)
         if (!text) {
           return
@@ -291,7 +291,7 @@ const migrateGoalsSnapshot = async (): Promise<void> => {
           sort_index: (taskIndex + 1) * GOAL_SORT_STEP,
           notes: typeof task.notes === 'string' ? task.notes : '',
         })
-        ;(task.subtasks ?? []).forEach((subtask, subIndex) => {
+        ;(task.subtasks ?? []).forEach((subtask: any, subIndex: number) => {
           const subText = sanitizeTaskText(subtask.text)
           if (!subText) {
             return
