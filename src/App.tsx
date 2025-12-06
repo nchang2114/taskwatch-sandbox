@@ -1895,10 +1895,8 @@ const nextThemeLabel = theme === 'dark' ? 'light' : 'dark'
             <span>Account</span>
           </button>
           <button type="button" className="profile-menu__link-action" role="menuitem" onClick={() => window.open('https://genzero.vercel.app/taskwatch/pricing', '_blank', 'noopener,noreferrer')}>
-            <svg className="profile-menu__link-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
-              <circle cx="12" cy="12" r="8" />
-              <path d="M12 8v4l2.5 1.5" />
-              <path d="M16 16l2 2" />
+            <svg className="profile-menu__link-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M12 4l8 7h-5v9h-6v-9h-5l8-7z" />
             </svg>
             <span>Upgrade your plan</span>
           </button>
@@ -1991,10 +1989,8 @@ const nextThemeLabel = theme === 'dark' ? 'light' : 'dark'
       <hr className="profile-menu__divider" />
       <div className="profile-menu__section profile-menu__section--links">
         <button type="button" className="profile-menu__link-action" role="menuitem" onClick={() => window.open('https://genzero.vercel.app/taskwatch/pricing', '_blank', 'noopener,noreferrer')}>
-          <svg className="profile-menu__link-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
-            <circle cx="12" cy="12" r="8" />
-            <path d="M12 8v4l2.5 1.5" />
-            <path d="M16 16l2 2" />
+          <svg className="profile-menu__link-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M12 4l8 7h-5v9h-6v-9h-5l8-7z" />
           </svg>
           <span>See plans and pricing</span>
         </button>
