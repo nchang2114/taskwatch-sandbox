@@ -528,9 +528,12 @@ export const syncLifeRoutinesWithSupabase = async (): Promise<LifeRoutineConfig[
     return null
   }
   
-  // Set user ID marker before any storage operations
+  // Set user ID marker only if it's different (avoid triggering storage events unnecessarily)
   // (important after localStorage.clear() during bootstrap)
-  setStoredLifeRoutineUserId(session.user.id)
+  const currentUserId = readStoredLifeRoutineUserId()
+  if (currentUserId !== session.user.id) {
+    setStoredLifeRoutineUserId(session.user.id)
+  }
   
   // Default to preferring the remote snapshot. You can opt out by setting
   // VITE_PREFER_REMOTE_LIFE_ROUTINES=false in .env.local.
