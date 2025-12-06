@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState, useId, type RefObject } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, useId, Fragment, type RefObject } from 'react'
 import type { ReactNode, FormEvent } from 'react'
 import type { PointerEvent as ReactPointerEvent } from 'react'
 import type { Session, User } from '@supabase/supabase-js'
@@ -324,6 +324,8 @@ function MainApp() {
   const [authVerifyStatus, setAuthVerifyStatus] = useState<string | null>(null)
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [featureModalOpen, setFeatureModalOpen] = useState(false)
+  const [shortcutsPanelOpen, setShortcutsPanelOpen] = useState(false)
+  const [shortcutsSearch, setShortcutsSearch] = useState('')
   const [isSigningOut, setIsSigningOut] = useState(false)
   // Only show "Signing you in..." screen when returning from OAuth redirect
   const [isSigningIn, setIsSigningIn] = useState(() => {
@@ -1240,7 +1242,7 @@ function MainApp() {
       return
     }
     const originalOverflow = document.body.style.overflow
-    if (settingsOpen || authModalOpen) {
+    if (settingsOpen || authModalOpen || featureModalOpen || shortcutsPanelOpen) {
       document.body.style.overflow = 'hidden'
     } else {
       document.body.style.overflow = originalOverflow
@@ -1248,7 +1250,7 @@ function MainApp() {
     return () => {
       document.body.style.overflow = originalOverflow
     }
-  }, [settingsOpen, authModalOpen])
+  }, [settingsOpen, authModalOpen, featureModalOpen, shortcutsPanelOpen])
 
   const handleLogOut = useCallback(async () => {
     setIsSigningOut(true)
@@ -1358,6 +1360,13 @@ function MainApp() {
   const handleHelpMenuItemSelect = useCallback((itemId: string, url?: string) => {
     // Always close the help menu
     setProfileHelpMenuOpen(false)
+    // Keyboard shortcuts opens its own panel
+    if (itemId === 'shortcuts') {
+      closeProfileMenu()
+      setShortcutsPanelOpen(true)
+      setShortcutsSearch('')
+      return
+    }
     // Items that show feature not implemented modal
     const unimplementedItems = ['help-center', 'report-bug', 'download-apps']
     if (unimplementedItems.includes(itemId)) {
@@ -1368,7 +1377,7 @@ function MainApp() {
     if (url) {
       window.open(url, '_blank', 'noopener,noreferrer')
     }
-  }, [])
+  }, [closeProfileMenu])
 
   const openSettingsPanel = useCallback((sectionId?: string) => {
     closeProfileMenu()
@@ -2294,6 +2303,100 @@ const nextThemeLabel = theme === 'dark' ? 'light' : 'dark'
             <button type="button" className="feature-modal__close" onClick={() => setFeatureModalOpen(false)}>
               Got it
             </button>
+          </div>
+        </div>
+      ) : null}
+      {shortcutsPanelOpen ? (
+        <div className="shortcuts-overlay" role="dialog" aria-modal="true" aria-label="Keyboard shortcuts" onClick={() => setShortcutsPanelOpen(false)}>
+          <div className="shortcuts-panel" onClick={(e) => e.stopPropagation()}>
+            <div className="shortcuts-panel__header">
+              <h2 className="shortcuts-panel__title">Keyboard shortcuts</h2>
+              <button type="button" className="shortcuts-panel__close" aria-label="Close keyboard shortcuts" onClick={() => setShortcutsPanelOpen(false)}>
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M18 6L6 18M6 6l12 12" />
+                </svg>
+              </button>
+            </div>
+            <div className="shortcuts-panel__search">
+              <svg className="shortcuts-panel__search-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <circle cx="11" cy="11" r="7" />
+                <path d="M21 21l-4.35-4.35" />
+              </svg>
+              <input
+                type="text"
+                className="shortcuts-panel__search-input"
+                placeholder="Search"
+                value={shortcutsSearch}
+                onChange={(e) => setShortcutsSearch(e.target.value)}
+              />
+            </div>
+            <div className="shortcuts-panel__content">
+              {(() => {
+                const shortcuts = [
+                  { section: 'Page Navigation', items: [
+                    { label: 'Goals page', keys: ['1', 'G'] },
+                    { label: 'Focus page', keys: ['2', 'F'] },
+                    { label: 'Reflection page', keys: ['3', 'R'] },
+                  ]},
+                  { section: 'Calendar Navigation', items: [
+                    { label: 'Previous period', keys: ['P'] },
+                    { label: 'Next period', keys: ['N'] },
+                    { label: 'Today', keys: ['T'] },
+                  ]},
+                  { section: 'Calendar Views', items: [
+                    { label: 'Day view', keys: ['D'] },
+                    { label: 'Custom view', keys: ['X'] },
+                    { label: 'Custom view (double tap)', keys: ['X X'], noOr: true },
+                    { label: 'Week view', keys: ['W'] },
+                    { label: 'Month view', keys: ['M'] },
+                    { label: 'Year view', keys: ['Y'] },
+                  ]},
+                ]
+                const searchLower = shortcutsSearch.toLowerCase()
+                const filtered = shortcuts.map(section => ({
+                  ...section,
+                  items: section.items.filter(item => 
+                    item.label.toLowerCase().includes(searchLower) ||
+                    item.keys.some(k => k.toLowerCase().includes(searchLower))
+                  )
+                })).filter(section => section.items.length > 0)
+                
+                return filtered.map(section => (
+                  <div key={section.section} className="shortcuts-panel__section">
+                    <h3 className="shortcuts-panel__section-title">{section.section}</h3>
+                    {section.items.map(item => (
+                      <div key={item.label} className="shortcuts-panel__row">
+                        <span className="shortcuts-panel__label">{item.label}</span>
+                        <span className="shortcuts-panel__keys">
+                          {(item as any).noOr ? (
+                            item.keys[0].split(' ').map((key: string, i: number) => (
+                              <kbd key={i} className="shortcuts-panel__key">{key}</kbd>
+                            ))
+                          ) : (
+                            item.keys.map((key, i) => (
+                              <Fragment key={i}>
+                                {i > 0 && <span className="shortcuts-panel__or">or</span>}
+                                <kbd className="shortcuts-panel__key">{key}</kbd>
+                              </Fragment>
+                            ))
+                          )}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                ))
+              })()}
+            </div>
+            <div className="shortcuts-panel__footer">
+              <a href="https://genzero.vercel.app/taskwatch/help" target="_blank" rel="noopener noreferrer" className="shortcuts-panel__help-link">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" />
+                  <polyline points="15 3 21 3 21 9" />
+                  <line x1="10" y1="14" x2="21" y2="3" />
+                </svg>
+                <span>View all in help center</span>
+              </a>
+            </div>
           </div>
         </div>
       ) : null}
