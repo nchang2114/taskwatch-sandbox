@@ -332,9 +332,6 @@ function MainApp() {
   const [defaultCalendarView, setDefaultCalendarView] = useState<2 | 3 | 4 | 5 | 6 | 'week'>(6)
   const [snapToInterval, setSnapToInterval] = useState<0 | 5 | 10 | 15>(0) // 0 = none, or 5/10/15 minutes
   const [isSigningOut, setIsSigningOut] = useState(false)
-  // Used for blocking UI during in-app auth state changes (e.g., magic link)
-  // OAuth callback flow is handled by AuthCallbackScreen at /auth/callback
-  const [isSigningIn, setIsSigningIn] = useState(false)
   const [activeSettingsSection, setActiveSettingsSection] = useState(SETTINGS_SECTIONS[0]?.id ?? 'general')
   const [authEmailLookupValue, setAuthEmailLookupValue] = useState('')
   const [authEmailLookupResult, setAuthEmailLookupResult] = useState<boolean | null>(null)
@@ -1025,12 +1022,6 @@ function MainApp() {
       
       const profile = deriveProfileFromSupabaseUser(user ?? null)
       
-      // Block UI while syncing data - show "Signing you in..." screen
-      // This ensures data is ready before user sees the app
-      if (user && mounted) {
-        setIsSigningIn(true)
-      }
-      
       // Fetch all data BEFORE updating the profile (which triggers UI change)
       // Keep the auth modal open during this time - user just sees the sign-in screen
       await alignLocalStoresForUser(user?.id ?? null)
@@ -1038,7 +1029,6 @@ function MainApp() {
       // Now that data is ready, update the profile and close the modal
       if (mounted) {
         setUserProfile(profile)
-        setIsSigningIn(false)
         if (profile) {
           setAuthModalOpen(false)
         }
@@ -1087,11 +1077,6 @@ function MainApp() {
         const resolvedUser = data?.user ?? session?.user ?? null
         await applySessionUser(resolvedUser)
       } catch {}
-      
-      // Bootstrap complete - all data is loaded, ready to show the app
-      if (mounted) {
-        setIsSigningIn(false)
-      }
     }
 
     // Track last session check to debounce rapid auth changes
@@ -2304,10 +2289,6 @@ const nextThemeLabel = theme === 'dark' ? 'light' : 'dark'
     return <SignOutScreen />
   }
 
-  if (isSigningIn) {
-    return <SignInScreen />
-  }
-
   return (
     <div className="page">
       <header className={headerClassName}>
@@ -2428,7 +2409,7 @@ const nextThemeLabel = theme === 'dark' ? 'light' : 'dark'
           tabIndex={-1}
           hidden={activeTab !== 'goals'}
         >
-          {!isSigningIn && <GoalsPage />}
+          <GoalsPage />
         </section>
 
         <section
@@ -2439,7 +2420,7 @@ const nextThemeLabel = theme === 'dark' ? 'light' : 'dark'
           tabIndex={-1}
           hidden={activeTab !== 'focus'}
         >
-          {!isSigningIn && <FocusPage viewportWidth={viewportWidth} showMilliseconds={showMilliseconds} use24HourTime={use24HourTime} />}
+          <FocusPage viewportWidth={viewportWidth} showMilliseconds={showMilliseconds} use24HourTime={use24HourTime} />
         </section>
 
         <section
@@ -2450,7 +2431,7 @@ const nextThemeLabel = theme === 'dark' ? 'light' : 'dark'
           tabIndex={-1}
           hidden={activeTab !== 'reflection'}
         >
-          {!isSigningIn && <ReflectionPage use24HourTime={use24HourTime} weekStartDay={weekStartDay} defaultCalendarView={defaultCalendarView} snapToInterval={snapToInterval} />}
+          <ReflectionPage use24HourTime={use24HourTime} weekStartDay={weekStartDay} defaultCalendarView={defaultCalendarView} snapToInterval={snapToInterval} />
         </section>
       </main>
       {settingsOpen ? (
@@ -2908,17 +2889,6 @@ function SignOutScreen(): React.ReactElement {
       <div className="auth-callback-panel">
         <p className="auth-callback-title">Signing you out…</p>
         <p className="auth-callback-text">Hang tight while we wrap things up.</p>
-      </div>
-    </div>
-  )
-}
-
-function SignInScreen(): React.ReactElement {
-  return (
-    <div className="auth-callback-screen">
-      <div className="auth-callback-panel">
-        <p className="auth-callback-title">Signing you in…</p>
-        <p className="auth-callback-text">Hang tight while we finish connecting your account.</p>
       </div>
     </div>
   )
