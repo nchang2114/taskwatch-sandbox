@@ -2652,6 +2652,10 @@ html[data-theme='light'] .settings-panel__chip--warning:hover {
     border-right: none;
     border-bottom: 1px solid rgba(148, 164, 255, 0.2);
   }
+  
+    .settings-panel__sidebar-header {
+    display: none;
+  }
 
   .settings-panel__nav {
     flex-direction: row;
