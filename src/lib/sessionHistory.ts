@@ -7,9 +7,9 @@ import {
   type SurfaceStyle,
 } from './surfaceStyles'
 
-export const HISTORY_STORAGE_KEY = 'nc-taskwatch-history'
+export const HISTORY_STORAGE_KEY = 'nc-taskwatch-session-history'
 export const HISTORY_EVENT_NAME = 'nc-taskwatch:history-update'
-export const HISTORY_USER_KEY = 'nc-taskwatch-history-user'
+export const HISTORY_USER_KEY = 'nc-taskwatch-session-history-user'
 export const HISTORY_GUEST_USER_ID = '__guest__'
 export const HISTORY_USER_EVENT = 'nc-taskwatch-history-user-updated'
 export const CURRENT_SESSION_STORAGE_KEY = 'nc-taskwatch-current-session'
@@ -125,6 +125,13 @@ const getStoredHistoryUserId = (): string | null => {
     return null
   }
 }
+
+const normalizeHistoryUserId = (userId: string | null | undefined): string =>
+  typeof userId === 'string' && userId.trim().length > 0 ? userId.trim() : HISTORY_GUEST_USER_ID
+
+const storageKeyForUser = (userId: string | null | undefined): string =>
+  `${HISTORY_STORAGE_KEY}::${normalizeHistoryUserId(userId)}`
+
 export const readHistoryOwnerId = (): string | null => getStoredHistoryUserId()
 const setStoredHistoryUserId = (userId: string | null): void => {
   if (typeof window === 'undefined') return
@@ -974,8 +981,8 @@ const readHistoryRecords = (): HistoryRecord[] => {
     return []
   }
   try {
-    const raw = window.localStorage.getItem(HISTORY_STORAGE_KEY)
     const currentUserId = getStoredHistoryUserId()
+    const raw = window.localStorage.getItem(storageKeyForUser(currentUserId))
     const guestContext = !currentUserId || currentUserId === HISTORY_GUEST_USER_ID
     if (!raw) {
       if (guestContext) {
@@ -1014,7 +1021,8 @@ const writeHistoryRecords = (records: HistoryRecord[]): void => {
     return
   }
   try {
-    window.localStorage.setItem(HISTORY_STORAGE_KEY, JSON.stringify(records))
+    const currentUserId = getStoredHistoryUserId()
+    window.localStorage.setItem(storageKeyForUser(currentUserId), JSON.stringify(records))
   } catch {}
 }
 
@@ -1114,8 +1122,7 @@ const persistRecords = (records: HistoryRecord[]): HistoryEntry[] => {
 
 export const ensureHistoryUser = (userId: string | null): void => {
   if (typeof window === 'undefined') return
-  const normalized =
-    typeof userId === 'string' && userId.trim().length > 0 ? userId.trim() : HISTORY_GUEST_USER_ID
+  const normalized = normalizeHistoryUserId(userId)
   const current = getStoredHistoryUserId()
   if (current === normalized) {
     return

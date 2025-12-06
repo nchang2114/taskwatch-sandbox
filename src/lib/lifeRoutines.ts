@@ -58,7 +58,7 @@ const surfaceStyleFromColour = (colour: string | null | undefined): SurfaceStyle
   return match ? match[0] : DEFAULT_SURFACE_STYLE
 }
 
-export const LIFE_ROUTINE_STORAGE_KEY = 'nc-taskwatch-life-routines-v1'
+export const LIFE_ROUTINE_STORAGE_KEY = 'nc-taskwatch-life-routines'
 export const LIFE_ROUTINE_UPDATE_EVENT = 'nc-life-routines:updated'
 export const LIFE_ROUTINE_USER_STORAGE_KEY = 'nc-taskwatch-life-routines-user'
 export const LIFE_ROUTINE_GUEST_USER_ID = '__guest__'

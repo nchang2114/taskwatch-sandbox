@@ -11,6 +11,12 @@ export const GOALS_SNAPSHOT_REQUEST_EVENT = 'nc-taskwatch:goals-snapshot-request
 export const GOALS_SNAPSHOT_USER_KEY = 'nc-taskwatch-goals-user'
 export const GOALS_GUEST_USER_ID = '__guest__'
 
+const normalizeGoalsUserId = (userId: string | null | undefined): string =>
+  typeof userId === 'string' && userId.trim().length > 0 ? userId.trim() : GOALS_GUEST_USER_ID
+
+const storageKeyForUser = (userId: string | null | undefined): string =>
+  `${STORAGE_KEY}::${normalizeGoalsUserId(userId)}`
+
 export type GoalTaskSubtaskSnapshot = {
   id: string
   text: string
@@ -186,12 +192,14 @@ export const createGoalsSnapshot = (goals: Goal[] | unknown): GoalSnapshot[] => 
   return snapshot
 }
 
-export const publishGoalsSnapshot = (snapshot: GoalSnapshot[]) => {
+export const publishGoalsSnapshot = (snapshot: GoalSnapshot[], userId?: string | null) => {
   if (typeof window === 'undefined') {
     return
   }
+  // Use provided userId or fall back to stored user ID
+  const effectiveUserId = userId !== undefined ? userId : readStoredGoalsSnapshotUserId()
   try {
-    window.localStorage.setItem(STORAGE_KEY, JSON.stringify(snapshot))
+    window.localStorage.setItem(storageKeyForUser(effectiveUserId), JSON.stringify(snapshot))
   } catch {
     // Ignore storage errors (e.g., quota exceeded, restricted environments)
   }
@@ -215,7 +223,8 @@ export const readStoredGoalsSnapshot = (): GoalSnapshot[] => {
     return []
   }
   try {
-    const raw = window.localStorage.getItem(STORAGE_KEY)
+    const currentUser = readStoredGoalsSnapshotUserId()
+    const raw = window.localStorage.getItem(storageKeyForUser(currentUser))
     if (!raw) {
       return []
     }
@@ -232,7 +241,8 @@ export const readStoredGoalsSnapshot = (): GoalSnapshot[] => {
 // Listen for storage events from other tabs to sync goals
 if (typeof window !== 'undefined') {
   window.addEventListener('storage', (event: StorageEvent) => {
-    if (event.key === STORAGE_KEY) {
+    // Check if the change is for a goals snapshot key (any user)
+    if (event.key && event.key.startsWith(STORAGE_KEY + '::')) {
       try {
         const newValue = event.newValue
         if (!newValue) return
@@ -311,8 +321,7 @@ export const ensureGoalsUser = (
   if (typeof window === 'undefined') {
     return
   }
-  const normalized =
-    typeof userId === 'string' && userId.trim().length > 0 ? userId.trim() : GOALS_GUEST_USER_ID
+  const normalized = normalizeGoalsUserId(userId)
   const current = readStoredGoalsSnapshotUserId()
   if (current === normalized) {
     return
@@ -322,11 +331,12 @@ export const ensureGoalsUser = (
   if (normalized === GOALS_GUEST_USER_ID) {
     if (current !== GOALS_GUEST_USER_ID && !options?.suppressGuestSnapshot) {
       const snapshot = getGuestSnapshot()
-      publishGoalsSnapshot(snapshot)
+      publishGoalsSnapshot(snapshot, normalized)
     }
   } else if (!migratingFromGuest) {
     try {
-      window.localStorage.removeItem(GOALS_SNAPSHOT_STORAGE_KEY)
+      // Clear the user-specific key
+      window.localStorage.removeItem(storageKeyForUser(normalized))
     } catch {}
     try {
       const event = new CustomEvent<GoalSnapshot[]>(EVENT_NAME, { detail: [] })
