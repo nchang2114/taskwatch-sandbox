@@ -218,9 +218,30 @@ const SETTINGS_SECTIONS: Array<{ id: string; label: string; description?: string
     label: 'General',
     icon: createHelpIcon(
       <>
-        <circle cx="12" cy="12" r="7.5" />
-        <path d="M12 9.5v5" />
-        <circle cx="12" cy="7" r="0.9" fill="currentColor" stroke="none" />
+        <circle cx="12" cy="12" r="3" />
+        <path d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42" />
+      </>,
+    ),
+  },
+  {
+    id: 'focus-timers',
+    label: 'Focus & Timers',
+    icon: createHelpIcon(
+      <>
+        <circle cx="12" cy="12" r="8" />
+        <path d="M12 6v6l4 2" />
+      </>,
+    ),
+  },
+  {
+    id: 'calendar',
+    label: 'Calendar',
+    icon: createHelpIcon(
+      <>
+        <rect x="5" y="6" width="14" height="13" rx="1.4" />
+        <path d="M8 4v4" />
+        <path d="M16 4v4" />
+        <path d="M5 10h14" />
       </>,
     ),
   },
@@ -235,42 +256,18 @@ const SETTINGS_SECTIONS: Array<{ id: string; label: string; description?: string
     ),
   },
   {
-    id: 'personalization',
-    label: 'Personalization',
+    id: 'account',
+    label: 'Account',
     icon: createHelpIcon(
       <>
-        <circle cx="12" cy="12" r="6" />
-        <path d="M12 6v12M6 12h12" />
-      </>,
-    ),
-  },
-  {
-    id: 'apps',
-    label: 'Apps & Connectors',
-    icon: createHelpIcon(
-      <>
-        <rect x="6.5" y="6" width="5" height="5" rx="1" />
-        <rect x="12.5" y="6" width="5" height="5" rx="1" />
-        <rect x="6.5" y="12" width="5" height="5" rx="1" />
-        <rect x="12.5" y="12" width="5" height="5" rx="1" />
-      </>,
-    ),
-  },
-  {
-    id: 'schedules',
-    label: 'Schedules',
-    icon: createHelpIcon(
-      <>
-        <rect x="6" y="7" width="12" height="11" rx="1.4" />
-        <path d="M9 5v4" />
-        <path d="M15 5v4" />
-        <path d="M6 10h12" />
+        <circle cx="12" cy="9" r="3.4" />
+        <path d="M6 18c.8-3.1 3.4-4.5 6-4.5s5.2 1.4 6 4.5" />
       </>,
     ),
   },
   {
     id: 'data',
-    label: 'Data controls',
+    label: 'Data',
     icon: createHelpIcon(
       <>
         <path d="M6 8c0-2.5 3-4 6-4s6 1.5 6 4-3 4-6 4-6-1.5-6-4Z" />
@@ -280,32 +277,14 @@ const SETTINGS_SECTIONS: Array<{ id: string; label: string; description?: string
     ),
   },
   {
-    id: 'security',
-    label: 'Security',
+    id: 'about-me',
+    label: 'About Me',
     icon: createHelpIcon(
       <>
-        <path d="M12 4 5.5 6.5v6.6c0 4.6 3.7 6.9 6.5 8.4 2.8-1.5 6.5-3.8 6.5-8.4V6.5Z" />
-        <path d="M9.5 12.5 11 14l3.5-3.5" />
-      </>,
-    ),
-  },
-  {
-    id: 'parental',
-    label: 'Parental controls',
-    icon: createHelpIcon(
-      <>
-        <path d="M12 12a4 4 0 1 0-4-4 4 4 0 0 0 4 4Zm0 0v7" />
-        <path d="M8 22h8" />
-      </>,
-    ),
-  },
-  {
-    id: 'account',
-    label: 'Account',
-    icon: createHelpIcon(
-      <>
-        <circle cx="12" cy="9" r="3.4" />
-        <path d="M6 18c.8-3.1 3.4-4.5 6-4.5s5.2 1.4 6 4.5" />
+        <circle cx="12" cy="12" r="8" />
+        <circle cx="9" cy="10" r="1" fill="currentColor" stroke="none" />
+        <circle cx="15" cy="10" r="1" fill="currentColor" stroke="none" />
+        <path d="M8 14c1 2 3 3 4 3s3-1 4-3" />
       </>,
     ),
   },
@@ -1351,11 +1330,6 @@ function MainApp() {
     }
   }, [closeProfileMenu, setActiveTab, setIsSigningOut])
 
-  const handleContinueGuest = useCallback(() => {
-    setUserProfile(null)
-    closeProfileMenu()
-  }, [closeProfileMenu])
-
   const handleHelpMenuItemSelect = useCallback(() => {
     setProfileHelpMenuOpen(false)
   }, [])
@@ -1935,8 +1909,8 @@ const nextThemeLabel = theme === 'dark' ? 'light' : 'dark'
               <span className="profile-help-button__icon" aria-hidden="true">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
                   <circle cx="12" cy="12" r="8" />
-                  <path d="M12 8a2.3 2.3 0 0 1 2.3 2.3c0 1.6-2.2 1.7-2.2 3.2v0.3" />
-                  <circle cx="12" cy="16.9" r="0.8" fill="currentColor" stroke="none" />
+                  <path d="M9.5 9.5a2.5 2.5 0 1 1 3 2.4c-.6.3-1 .9-1 1.6v.5" />
+                  <circle cx="12" cy="17" r="0.5" fill="currentColor" stroke="none" />
                 </svg>
               </span>
               <span className="profile-help-button__label">Help</span>
@@ -2025,14 +1999,66 @@ const nextThemeLabel = theme === 'dark' ? 'light' : 'dark'
         </button>
       </div>
       <hr className="profile-menu__divider" />
-      <button
-        type="button"
-        className="profile-menu__ghost-action"
-        onClick={handleContinueGuest}
-        role="menuitem"
-      >
-        Continue as guest
-      </button>
+      <div className="profile-menu__section profile-menu__section--links">
+        <button type="button" className="profile-menu__link-action" role="menuitem">
+          <svg className="profile-menu__link-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
+            <circle cx="12" cy="12" r="8" />
+            <path d="M12 8v4l2.5 1.5" />
+            <path d="M16 16l2 2" />
+          </svg>
+          <span>See plans and pricing</span>
+        </button>
+        <button type="button" className="profile-menu__link-action" role="menuitem" onClick={() => openSettingsPanel()}>
+          <svg className="profile-menu__link-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
+            <circle cx="12" cy="12" r="3" />
+            <path d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42" />
+          </svg>
+          <span>Settings</span>
+        </button>
+        <div className="profile-menu__link-help-wrapper">
+          <button type="button" className="profile-menu__link-action" role="menuitem" onClick={() => setProfileHelpMenuOpen((open) => !open)} ref={profileHelpButtonRef}>
+            <svg className="profile-menu__link-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
+              <circle cx="12" cy="12" r="8" />
+              <path d="M9.5 9.5a2.5 2.5 0 1 1 3 2.4c-.6.3-1 .9-1 1.6v.5" />
+              <circle cx="12" cy="17" r="0.5" fill="currentColor" stroke="none" />
+            </svg>
+            <span>Help</span>
+          </button>
+          {profileHelpMenuOpen ? (
+            <div className="profile-help-menu profile-help-menu--guest" role="menu" id={profileHelpMenuId} ref={profileHelpMenuRef}>
+              {HELP_MENU_ITEMS.map((item) => (
+                <button
+                  key={item.id}
+                  type="button"
+                  role="menuitem"
+                  className="profile-help-menu__item"
+                  onClick={handleHelpMenuItemSelect}
+                >
+                  <span className="profile-help-menu__item-icon" aria-hidden="true">
+                    {item.icon}
+                  </span>
+                  <span className="profile-help-menu__item-label">{item.label}</span>
+                </button>
+              ))}
+            </div>
+          ) : null}
+        </div>
+        <button type="button" className="profile-menu__link-action" role="menuitem">
+          <svg className="profile-menu__link-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9l-6-6Z" />
+            <path d="M14 3v6h6" />
+            <path d="M8 13h8M8 17h5" />
+          </svg>
+          <span>Release notes</span>
+        </button>
+        <button type="button" className="profile-menu__link-action" role="menuitem">
+          <svg className="profile-menu__link-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
+            <rect x="5" y="4" width="14" height="17" rx="2" />
+            <path d="M9 9h6M9 13h6M9 17h4" />
+          </svg>
+          <span>Terms &amp; policies</span>
+        </button>
+      </div>
     </>
   )
 
