@@ -1032,9 +1032,17 @@ function MainApp() {
       }
       
       // Check if user ID actually changed (sign-in or sign-out, not just page refresh)
+      // Use localStorage to persist across page reloads (OAuth redirects cause fresh page loads)
       const newUserId = user?.id ?? null
-      const previousUserId = lastAlignedUserIdRef.current
-      const userActuallyChanged = previousUserId !== newUserId && previousUserId !== undefined
+      let previousUserId: string | null | undefined = lastAlignedUserIdRef.current
+      if (previousUserId === undefined && typeof window !== 'undefined') {
+        try {
+          // On fresh page load, check localStorage for last known user
+          const stored = window.localStorage.getItem('nc-taskwatch-last-auth-user-id')
+          previousUserId = stored === null ? null : (stored === '' ? null : stored)
+        } catch {}
+      }
+      const userActuallyChanged = previousUserId !== undefined && previousUserId !== newUserId
       
       // Reset app timezone to system default ONLY on actual auth changes (sign-in/sign-out)
       // Not on page refresh where user stays the same
@@ -1043,6 +1051,17 @@ function MainApp() {
           window.localStorage.removeItem('taskwatch_app_timezone')
           // Dispatch custom event to notify same-tab components (storage events only fire cross-tab)
           window.dispatchEvent(new CustomEvent('taskwatch-timezone-reset'))
+        } catch {}
+      }
+      
+      // Persist current user ID for future page loads
+      if (typeof window !== 'undefined') {
+        try {
+          if (newUserId) {
+            window.localStorage.setItem('nc-taskwatch-last-auth-user-id', newUserId)
+          } else {
+            window.localStorage.setItem('nc-taskwatch-last-auth-user-id', '')
+          }
         } catch {}
       }
       
@@ -1296,6 +1315,9 @@ function MainApp() {
         
         // Clear app timezone override so it resets to system default on next load
         window.localStorage.removeItem('taskwatch_app_timezone')
+        
+        // Clear last auth user tracking (used to detect sign-in/sign-out across page loads)
+        window.localStorage.removeItem('nc-taskwatch-last-auth-user-id')
         
         // Clear alignment tracking so next sign-in runs fresh alignment
         window.localStorage.removeItem('nc-taskwatch-align-complete')
