@@ -13,12 +13,12 @@ import {
   upsertGoalMilestone,
 } from './goalsApi'
 import { pushLifeRoutinesToSupabase, syncLifeRoutinesWithSupabase, type LifeRoutineConfig } from './lifeRoutines'
-import { readStoredGoalsSnapshot, readGoalsSnapshotOwner, GOALS_GUEST_USER_ID, syncGoalsSnapshotFromSupabase } from './goalsSync'
+import { GOALS_GUEST_USER_ID, GOALS_SNAPSHOT_STORAGE_KEY, createGoalsSnapshot, syncGoalsSnapshotFromSupabase } from './goalsSync'
 import { QUICK_LIST_GOAL_NAME } from './quickListRemote'
 import { DEFAULT_SURFACE_STYLE, ensureServerBucketStyle } from './surfaceStyles'
 import { pushSnapbackTriggersToSupabase, syncSnapbackTriggersFromSupabase, type SnapbackTriggerPayload } from './snapbackApi'
 import { pushRepeatingRulesToSupabase, readLocalRepeatingRules, syncRepeatingRulesFromSupabase } from './repeatingSessions'
-import { pushAllHistoryToSupabase, syncHistoryWithSupabase } from './sessionHistory'
+import { pushAllHistoryToSupabase, syncHistoryWithSupabase, HISTORY_STORAGE_KEY, HISTORY_GUEST_USER_ID, sanitizeHistoryRecords } from './sessionHistory'
 
 // Type for ID mappings returned from migrations
 export type IdMaps = {
@@ -226,13 +226,26 @@ const pushGoalsToSupabase = async (): Promise<IdMaps> => {
     taskIdMap: new Map<string, string>(),
   }
   
-  const owner = readGoalsSnapshotOwner()
-  if (owner && owner !== GOALS_GUEST_USER_ID) {
+  // Read directly from the guest key (not the current user's key)
+  const guestGoalsKey = `${GOALS_SNAPSHOT_STORAGE_KEY}::${GOALS_GUEST_USER_ID}`
+  const guestGoalsRaw = typeof window !== 'undefined'
+    ? window.localStorage.getItem(guestGoalsKey)
+    : null
+  
+  if (!guestGoalsRaw) {
     return emptyMaps
   }
-  const snapshot = readStoredGoalsSnapshot().filter(
-    (goal) => goal.name?.trim() !== QUICK_LIST_GOAL_NAME,
-  )
+  
+  let snapshot: ReturnType<typeof createGoalsSnapshot> = []
+  try {
+    const parsed = JSON.parse(guestGoalsRaw)
+    snapshot = createGoalsSnapshot(parsed).filter(
+      (goal) => goal.name?.trim() !== QUICK_LIST_GOAL_NAME,
+    )
+  } catch {
+    return emptyMaps
+  }
+  
   if (snapshot.length === 0) {
     return emptyMaps
   }
@@ -464,6 +477,23 @@ const migrateGuestData = async (): Promise<void> => {
   }
 
   // 4. Migrate session history with all ID mappings
+  // Read directly from the guest key (not the current user's key)
+  const guestHistoryKey = `${HISTORY_STORAGE_KEY}::${HISTORY_GUEST_USER_ID}`
+  const guestHistoryRaw = typeof window !== 'undefined'
+    ? window.localStorage.getItem(guestHistoryKey)
+    : null
+  
+  let guestHistoryRecords: ReturnType<typeof sanitizeHistoryRecords> = []
+  if (guestHistoryRaw) {
+    try {
+      const parsed = JSON.parse(guestHistoryRaw)
+      guestHistoryRecords = sanitizeHistoryRecords(parsed)
+      console.log('[bootstrap] Found', guestHistoryRecords.length, 'guest history records to migrate')
+    } catch {
+      console.warn('[bootstrap] Could not parse guest history records')
+    }
+  }
+  
   // Convert Maps to Records for the history function
   const goalIdRecord: Record<string, string> = Object.fromEntries(goalIdMap)
   const bucketIdRecord: Record<string, string> = Object.fromEntries(bucketIdMap)
@@ -478,6 +508,7 @@ const migrateGuestData = async (): Promise<void> => {
       goalIdMap: goalIdRecord,
       bucketIdMap: bucketIdRecord,
       taskIdMap: taskIdRecord,
+      sourceRecords: guestHistoryRecords.length > 0 ? guestHistoryRecords : undefined,
     }
   )
   console.log('[bootstrap] Session history migration complete')

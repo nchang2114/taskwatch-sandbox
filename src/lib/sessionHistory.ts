@@ -942,7 +942,7 @@ const sanitizeHistoryEntries = (value: unknown): HistoryEntry[] => {
     .filter((entry): entry is HistoryEntry => Boolean(entry))
 }
 
-const sanitizeHistoryRecords = (value: unknown): HistoryRecord[] => {
+export const sanitizeHistoryRecords = (value: unknown): HistoryRecord[] => {
   const entries = sanitizeHistoryEntries(value)
   const array = Array.isArray(value) ? (value as HistoryRecordCandidate[]) : []
   const now = Date.now()
@@ -1653,6 +1653,7 @@ export const pushAllHistoryToSupabase = async (
     goalIdMap?: Record<string, string>
     bucketIdMap?: Record<string, string>
     taskIdMap?: Record<string, string>
+    sourceRecords?: HistoryRecord[]
   },
 ): Promise<void> => {
   const skipRemoteCheck = Boolean(options?.skipRemoteCheck)
@@ -1660,6 +1661,7 @@ export const pushAllHistoryToSupabase = async (
   const goalIdMap = options?.goalIdMap ?? {}
   const bucketIdMap = options?.bucketIdMap ?? {}
   const taskIdMap = options?.taskIdMap ?? {}
+  const sourceRecords = options?.sourceRecords
   const fail = (message: string, err?: unknown) => {
     if (strict) {
       throw err instanceof Error ? err : new Error(message)
@@ -1681,7 +1683,8 @@ export const pushAllHistoryToSupabase = async (
       return
     }
   }
-  let records = readHistoryRecords()
+  // Use provided sourceRecords (for migration) or read from current user's key
+  let records = sourceRecords ?? readHistoryRecords()
   if (!records || records.length === 0) {
     records = []
   }
@@ -1692,9 +1695,12 @@ export const pushAllHistoryToSupabase = async (
     const id = generateUuid()
     return { ...record, id }
   })
-  if (uuidNormalized.some((record, index) => record.id !== records[index]?.id)) {
+  // Only write back if we're not using sourceRecords (don't overwrite guest data)
+  if (!sourceRecords && uuidNormalized.some((record, index) => record.id !== records[index]?.id)) {
     records = uuidNormalized
     writeHistoryRecords(records)
+  } else {
+    records = uuidNormalized
   }
   const { records: lifeRoutineAligned, changed: alignedChanged } = applyLifeRoutineSurfaces(records)
   if (alignedChanged) {
