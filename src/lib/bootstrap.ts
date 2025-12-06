@@ -10,9 +10,6 @@ import {
   upsertTaskSubtask,
 } from './goalsApi'
 import { pushLifeRoutinesToSupabase, type LifeRoutineConfig } from './lifeRoutines'
-// DISABLED: Goals bootstrap imports - no longer needed
-// import { QUICK_LIST_GOAL_NAME } from './quickListRemote'
-// import { DEFAULT_SURFACE_STYLE, ensureServerBucketStyle } from './surfaceStyles'
 import { bulkInsertSnapbackTriggers, type SnapbackTriggerPayload } from './snapbackApi'
 
 let bootstrapPromises = new Map<string, Promise<boolean>>()
@@ -51,37 +48,10 @@ const releaseBootstrapLock = (userId: string): void => {
     window.localStorage.removeItem(makeBootstrapLockKey(userId))
   } catch {}
 }
+
 const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
 const isUuid = (value: string | undefined | null): value is string => !!value && UUID_REGEX.test(value)
 const ensureUuid = (value: string | undefined): string => (isUuid(value) ? value! : generateUuid())
-
-// DISABLED: Goals bootstrap helpers - no longer needed
-// const GOAL_SORT_STEP = 1024
-// const SUBTASK_SORT_STEP = 1024
-// 
-// const sanitizeGoalName = (value: string | undefined): string =>
-//   value && value.trim().length > 0 ? value.trim() : 'Personal Goal'
-// 
-// const sanitizeBucketName = (value: string | undefined): string =>
-//   value && value.trim().length > 0 ? value.trim() : 'Task List'
-// 
-// const sanitizeTaskText = (value: string | undefined): string | null => {
-//   if (typeof value !== 'string') {
-//     return null
-//   }
-//   const trimmed = value.trim()
-//   return trimmed.length > 0 ? trimmed : null
-// }
-// 
-// const normalizeGradient = (value: string | undefined | null): string =>
-//   normalizeGoalColour(value, FALLBACK_GOAL_COLOR)
-// 
-// const sanitizeDifficulty = (value: string | undefined): 'none' | 'green' | 'yellow' | 'red' => {
-//   if (value === 'green' || value === 'yellow' || value === 'red') {
-//     return value
-//   }
-//   return 'none'
-// }
 
 const sortByIndex = (a: { sortIndex?: number }, b: { sortIndex?: number }) => {
   const left = typeof a.sortIndex === 'number' ? a.sortIndex : 0
@@ -157,194 +127,6 @@ const uploadQuickListItems = async (items: QuickItem[]): Promise<void> => {
   }
 }
 
-// DISABLED: Goals bootstrap is disabled - new accounts start with empty goals
-// const migrateGoalsSnapshot = async (): Promise<void> => {
-//   // Read from bootstrap-snapshot first (created at sign-up), fall back to regular snapshot
-//   let snapshotRaw: string | null = null
-//   if (typeof window !== 'undefined') {
-//     snapshotRaw = window.localStorage.getItem('nc-taskwatch-bootstrap-snapshot::goals')
-//     if (!snapshotRaw) {
-//       // Fall back to regular snapshot - don't check owner since AuthCallbackScreen
-//       // may have already set it to the real user ID before bootstrap runs
-//       snapshotRaw = window.localStorage.getItem('nc-taskwatch-goals-snapshot')
-//     }
-//   }
-//   
-//   if (!snapshotRaw) {
-//     console.log('[bootstrap] No goals snapshot found to migrate')
-//     return
-//   }
-//   
-//   let snapshot: Array<any> = []
-//   try {
-//     const parsed = JSON.parse(snapshotRaw)
-//     if (Array.isArray(parsed)) {
-//       snapshot = parsed.filter((goal: any) => goal.name?.trim() !== QUICK_LIST_GOAL_NAME)
-//     }
-//   } catch (e) {
-//     console.warn('[bootstrap] Could not parse goals snapshot:', e)
-//     return
-//   }
-//   
-//   if (snapshot.length === 0) {
-//     console.log('[bootstrap] Goals snapshot is empty after filtering')
-//     return
-//   }
-//   
-//   console.log('[bootstrap] Migrating', snapshot.length, 'goals to database')
-//   
-//   if (!supabase) {
-//     throw new Error('Supabase client unavailable for goals migration')
-//   }
-//   const session = await ensureSingleUserSession()
-//   if (!session?.user?.id) {
-//     throw new Error('Missing Supabase session for goals migration')
-//   }
-//   const userId = session.user.id
-//   const { data: existingGoals, error: existingError } = await supabase
-//     .from('goals')
-//     .select('id')
-//     .eq('user_id', userId)
-//     .limit(1)
-//   if (existingError) {
-//     throw existingError
-//   }
-//   if (existingGoals && existingGoals.length > 0) {
-//     return
-//   }
-// 
-//   const goalIdMap = new Map<string, string>()
-//   const bucketIdMap = new Map<string, string>()
-//   const taskIdMap = new Map<string, string>()
-//   const goalRows: Array<Record<string, any>> = []
-//   const bucketRows: Array<Record<string, any>> = []
-//   const taskRows: Array<Record<string, any>> = []
-//   const subtaskRows: Array<Record<string, any>> = []
-// 
-//   snapshot.forEach((goal, goalIndex) => {
-//     const goalId = (() => {
-//       if (goal.id && goalIdMap.has(goal.id)) {
-//         return goalIdMap.get(goal.id)!
-//       }
-//       const generated = ensureUuid(goal.id)
-//       if (goal.id) {
-//         goalIdMap.set(goal.id, generated)
-//       }
-//       return generated
-//     })()
-//     goalRows.push({
-//       id: goalId,
-//       user_id: userId,
-//       name: sanitizeGoalName(goal.name),
-//       goal_colour: normalizeGradient((goal as any).goalColour ?? (goal as any).goal_colour),
-//       sort_index: (goalIndex + 1) * GOAL_SORT_STEP,
-//       starred: Boolean(goal.starred),
-//       goal_archive: Boolean(goal.archived),
-//       milestones_shown: typeof (goal as any).milestonesShown === 'boolean' ? (goal as any).milestonesShown : null,
-//     })
-//     ;(goal.buckets ?? []).forEach((bucket: any, bucketIndex: number) => {
-//       const bucketId = (() => {
-//         if (bucket.id && bucketIdMap.has(bucket.id)) {
-//           return bucketIdMap.get(bucket.id)!
-//         }
-//         const generated = ensureUuid(bucket.id)
-//         if (bucket.id) {
-//           bucketIdMap.set(bucket.id, generated)
-//         }
-//         return generated
-//       })()
-//       const surfaceStyle = ensureServerBucketStyle(bucket.surfaceStyle, DEFAULT_SURFACE_STYLE)
-//       bucketRows.push({
-//         id: bucketId,
-//         user_id: userId,
-//         goal_id: goalId,
-//         name: sanitizeBucketName(bucket.name),
-//         favorite: Boolean(bucket.favorite),
-//         sort_index: (bucketIndex + 1) * GOAL_SORT_STEP,
-//         buckets_card_style: surfaceStyle,
-//         bucket_archive: Boolean(bucket.archived),
-//       })
-//       ;(bucket.tasks ?? []).forEach((task: any, taskIndex: number) => {
-//         const text = sanitizeTaskText(task.text)
-//         if (!text) {
-//           return
-//         }
-//         const taskId = (() => {
-//           if (task.id && taskIdMap.has(task.id)) {
-//             return taskIdMap.get(task.id)!
-//           }
-//           const generated = ensureUuid(task.id)
-//           if (task.id) {
-//             taskIdMap.set(task.id, generated)
-//           }
-//           return generated
-//         })()
-//         taskRows.push({
-//           id: taskId,
-//           user_id: userId,
-//           bucket_id: bucketId,
-//           text,
-//           completed: Boolean(task.completed),
-//           difficulty: sanitizeDifficulty(task.difficulty),
-//           priority: Boolean(task.priority),
-//           sort_index: (taskIndex + 1) * GOAL_SORT_STEP,
-//           notes: typeof task.notes === 'string' ? task.notes : '',
-//         })
-//         ;(task.subtasks ?? []).forEach((subtask: any, subIndex: number) => {
-//           const subText = sanitizeTaskText(subtask.text)
-//           if (!subText) {
-//             return
-//           }
-//           subtaskRows.push({
-//             id: ensureUuid(subtask.id),
-//             user_id: userId,
-//             task_id: taskId,
-//             text: subText,
-//             completed: Boolean(subtask.completed),
-//             sort_index:
-//               typeof subtask.sortIndex === 'number' ? subtask.sortIndex : (subIndex + 1) * SUBTASK_SORT_STEP,
-//           })
-//         })
-//       })
-//     })
-//   })
-// 
-//   if (goalRows.length > 0) {
-//     const { error } = await supabase.from('goals').insert(goalRows)
-//     if (error) {
-//       throw error
-//     }
-//   }
-//   if (bucketRows.length > 0) {
-//     const { error } = await supabase.from('buckets').insert(bucketRows)
-//     if (error) {
-//       const code = String((error as any)?.code || '')
-//       if (code === '23514') {
-//         // Retry with null surface styles to satisfy strict server checks
-//         const fallbackRows = bucketRows.map((row) => ({ ...row, buckets_card_style: null }))
-//         const { error: retryError } = await supabase.from('buckets').insert(fallbackRows)
-//         if (retryError) {
-//           throw retryError
-//         }
-//       } else {
-//         throw error
-//       }
-//     }
-//   }
-//   if (taskRows.length > 0) {
-//     const { error } = await supabase.from('tasks').insert(taskRows)
-//     if (error) {
-//       throw error
-//     }
-//   }
-//   if (subtaskRows.length > 0) {
-//     const { error } = await supabase.from('task_subtasks').insert(subtaskRows)
-//     if (error) {
-//       throw error
-//     }
-//   }
-// }
-
 /**
  * Guest Data Lifecycle:
  * 
@@ -355,19 +137,12 @@ const uploadQuickListItems = async (items: QuickItem[]): Promise<void> => {
  * 5. SIGN-OUT: resetLocalStoresToGuest() clears guest keys → fresh defaults appear
  * 
  * Multi-tab: Only the tab doing sign-up bootstraps. Other tabs skip (bootstrap_completed=true)
+ * 
+ * NOTE: Goals bootstrap is disabled - new accounts start with empty goals.
+ * Goals are cleared via ensureGoalsUser() when switching to authenticated user.
  */
 const migrateGuestData = async (): Promise<void> => {
-  // Skip repeating rules - they have stale references like session history
-  // const rules = readLocalRepeatingRules()
-  // if (rules.length > 0) {
-  //   await pushRepeatingRulesToSupabase(rules, { strict: true })
-  // }
-
-  // DISABLED: Goals bootstrap is disabled - new accounts start with empty goals
-  // await migrateGoalsSnapshot()
-  
-  // CRITICAL: Clear goals snapshot immediately to prevent stale demo IDs from being used
-  // The snapshot has demo IDs that will cause 400 errors if used
+  // Clear goals snapshot to prevent stale demo IDs from being used
   if (typeof window !== 'undefined') {
     try {
       window.localStorage.removeItem('nc-taskwatch-goals-snapshot')
@@ -375,13 +150,6 @@ const migrateGuestData = async (): Promise<void> => {
       window.localStorage.removeItem('nc-taskwatch-bootstrap-snapshot::goals')
     } catch {}
   }
-
-  // Skip migrating session history - it has stale goal/bucket/task IDs
-  // that would need complex remapping. Fresh account = fresh history.
-  // const history = readStoredHistory()
-  // if (history.length > 0) {
-  //   await pushAllHistoryToSupabase(ruleIdMap, undefined, { skipRemoteCheck: true, strict: true })
-  // }
 
   // Read from snapshot first (created at sign-up), fall back to guest key
   const snapshotRoutinesRaw = typeof window !== 'undefined'
