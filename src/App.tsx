@@ -13,10 +13,10 @@ import { AUTH_SESSION_STORAGE_KEY } from './lib/authStorage'
 import { readCachedSessionTokens } from './lib/authStorage'
 import { ensureQuickListUser } from './lib/quickList'
 import { ensureLifeRoutineUser } from './lib/lifeRoutines'
-import { ensureHistoryUser, syncHistoryWithSupabase } from './lib/sessionHistory'
+import { ensureHistoryUser } from './lib/sessionHistory'
 import { ensureRepeatingRulesUser } from './lib/repeatingSessions'
 import { bootstrapGuestDataIfNeeded, clearAllLocalStorage } from './lib/bootstrap'
-import { ensureGoalsUser, syncGoalsSnapshotFromSupabase } from './lib/goalsSync'
+import { ensureGoalsUser } from './lib/goalsSync'
 
 type Theme = 'light' | 'dark'
 type TabKey = 'goals' | 'focus' | 'reflection'
@@ -332,15 +332,9 @@ function MainApp() {
   const [defaultCalendarView, setDefaultCalendarView] = useState<2 | 3 | 4 | 5 | 6 | 'week'>(6)
   const [snapToInterval, setSnapToInterval] = useState<0 | 5 | 10 | 15>(0) // 0 = none, or 5/10/15 minutes
   const [isSigningOut, setIsSigningOut] = useState(false)
-  // Only show "Signing you in..." screen when returning from OAuth redirect
-  const [isSigningIn, setIsSigningIn] = useState(() => {
-    if (typeof window !== 'undefined') {
-      const hasAuthCallback = window.location.hash.includes('access_token') || 
-                              window.location.search.includes('code=')
-      return hasAuthCallback
-    }
-    return false
-  })
+  // Used for blocking UI during in-app auth state changes (e.g., magic link)
+  // OAuth callback flow is handled by AuthCallbackScreen at /auth/callback
+  const [isSigningIn, setIsSigningIn] = useState(false)
   const [activeSettingsSection, setActiveSettingsSection] = useState(SETTINGS_SECTIONS[0]?.id ?? 'general')
   const [authEmailLookupValue, setAuthEmailLookupValue] = useState('')
   const [authEmailLookupResult, setAuthEmailLookupResult] = useState<boolean | null>(null)
@@ -2872,22 +2866,14 @@ function AuthCallbackScreen(): React.ReactElement {
         session = data?.session
       }
       
-      // Now that we're authenticated, pre-fetch all the user's data before redirecting
+      // Now that we're authenticated, run full bootstrap (migrate guest data + sync from Supabase)
+      // This ensures all data is ready before redirecting to the main app
       if (session?.user?.id && !cancelled) {
-        const userId = session.user.id
-        
-        // Set up user in all the stores
-        ensureQuickListUser(userId)
-        ensureLifeRoutineUser(userId)
-        ensureHistoryUser(userId)
-        ensureGoalsUser(userId)
-        await ensureRepeatingRulesUser(userId)
-        
-        // Fetch goals and history from Supabase so they're in localStorage
-        await Promise.all([
-          syncGoalsSnapshotFromSupabase(),
-          syncHistoryWithSupabase(),
-        ])
+        try {
+          await bootstrapGuestDataIfNeeded(session.user.id)
+        } catch (error) {
+          console.error('[AuthCallback] Bootstrap failed:', error)
+        }
       }
       
       if (!cancelled) {
