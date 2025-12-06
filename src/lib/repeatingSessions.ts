@@ -286,12 +286,15 @@ export const pushRepeatingRulesToSupabase = async (
     const baseRule = { ...rule, taskName: safeTaskName, dayOfWeek: normalizeWeekdays(rule.dayOfWeek) }
     const incomingId = typeof rule.id === 'string' ? rule.id : null
     if (!isRepeatingRuleId(incomingId)) {
+      // Non-UUID ID (like "sample-sleep-rule") - generate a new UUID
       const newId = randomRuleId()
       if (incomingId) {
         idMap[incomingId] = newId
       }
       return { ...baseRule, id: newId }
     }
+    // Already a valid UUID - add identity mapping so session remapping knows this rule exists
+    idMap[incomingId] = incomingId
     return baseRule
   })
   if (Object.keys(idMap).length > 0) {
