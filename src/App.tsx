@@ -1031,6 +1031,12 @@ function MainApp() {
       
       const profile = deriveProfileFromSupabaseUser(user ?? null)
       
+      // Block UI while syncing data - show "Signing you in..." screen
+      // This ensures data is ready before user sees the app
+      if (user && mounted) {
+        setIsSigningIn(true)
+      }
+      
       // Fetch all data BEFORE updating the profile (which triggers UI change)
       // Keep the auth modal open during this time - user just sees the sign-in screen
       await alignLocalStoresForUser(user?.id ?? null)
@@ -1038,6 +1044,7 @@ function MainApp() {
       // Now that data is ready, update the profile and close the modal
       if (mounted) {
         setUserProfile(profile)
+        setIsSigningIn(false)
         if (profile) {
           setAuthModalOpen(false)
         }
