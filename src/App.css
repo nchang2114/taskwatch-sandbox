@@ -1163,19 +1163,35 @@ html[data-theme='light'] .nav-links--drawer {
 }
 
 .profile-menu__link-status--synced {
-  color: #6ee7a8;
+  color: #22c55e;
+}
+
+html[data-theme='light'] .profile-menu__link-status--synced {
+  color: #16a34a;
 }
 
 .profile-menu__link-status--syncing {
   color: #45adff;
 }
 
+html[data-theme='light'] .profile-menu__link-status--syncing {
+  color: #2563eb;
+}
+
 .profile-menu__link-status--offline {
   color: #ff9e5c;
 }
 
+html[data-theme='light'] .profile-menu__link-status--offline {
+  color: #ea580c;
+}
+
 .profile-menu__link-status--pending {
   color: #ffd65c;
+}
+
+html[data-theme='light'] .profile-menu__link-status--pending {
+  color: #ca8a04;
 }
 
 .profile-menu__actions {
