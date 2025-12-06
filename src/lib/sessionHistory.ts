@@ -1709,9 +1709,17 @@ export const pushAllHistoryToSupabase = async (
   }
   const normalizedRecords = sortRecordsForStorage(records).map((record, index) => {
     // Remap IDs from guest demo IDs to real UUIDs
-    let mappedRepeatingId = record.repeatingSessionId
-    if (ruleIdMap && record.repeatingSessionId && ruleIdMap[record.repeatingSessionId]) {
-      mappedRepeatingId = ruleIdMap[record.repeatingSessionId]
+    // If repeatingSessionId exists but isn't in the ruleIdMap, set to null
+    // (the rule doesn't exist in the database, so we can't reference it)
+    let mappedRepeatingId: string | null = null
+    if (record.repeatingSessionId) {
+      if (ruleIdMap && ruleIdMap[record.repeatingSessionId]) {
+        mappedRepeatingId = ruleIdMap[record.repeatingSessionId]
+      } else if (!ruleIdMap) {
+        // No ruleIdMap provided, keep original (for non-migration syncs)
+        mappedRepeatingId = record.repeatingSessionId
+      }
+      // else: ruleIdMap exists but doesn't contain this ID -> null (rule doesn't exist)
     }
     let mappedGoalId = record.goalId
     if (record.goalId && goalIdMap[record.goalId]) {
