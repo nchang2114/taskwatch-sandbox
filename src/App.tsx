@@ -9,7 +9,7 @@ import FocusPage from './pages/FocusPage'
 import { FOCUS_EVENT_TYPE } from './lib/focusChannel'
 import { SCHEDULE_EVENT_TYPE } from './lib/scheduleChannel'
 import { supabase, ensureSingleUserSession } from './lib/supabaseClient'
-import { AUTH_SESSION_STORAGE_KEY, MIGRATION_LOCK_STORAGE_KEY, setMigrationLock, clearMigrationLock, isLockedByAnotherTab } from './lib/authStorage'
+import { AUTH_SESSION_STORAGE_KEY, MIGRATION_LOCK_STORAGE_KEY, setMigrationLock, clearMigrationLock, isLockedByAnotherTab, markMigrationComplete, clearMigrationLockIfOwned, isMigrationComplete } from './lib/authStorage'
 import { readCachedSessionTokens } from './lib/authStorage'
 import { ensureQuickListUser } from './lib/quickList'
 import { ensureLifeRoutineUser } from './lib/lifeRoutines'
@@ -299,6 +299,51 @@ const SETTINGS_SECTIONS: Array<{ id: string; label: string; description?: string
 
 
 function MainApp() {
+  // Check if another tab is signing in - if so, show waiting screen and poll
+  const [waitingForMigration] = useState(() => isLockedByAnotherTab())
+  
+  // Poll for migration lock status when waiting
+  useEffect(() => {
+    if (!waitingForMigration) {
+      return
+    }
+    
+    const checkLock = () => {
+      if (!isLockedByAnotherTab()) {
+        // Lock cleared, reload to get fresh state
+        window.location.reload()
+      }
+    }
+    
+    // Check every 2 seconds
+    const interval = setInterval(checkLock, 2000)
+    
+    // Also listen for storage events for immediate response
+    const handleStorage = (event: StorageEvent) => {
+      if (event.key === MIGRATION_LOCK_STORAGE_KEY) {
+        checkLock()
+      }
+    }
+    window.addEventListener('storage', handleStorage)
+    
+    return () => {
+      clearInterval(interval)
+      window.removeEventListener('storage', handleStorage)
+    }
+  }, [waitingForMigration])
+  
+  // Show waiting screen if another tab is signing in
+  if (waitingForMigration) {
+    return (
+      <div className="auth-callback-screen">
+        <div className="auth-callback-panel">
+          <p className="auth-callback-title">Signing in on another tab<span className="auth-dots"><span>.</span><span>.</span><span>.</span></span></p>
+          <p className="auth-callback-text">This tab will refresh automatically when ready.</p>
+        </div>
+      </div>
+    )
+  }
+  
   const [theme, setTheme] = useState<Theme>(getInitialTheme)
   const [activeTab, setActiveTab] = useState<TabKey>('focus')
   const [viewportWidth, setViewportWidth] = useState(() =>
@@ -311,7 +356,6 @@ function MainApp() {
   const [profileMenuOpen, setProfileMenuOpen] = useState(false)
   const [profileHelpMenuOpen, setProfileHelpMenuOpen] = useState(false)
   const [authModalOpen, setAuthModalOpen] = useState(false)
-  const [migrationLockedByOtherTab, setMigrationLockedByOtherTab] = useState(() => isLockedByAnotherTab())
   const [authEmailValue, setAuthEmailValue] = useState('')
   const [authEmailError, setAuthEmailError] = useState<string | null>(null)
   const [authEmailStage, setAuthEmailStage] = useState<'input' | 'create' | 'verify'>('input')
@@ -978,8 +1022,9 @@ function MainApp() {
       } finally {
         if (userId) {
           releaseAlignLock()
-          // Clear migration lock to signal other tabs that migration is complete
-          clearMigrationLock()
+          // Mark migration complete (don't clear lock yet - will clear after full page load)
+          // This signals other tabs to reload and get fresh state
+          markMigrationComplete()
         }
       }
     }
@@ -1121,6 +1166,8 @@ function MainApp() {
     void (async () => {
       await bootstrapSession()
       bootstrapComplete = true
+      // Clear migration lock if this tab owns it (sign-in flow completed)
+      clearMigrationLockIfOwned()
     })()
 
     // Listen to auth state changes within this tab
@@ -1136,15 +1183,12 @@ function MainApp() {
     const handleStorageChange = (event: StorageEvent) => {
       if (event.key === MIGRATION_LOCK_STORAGE_KEY) {
         // Migration lock changed in another tab
-        const newValue = event.newValue
-        if (!newValue || newValue === 'null' || newValue === '') {
-          // Lock was cleared - another tab finished migration, reload to get fresh state
+        // If another tab set the lock or marked it complete, reload immediately
+        // This prevents this tab from writing any data during migration
+        if (isLockedByAnotherTab() || isMigrationComplete()) {
           if (typeof window !== 'undefined') {
             window.location.reload()
           }
-        } else {
-          // Lock was set by another tab - show overlay
-          setMigrationLockedByOtherTab(isLockedByAnotherTab())
         }
       } else if (event.key === AUTH_SESSION_STORAGE_KEY) {
         // Skip debounce for sign-out events to ensure immediate response
@@ -2318,38 +2362,6 @@ const nextThemeLabel = theme === 'dark' ? 'light' : 'dark'
     return <SignOutScreen />
   }
 
-  // Show overlay when another tab is signing in (migration in progress)
-  const migrationOverlay = migrationLockedByOtherTab ? (
-    <div
-      style={{
-        position: 'fixed',
-        inset: 0,
-        zIndex: 99999,
-        backgroundColor: 'rgba(0, 0, 0, 0.75)',
-        display: 'flex',
-        flexDirection: 'column',
-        alignItems: 'center',
-        justifyContent: 'center',
-        color: '#fff',
-        gap: '1rem',
-      }}
-    >
-      <div
-        style={{
-          width: '2rem',
-          height: '2rem',
-          border: '3px solid rgba(255, 255, 255, 0.3)',
-          borderTopColor: '#fff',
-          borderRadius: '50%',
-          animation: 'spin 1s linear infinite',
-        }}
-      />
-      <p style={{ fontSize: '1.125rem', margin: 0 }}>Signing in from another tab...</p>
-      <p style={{ fontSize: '0.875rem', opacity: 0.7, margin: 0 }}>This tab will refresh automatically.</p>
-      <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
-    </div>
-  ) : null
-
   return (
     <div className="page">
       <header className={headerClassName}>
@@ -2846,7 +2858,6 @@ const nextThemeLabel = theme === 'dark' ? 'light' : 'dark'
           </div>
         </div>
       ) : null}
-      {migrationOverlay}
     </div>
   )
 }
@@ -2919,8 +2930,9 @@ function AuthCallbackScreen(): React.ReactElement {
         }
       }
       
-      // Clear migration lock to signal other tabs that sign-in is complete
-      clearMigrationLock()
+      // Mark migration complete (signals other tabs to reload)
+      // Don't clear the lock yet - the main app will clear it after full load
+      markMigrationComplete()
       
       if (!cancelled) {
         // Clear focus task state on sign-in so user starts with default presets
