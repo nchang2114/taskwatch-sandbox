@@ -167,19 +167,41 @@ export type MigrationLock = {
   completedAt?: number
 }
 
-// Generate a unique tab ID (persists for the lifetime of the page)
+// Generate a unique tab ID (persists for the lifetime of the tab via sessionStorage)
+const TAB_ID_STORAGE_KEY = 'nc-taskwatch-tab-id'
 let cachedTabId: string | null = null
+
 export const getTabId = (): string => {
   if (cachedTabId) {
     return cachedTabId
   }
-  // Try to use crypto.randomUUID if available
+  
+  // Try to read from sessionStorage first (survives page navigations within same tab)
+  if (typeof window !== 'undefined' && window.sessionStorage) {
+    try {
+      const stored = window.sessionStorage.getItem(TAB_ID_STORAGE_KEY)
+      if (stored) {
+        cachedTabId = stored
+        return cachedTabId
+      }
+    } catch {}
+  }
+  
+  // Generate new tab ID
   if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
     cachedTabId = crypto.randomUUID()
   } else {
     // Fallback to timestamp + random
     cachedTabId = `${Date.now()}-${Math.random().toString(36).substring(2, 11)}`
   }
+  
+  // Persist to sessionStorage
+  if (typeof window !== 'undefined' && window.sessionStorage) {
+    try {
+      window.sessionStorage.setItem(TAB_ID_STORAGE_KEY, cachedTabId)
+    } catch {}
+  }
+  
   return cachedTabId
 }
 
