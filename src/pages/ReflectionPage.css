@@ -2557,6 +2557,14 @@ html[data-theme='light'] .calendar-cell--today .calendar-day-number::after {
   min-height: 0;
 }
 
+/* Switch to 3 columns × 4 rows on smaller viewports */
+@media (max-width: 700px) {
+  .calendar-grid--year {
+    grid-template-columns: repeat(3, 1fr);
+    grid-template-rows: repeat(4, 1fr);
+  }
+}
+
 /* Generic carousel wrapper used for month/year swipe with preview panes */
 .calendar-carousel {
   position: relative;

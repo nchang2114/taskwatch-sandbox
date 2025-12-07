@@ -11827,19 +11827,23 @@ useEffect(() => {
       })()
 
       const buildYearPanel = (yr: number) => {
-        // Rotate weekday headers for mini month grids based on weekStartDay
-        const baseMiniHeaders = ['S','M','T','W','T','F','S']
-        const miniHeaders = [...baseMiniHeaders.slice(weekStartDay), ...baseMiniHeaders.slice(0, weekStartDay)]
         const months = Array.from({ length: 12 }).map((_, idx) => {
           const firstOfMonth = new Date(yr, idx, 1)
           const label = firstOfMonth.toLocaleDateString(undefined, { month: 'short' })
-          // Build a 6x7 grid of days for consistent height
+          // Calculate the start of the grid (first day of the week containing the 1st)
           const start = new Date(firstOfMonth)
           const startDow = start.getDay() // 0=Sun
           const offset = (startDow - weekStartDay + 7) % 7
           start.setDate(start.getDate() - offset)
+          // Calculate how many weeks we need: only show weeks that contain days from this month
+          const lastOfMonth = new Date(yr, idx + 1, 0) // last day of current month
+          const lastDow = lastOfMonth.getDay()
+          const daysAfterLastInWeek = (weekStartDay + 6 - lastDow + 7) % 7 // days to complete that week
+          const endOfGrid = new Date(lastOfMonth)
+          endOfGrid.setDate(lastOfMonth.getDate() + daysAfterLastInWeek)
+          const totalDays = Math.round((endOfGrid.getTime() - start.getTime()) / (24 * 60 * 60 * 1000)) + 1
           const cells: ReactElement[] = []
-          for (let i = 0; i < 42; i += 1) {
+          for (let i = 0; i < totalDays; i += 1) {
             const d = new Date(start)
             d.setDate(start.getDate() + i)
             d.setHours(0, 0, 0, 0)
@@ -11878,12 +11882,6 @@ useEffect(() => {
                 title={`Open ${label} ${yr}`}
               >
                 {label}
-              </div>
-              {/* Mini month weekday headers for clarity */}
-              <div className="calendar-month-headers" aria-hidden>
-                {miniHeaders.map((ch, i) => (
-                  <div key={`hdr-${label}-${i}`} className="calendar-month-header">{ch}</div>
-                ))}
               </div>
               <div className="calendar-month-grid" role="grid" aria-label={`Calendar for ${label} ${yr}`}>
                 {cells}
