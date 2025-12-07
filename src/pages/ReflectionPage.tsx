@@ -5503,6 +5503,11 @@ const [showInlineExtras, setShowInlineExtras] = useState(false)
     if (isLifeRoutineGoalSelected || isSnapbackGoalSelected) return false
     return availableBucketOptions.length === 0
   }, [isSnapbackGoalSelected, isLifeRoutineGoalSelected, isQuickListGoalSelected, availableBucketOptions.length])
+  const taskDropdownDisabled = useMemo(() => {
+    // Daily Life and Snapback don't have tasks - the "task" is really the routine/trigger selected in bucket
+    if (isLifeRoutineGoalSelected || isSnapbackGoalSelected) return true
+    return taskDropdownOptions.length === 0
+  }, [isLifeRoutineGoalSelected, isSnapbackGoalSelected, taskDropdownOptions.length])
 
   const historyWithTaskNotes = useMemo(() => {
     if (editorOpenRef.current) {
@@ -5843,16 +5848,17 @@ const [showInlineExtras, setShowInlineExtras] = useState(false)
         if (field === 'goalName') {
           const nextGoal = nextValue.trim().toLowerCase()
           const prevGoal = draft.goalName.trim().toLowerCase()
-          const wasQuickList = prevGoal === QUICK_LIST_NAME.toLowerCase()
           const isQuickList = nextGoal === QUICK_LIST_NAME.toLowerCase()
           
-          // When selecting Quick List, auto-set the bucket
-          if (isQuickList && !wasQuickList) {
-            base = { ...base, bucketName: QUICK_LIST_BUCKET_NAME }
-          }
-          // When changing away from Quick List, reset bucket and task
-          if (wasQuickList && !isQuickList) {
-            base = { ...base, bucketName: '', taskName: '' }
+          // When goal changes, reset bucket and task (except for special cases)
+          if (nextGoal !== prevGoal) {
+            if (isQuickList) {
+              // Quick List: auto-set the bucket, clear task
+              base = { ...base, bucketName: QUICK_LIST_BUCKET_NAME, taskName: '' }
+            } else {
+              // All other goals: reset bucket and task
+              base = { ...base, bucketName: '', taskName: '' }
+            }
           }
         }
         
@@ -13061,7 +13067,7 @@ useEffect(() => {
                                 placeholder={availableTaskOptions.length ? 'Select task' : 'No tasks available'}
                                 options={taskDropdownOptions}
                                 onChange={handleTaskDropdownChange}
-                                disabled={taskDropdownOptions.length === 0}
+                                disabled={taskDropdownDisabled}
                               />
                             </div>
             <div className="history-timeline__extras">
@@ -13857,7 +13863,7 @@ useEffect(() => {
                       placeholder={availableTaskOptions.length ? 'Select task' : 'No tasks available'}
                       options={taskDropdownOptions}
                       onChange={handleTaskDropdownChange}
-                      disabled={taskDropdownOptions.length === 0}
+                      disabled={taskDropdownDisabled}
                     />
                   </div>
                   <div className="history-timeline__extras">
@@ -14067,7 +14073,7 @@ useEffect(() => {
                   placeholder={availableTaskOptions.length ? 'Select task' : 'No tasks available'}
                   options={taskDropdownOptions}
                   onChange={handleTaskDropdownChange}
-                  disabled={taskDropdownOptions.length === 0}
+                  disabled={taskDropdownDisabled}
                 />
               </div>
               <div className="history-timeline__extras">
@@ -15114,7 +15120,7 @@ useEffect(() => {
                                 placeholder={availableTaskOptions.length ? 'Select task' : 'No tasks available'}
                                 options={taskDropdownOptions}
                                 onChange={handleTaskDropdownChange}
-                                disabled={taskDropdownOptions.length === 0}
+                                disabled={taskDropdownDisabled}
                               />
                             </div>
                             <div className="history-timeline__extras">
