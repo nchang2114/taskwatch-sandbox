@@ -4998,6 +4998,14 @@ const [showInlineExtras, setShowInlineExtras] = useState(false)
       setActiveRange('7d')
       setCalendarView('3d')
       setMultiDayCount(6)
+      // Compute a start time one hour from now, snapped to minute
+      const now = Date.now()
+      const start = Math.max(now + 60 * 60 * 1000, now + 60 * 1000)
+      // Navigate calendar so today is in the second column of the 6-day view
+      // Offset by -1 means the first column is yesterday, second column is today
+      const dayOffsetForScheduled = -1
+      setHistoryDayOffset(dayOffsetForScheduled)
+      historyDayOffsetRef.current = dayOffsetForScheduled
       // Scroll calendar into view
       setTimeout(() => {
         if (historyBlockRef.current) {
@@ -5010,9 +5018,6 @@ const [showInlineExtras, setShowInlineExtras] = useState(false)
           window.scrollTo({ top: targetY, behavior: 'smooth' })
         }
       }, 100)
-      // Compute a start time one hour from now, snapped to minute
-      const now = Date.now()
-      const start = Math.max(now + 60 * 60 * 1000, now + 60 * 1000)
       const end = start + 60 * 60 * 1000
       const elapsed = Math.max(1, end - start)
       const goalName = detail.goalName?.trim() ?? ''
