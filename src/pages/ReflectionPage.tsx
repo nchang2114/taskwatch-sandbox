@@ -5420,6 +5420,8 @@ const [showInlineExtras, setShowInlineExtras] = useState(false)
       resolvedGoalOptions.some((option) => option.trim().toLowerCase() === normalizedLifeRoutines) ||
       lifeRoutineBucketOptions.length > 0
     const next: HistoryDropdownOption[] = [{ value: '', label: 'No goal' }]
+    // System Layers section
+    next.push({ value: '__hdr_system_layers__', label: 'System Layers', disabled: true })
     if (hasLifeOption) {
       next.push({ value: LIFE_ROUTINES_NAME, label: LIFE_ROUTINES_NAME })
     }
@@ -5427,9 +5429,13 @@ const [showInlineExtras, setShowInlineExtras] = useState(false)
     next.push({ value: QUICK_LIST_NAME, label: QUICK_LIST_NAME })
     // Include Snapback
     next.push({ value: SNAPBACK_NAME, label: SNAPBACK_NAME })
-    optionsWithoutSpecial.forEach((option) => {
-      next.push({ value: option, label: option })
-    })
+    // Your Goals section
+    if (optionsWithoutSpecial.length > 0) {
+      next.push({ value: '__hdr_your_goals__', label: 'Your Goals', disabled: true })
+      optionsWithoutSpecial.forEach((option) => {
+        next.push({ value: option, label: option })
+      })
+    }
     return next
   }, [lifeRoutineBucketOptions, resolvedGoalOptions])
 
