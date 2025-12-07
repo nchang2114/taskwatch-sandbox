@@ -9,7 +9,7 @@ import FocusPage from './pages/FocusPage'
 import { FOCUS_EVENT_TYPE } from './lib/focusChannel'
 import { SCHEDULE_EVENT_TYPE } from './lib/scheduleChannel'
 import { supabase, ensureSingleUserSession } from './lib/supabaseClient'
-import { AUTH_SESSION_STORAGE_KEY } from './lib/authStorage'
+import { AUTH_SESSION_STORAGE_KEY, MIGRATION_LOCK_STORAGE_KEY, setMigrationLock, clearMigrationLock, isLockedByAnotherTab } from './lib/authStorage'
 import { readCachedSessionTokens } from './lib/authStorage'
 import { ensureQuickListUser } from './lib/quickList'
 import { ensureLifeRoutineUser } from './lib/lifeRoutines'
@@ -311,6 +311,7 @@ function MainApp() {
   const [profileMenuOpen, setProfileMenuOpen] = useState(false)
   const [profileHelpMenuOpen, setProfileHelpMenuOpen] = useState(false)
   const [authModalOpen, setAuthModalOpen] = useState(false)
+  const [migrationLockedByOtherTab, setMigrationLockedByOtherTab] = useState(() => isLockedByAnotherTab())
   const [authEmailValue, setAuthEmailValue] = useState('')
   const [authEmailError, setAuthEmailError] = useState<string | null>(null)
   const [authEmailStage, setAuthEmailStage] = useState<'input' | 'create' | 'verify'>('input')
@@ -501,6 +502,9 @@ function MainApp() {
       return false
     }
     try {
+      // Set migration lock BEFORE OAuth redirect so other tabs know to wait
+      setMigrationLock()
+      
       const queryParams: Record<string, string> = {}
       const trimmedHint = emailHint?.trim()
       if (trimmedHint) {
@@ -517,10 +521,12 @@ function MainApp() {
         },
       })
       if (error) {
+        clearMigrationLock()
         return false
       }
       return true
     } catch {
+      clearMigrationLock()
       return false
     }
   }, [])
@@ -530,6 +536,9 @@ function MainApp() {
       return
     }
     try {
+      // Set migration lock BEFORE OAuth redirect so other tabs know to wait
+      setMigrationLock()
+      
       const { error } = await supabase.auth.signInWithOAuth({
         provider: 'azure',
         options: {
@@ -537,9 +546,12 @@ function MainApp() {
         },
       })
       if (error) {
+        clearMigrationLock()
         return
       }
-    } catch {}
+    } catch {
+      clearMigrationLock()
+    }
   }, [])
 
   const isAuthEmailValid = useMemo(() => EMAIL_PATTERN.test(authEmailValue.trim()), [authEmailValue])
@@ -966,6 +978,8 @@ function MainApp() {
       } finally {
         if (userId) {
           releaseAlignLock()
+          // Clear migration lock to signal other tabs that migration is complete
+          clearMigrationLock()
         }
       }
     }
@@ -1120,7 +1134,19 @@ function MainApp() {
 
     // Listen to auth changes from other tabs via storage events
     const handleStorageChange = (event: StorageEvent) => {
-      if (event.key === AUTH_SESSION_STORAGE_KEY) {
+      if (event.key === MIGRATION_LOCK_STORAGE_KEY) {
+        // Migration lock changed in another tab
+        const newValue = event.newValue
+        if (!newValue || newValue === 'null' || newValue === '') {
+          // Lock was cleared - another tab finished migration, reload to get fresh state
+          if (typeof window !== 'undefined') {
+            window.location.reload()
+          }
+        } else {
+          // Lock was set by another tab - show overlay
+          setMigrationLockedByOtherTab(isLockedByAnotherTab())
+        }
+      } else if (event.key === AUTH_SESSION_STORAGE_KEY) {
         // Skip debounce for sign-out events to ensure immediate response
         const newValue = event.newValue
         const isSignOut = !newValue || newValue === 'null' || newValue === ''
@@ -2292,6 +2318,38 @@ const nextThemeLabel = theme === 'dark' ? 'light' : 'dark'
     return <SignOutScreen />
   }
 
+  // Show overlay when another tab is signing in (migration in progress)
+  const migrationOverlay = migrationLockedByOtherTab ? (
+    <div
+      style={{
+        position: 'fixed',
+        inset: 0,
+        zIndex: 99999,
+        backgroundColor: 'rgba(0, 0, 0, 0.75)',
+        display: 'flex',
+        flexDirection: 'column',
+        alignItems: 'center',
+        justifyContent: 'center',
+        color: '#fff',
+        gap: '1rem',
+      }}
+    >
+      <div
+        style={{
+          width: '2rem',
+          height: '2rem',
+          border: '3px solid rgba(255, 255, 255, 0.3)',
+          borderTopColor: '#fff',
+          borderRadius: '50%',
+          animation: 'spin 1s linear infinite',
+        }}
+      />
+      <p style={{ fontSize: '1.125rem', margin: 0 }}>Signing in from another tab...</p>
+      <p style={{ fontSize: '0.875rem', opacity: 0.7, margin: 0 }}>This tab will refresh automatically.</p>
+      <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
+    </div>
+  ) : null
+
   return (
     <div className="page">
       <header className={headerClassName}>
@@ -2788,6 +2846,7 @@ const nextThemeLabel = theme === 'dark' ? 'light' : 'dark'
           </div>
         </div>
       ) : null}
+      {migrationOverlay}
     </div>
   )
 }
@@ -2859,6 +2918,9 @@ function AuthCallbackScreen(): React.ReactElement {
           console.error('[AuthCallback] Bootstrap failed:', error)
         }
       }
+      
+      // Clear migration lock to signal other tabs that sign-in is complete
+      clearMigrationLock()
       
       if (!cancelled) {
         // Clear focus task state on sign-in so user starts with default presets
