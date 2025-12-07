@@ -751,8 +751,11 @@ export const bootstrapGuestDataIfNeeded = async (userId: string | null | undefin
     if (alreadyBootstrapped) {
       // User already bootstrapped (returning user on page refresh)
       // Just sync to pick up any changes from other devices - don't clear anything
-      console.log('[bootstrap] User already bootstrapped, syncing from DB')
-      await runAllSyncs()
+      // Skip if we just synced (e.g. auth callback redirect within seconds)
+      if (!isRecentlyFullSynced()) {
+        console.log('[bootstrap] User already bootstrapped, syncing from DB')
+        await runAllSyncs()
+      }
       return false
     }
     
