@@ -91,6 +91,7 @@ import {
 import { broadcastSnapbackUpdate, subscribeToSnapbackSync } from '../lib/snapbackChannel'
 import { supabase } from '../lib/supabaseClient'
 import { logWarn } from '../lib/logging'
+import { isRecentlyFullSynced } from '../lib/bootstrap'
 
 type ReflectionRangeKey = '24h' | '48h' | '7d' | 'all'
 
@@ -3871,6 +3872,10 @@ export default function ReflectionPage({ use24HourTime = false, weekStartDay = 0
       if (isGuestOwner) {
         return
       }
+      // Skip fetch if we just did a full sync (e.g. after auth callback)
+      if (isRecentlyFullSynced()) {
+        return
+      }
       try {
         const rules = await fetchRepeatingSessionRules()
         if (!cancelled && Array.isArray(rules)) {
@@ -4831,6 +4836,10 @@ const [showInlineExtras, setShowInlineExtras] = useState(false)
     if (!owner || owner === HISTORY_GUEST_USER_ID) {
       return
     }
+    // Skip fetch if we just did a full sync (e.g. after auth callback)
+    if (isRecentlyFullSynced()) {
+      return
+    }
     let cancelled = false
     void (async () => {
       const synced = await syncHistoryWithSupabase()
@@ -4849,6 +4858,10 @@ const [showInlineExtras, setShowInlineExtras] = useState(false)
   useEffect(() => {
     const owner = readGoalsSnapshotOwner()
     if (!owner || owner === GOALS_GUEST_USER_ID) {
+      return
+    }
+    // Skip fetch if we just did a full sync (e.g. after auth callback)
+    if (isRecentlyFullSynced()) {
       return
     }
     let cancelled = false

@@ -93,6 +93,7 @@ import {
   areHistorySubtasksEqual,
 } from '../lib/sessionHistory'
 import { logDebug, logWarn } from '../lib/logging'
+import { isRecentlyFullSynced } from '../lib/bootstrap'
 
 // Minimal sync instrumentation disabled by default
 const DEBUG_SYNC = false
@@ -1152,6 +1153,10 @@ export function FocusPage({ viewportWidth: _viewportWidth, showMilliseconds = tr
   }, [])
 
   useEffect(() => {
+    // Skip fetch if we just did a full sync (e.g. after auth callback)
+    if (isRecentlyFullSynced()) {
+      return
+    }
     let cancelled = false
     void (async () => {
       const synced = await syncLifeRoutinesWithSupabase()
@@ -1296,6 +1301,10 @@ useEffect(() => {
   useEffect(() => {
     const owner = readHistoryOwnerId()
     if (!owner || owner === HISTORY_GUEST_USER_ID) {
+      return
+    }
+    // Skip fetch if we just did a full sync (e.g. after auth callback)
+    if (isRecentlyFullSynced()) {
       return
     }
     let cancelled = false
@@ -2210,6 +2219,10 @@ useEffect(() => {
         }
       } catch {}
       if (isGuestOwner) {
+        return
+      }
+      // Skip fetch if we just did a full sync (e.g. after auth callback)
+      if (isRecentlyFullSynced()) {
         return
       }
       try {

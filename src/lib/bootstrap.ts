@@ -27,6 +27,37 @@ export type IdMaps = {
   taskIdMap: Map<string, string>
 }
 
+// Freshness check: skip redundant fetches immediately after a full sync
+const LAST_FULL_SYNC_KEY = 'nc-taskwatch-last-full-sync'
+const FRESHNESS_WINDOW_MS = 5000 // 5 seconds
+
+export const setLastFullSyncTimestamp = (): void => {
+  if (typeof window === 'undefined') return
+  try {
+    window.localStorage.setItem(LAST_FULL_SYNC_KEY, String(Date.now()))
+  } catch {}
+}
+
+export const clearLastFullSyncTimestamp = (): void => {
+  if (typeof window === 'undefined') return
+  try {
+    window.localStorage.removeItem(LAST_FULL_SYNC_KEY)
+  } catch {}
+}
+
+export const isRecentlyFullSynced = (): boolean => {
+  if (typeof window === 'undefined') return false
+  try {
+    const raw = window.localStorage.getItem(LAST_FULL_SYNC_KEY)
+    if (!raw) return false
+    const timestamp = Number(raw)
+    if (!Number.isFinite(timestamp)) return false
+    return Date.now() - timestamp < FRESHNESS_WINDOW_MS
+  } catch {
+    return false
+  }
+}
+
 /**
  * Runs all 5 sync functions in parallel to pull user data from Supabase into localStorage.
  * Called after localStorage.clear() during bootstrap to populate the app with user data.
@@ -41,6 +72,7 @@ export const runAllSyncs = async (): Promise<void> => {
     syncSnapbackTriggersFromSupabase(),
     syncQuickListFromSupabase(),
   ])
+  setLastFullSyncTimestamp()
   console.log('[bootstrap] All syncs complete')
 }
 
