@@ -2484,6 +2484,7 @@ html[data-theme='light'] .history-calendar {
   font-size: 0.8rem;
   color: var(--text-secondary);
   padding: 0.25rem 0.35rem;
+  text-align: center;
 }
 
 .calendar-cell {
@@ -2493,6 +2494,9 @@ html[data-theme='light'] .history-calendar {
   border-radius: 0.5rem;
   padding: 0.35rem;
   position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
 }
 
 .calendar-cell--muted {
