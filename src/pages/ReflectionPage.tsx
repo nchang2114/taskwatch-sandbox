@@ -6961,7 +6961,7 @@ useEffect(() => {
       return
     }
     const handleStorage = (event: StorageEvent) => {
-      if (event.key === HISTORY_STORAGE_KEY) {
+      if (event.key?.startsWith(HISTORY_STORAGE_KEY)) {
         const stored = readPersistedHistory()
         if (!historiesAreEqual(latestHistoryRef.current, stored)) {
           setHistory(stored)

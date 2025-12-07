@@ -1333,7 +1333,7 @@ useEffect(() => {
     }
 
     const handleStorage = (event: StorageEvent) => {
-      if (event.key !== HISTORY_STORAGE_KEY) {
+      if (!event.key?.startsWith(HISTORY_STORAGE_KEY)) {
         return
       }
       try {
