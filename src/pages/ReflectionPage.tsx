@@ -3791,7 +3791,7 @@ export default function ReflectionPage({ use24HourTime = false, weekStartDay = 0
   const calendarPanFallbackTimeoutRef = useRef<number | null>(null)
   const calendarPanDesiredOffsetRef = useRef<number>(historyDayOffset)
   // Repeating sessions (rules fetched from backend)
-  const [repeatingRules, setRepeatingRules] = useState<RepeatingSessionRule[]>([])
+  const [repeatingRules, setRepeatingRules] = useState<RepeatingSessionRule[]>(() => readLocalRepeatingRules())
   const [historyOwnerSignal, setHistoryOwnerSignal] = useState(0)
   const historyOwnerId = useMemo(() => readHistoryOwnerId(), [historyOwnerSignal])
   const [accountCreatedAtMs, setAccountCreatedAtMs] = useState<number | null>(null)

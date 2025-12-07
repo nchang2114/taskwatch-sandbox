@@ -2196,7 +2196,7 @@ useEffect(() => {
   }, [activeGoalSnapshots, currentTime, goalGradientById, history, lifeRoutineColorByBucket])
 
   // Fetch repeating rules to surface guide tasks that overlap 'now'
-  const [repeatingRules, setRepeatingRules] = useState<RepeatingSessionRule[]>([])
+  const [repeatingRules, setRepeatingRules] = useState<RepeatingSessionRule[]>(() => readLocalRepeatingRules())
   useEffect(() => {
     let cancelled = false
     const hydrateRepeatingRules = async () => {
