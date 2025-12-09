@@ -893,6 +893,53 @@ const daysBetweenDateKeys = (baseKey: string, targetKey: string): number => {
   return Math.round((targetDate.getTime() - baseDate.getTime()) / DAY_DURATION_MS)
 }
 
+// Get day of week (0=Sunday, 6=Saturday) from a date key string
+const getDayOfWeekFromDateKey = (dateKey: string): number => {
+  const [year, month, day] = dateKey.split('-').map(Number)
+  // Use UTC to avoid local timezone shifting the date
+  return new Date(Date.UTC(year, month - 1, day)).getUTCDay()
+}
+
+// Get date parts (year, month 1-12, day 1-31) from a date key string
+const getDatePartsFromDateKey = (dateKey: string): { year: number; month: number; day: number } => {
+  const [year, month, day] = dateKey.split('-').map(Number)
+  return { year, month, day }
+}
+
+// Get "month-day" key (e.g., "12-10") from a date key string for annual matching
+const monthDayKeyFromDateKey = (dateKey: string): string => {
+  const { month, day } = getDatePartsFromDateKey(dateKey)
+  return `${month}-${day}`
+}
+
+// Check if a date key matches a monthly rule (date-key aware version)
+const matchesMonthlyDayWithDateKey = (rule: RepeatingSessionRule, dateKey: string): boolean => {
+  const { year, month, day } = getDatePartsFromDateKey(dateKey)
+  const pattern = ruleMonthlyPattern(rule)
+  if (pattern === 'day') {
+    const anchorDay = ruleDayOfMonth(rule)
+    if (!Number.isFinite(anchorDay as number)) return false
+    // Use UTC to avoid timezone issues when calculating last day of month
+    const lastDay = new Date(Date.UTC(year, month, 0)).getUTCDate()
+    const expectedDay = Math.min(anchorDay as number, lastDay)
+    return day === expectedDay
+  }
+  const weekday = ruleMonthlyWeekday(rule)
+  if (!Number.isFinite(weekday as number)) return false
+  if (pattern === 'first') {
+    // First day of month in UTC
+    const firstOfMonth = new Date(Date.UTC(year, month - 1, 1))
+    const offset = ((weekday as number) - firstOfMonth.getUTCDay() + 7) % 7
+    const firstOccurrence = 1 + offset
+    return day === firstOccurrence
+  }
+  // Last occurrence pattern
+  const lastOfMonth = new Date(Date.UTC(year, month, 0))
+  const offset = (lastOfMonth.getUTCDay() - (weekday as number) + 7) % 7
+  const lastOccurrence = lastOfMonth.getUTCDate() - offset
+  return day === lastOccurrence
+}
+
 // Convert a percentage position (0-100) on a day to a UTC timestamp
 // Uses the day's midnight UTC as the base
 const percentToUtcTimestamp = (percent: number, dayMidnightUtc: number): number => {
@@ -9891,16 +9938,18 @@ useEffect(() => {
           const makeOccurrenceKey = (ruleId: string, baseMs: number) => `${ruleId}:${getDateKeyInTimezone(baseMs, displayTimezone)}`
           const isRuleScheduledForDay = (rule: RepeatingSessionRule, dayStart: number) => {
             if (!rule.isActive) return false
+            // Get date key in display timezone for accurate day-of-week calculation
+            const dateKey = getDateKeyInTimezone(dayStart, displayTimezone)
             if (rule.frequency === 'daily') return ruleIntervalAllowsDay(rule, dayStart)
             if (rule.frequency === 'weekly') {
-              const d = new Date(dayStart)
-              return Array.isArray(rule.dayOfWeek) && rule.dayOfWeek.includes(d.getDay()) && ruleIntervalAllowsDay(rule, dayStart)
+              const dow = getDayOfWeekFromDateKey(dateKey)
+              return Array.isArray(rule.dayOfWeek) && rule.dayOfWeek.includes(dow) && ruleIntervalAllowsDay(rule, dayStart)
             }
             if (rule.frequency === 'monthly') {
-              return matchesMonthlyDay(rule, dayStart) && ruleIntervalAllowsDay(rule, dayStart)
+              return matchesMonthlyDayWithDateKey(rule, dateKey) && ruleIntervalAllowsDay(rule, dayStart)
             }
             if (rule.frequency === 'annually') {
-              const dayKey = monthDayKey(dayStart)
+              const dayKey = monthDayKeyFromDateKey(dateKey)
               const ruleKey = ruleMonthDayKey(rule)
               return ruleKey !== null && ruleKey === dayKey && ruleIntervalAllowsDay(rule, dayStart)
             }
@@ -10147,16 +10196,18 @@ useEffect(() => {
 
           const isRuleScheduledForDay = (rule: RepeatingSessionRule, dayStart: number) => {
             if (!rule.isActive) return false
+            // Get date key in display timezone for accurate day-of-week calculation
+            const dateKey = getDateKeyInTimezone(dayStart, displayTimezone)
             if (rule.frequency === 'daily') return ruleIntervalAllowsDay(rule, dayStart)
             if (rule.frequency === 'weekly') {
-              const d = new Date(dayStart)
-              return Array.isArray(rule.dayOfWeek) && rule.dayOfWeek.includes(d.getDay()) && ruleIntervalAllowsDay(rule, dayStart)
+              const dow = getDayOfWeekFromDateKey(dateKey)
+              return Array.isArray(rule.dayOfWeek) && rule.dayOfWeek.includes(dow) && ruleIntervalAllowsDay(rule, dayStart)
             }
             if (rule.frequency === 'monthly') {
-              return matchesMonthlyDay(rule, dayStart) && ruleIntervalAllowsDay(rule, dayStart)
+              return matchesMonthlyDayWithDateKey(rule, dateKey) && ruleIntervalAllowsDay(rule, dayStart)
             }
             if (rule.frequency === 'annually') {
-              const dayKey = monthDayKey(dayStart)
+              const dayKey = monthDayKeyFromDateKey(dateKey)
               const ruleKey = ruleMonthDayKey(rule)
               return ruleKey !== null && ruleKey === dayKey && ruleIntervalAllowsDay(rule, dayStart)
             }
