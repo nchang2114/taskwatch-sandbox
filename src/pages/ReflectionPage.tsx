@@ -883,6 +883,16 @@ const addDaysToDateKey = (dateKey: string, days: number): string => {
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`
 }
 
+// Calculate the number of days between two date keys (targetKey - baseKey)
+// Returns positive if targetKey is after baseKey, negative if before
+const daysBetweenDateKeys = (baseKey: string, targetKey: string): number => {
+  const [by, bm, bd] = baseKey.split('-').map(Number)
+  const [ty, tm, td] = targetKey.split('-').map(Number)
+  const baseDate = new Date(by, bm - 1, bd)
+  const targetDate = new Date(ty, tm - 1, td)
+  return Math.round((targetDate.getTime() - baseDate.getTime()) / DAY_DURATION_MS)
+}
+
 // Convert a percentage position (0-100) on a day to a UTC timestamp
 // Uses the day's midnight UTC as the base
 const percentToUtcTimestamp = (percent: number, dayMidnightUtc: number): number => {
@@ -8178,6 +8188,39 @@ useEffect(() => {
   
   // Get the effective display timezone (user-selected or system default)
   const displayTimezone = deferredAppTimezone ?? getCurrentSystemTimezone()
+  
+  // Track previous timezone to compensate historyDayOffset when timezone changes
+  // Use appTimezone (not deferred) so offset updates immediately when user changes TZ
+  // Use useLayoutEffect to update offset synchronously before paint
+  const effectiveAppTimezone = appTimezone ?? getCurrentSystemTimezone()
+  const prevAppTimezoneRef = useRef<string>(effectiveAppTimezone)
+  useLayoutEffect(() => {
+    const prevTz = prevAppTimezoneRef.current
+    if (prevTz !== effectiveAppTimezone) {
+      // Timezone changed - adjust historyDayOffset to keep the same date visible
+      // Get the currently viewed date key in the OLD timezone
+      const oldTodayKey = getDateKeyInTimezone(Date.now(), prevTz)
+      const currentDateKey = historyDayOffsetRef.current === 0 
+        ? oldTodayKey 
+        : addDaysToDateKey(oldTodayKey, historyDayOffsetRef.current)
+      
+      // Get what "today" is in the NEW timezone
+      const newTodayKey = getDateKeyInTimezone(Date.now(), effectiveAppTimezone)
+      
+      // Calculate the new offset needed to show the same date
+      const newOffset = daysBetweenDateKeys(newTodayKey, currentDateKey)
+      
+      // Update offset synchronously to prevent visual glitch
+      if (newOffset !== historyDayOffsetRef.current) {
+        historyDayOffsetRef.current = newOffset
+        flushSync(() => {
+          setHistoryDayOffset(newOffset)
+        })
+      }
+      
+      prevAppTimezoneRef.current = effectiveAppTimezone
+    }
+  }, [effectiveAppTimezone])
   
   // Get today's date key in the display timezone, then apply offset
   const selectedDateKey = useMemo(() => {
