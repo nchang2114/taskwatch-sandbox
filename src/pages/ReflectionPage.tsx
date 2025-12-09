@@ -9936,43 +9936,6 @@ useEffect(() => {
           })()
           // Use display timezone for occurrence key to match confirmedKeySet
           const makeOccurrenceKey = (ruleId: string, baseMs: number) => `${ruleId}:${getDateKeyInTimezone(baseMs, displayTimezone)}`
-          const isRuleScheduledForDay = (rule: RepeatingSessionRule, dayStart: number) => {
-            if (!rule.isActive) return false
-            // Get date key in display timezone for accurate day-of-week calculation
-            const dateKey = getDateKeyInTimezone(dayStart, displayTimezone)
-            if (rule.frequency === 'daily') return ruleIntervalAllowsDay(rule, dayStart)
-            if (rule.frequency === 'weekly') {
-              const dow = getDayOfWeekFromDateKey(dateKey)
-              return Array.isArray(rule.dayOfWeek) && rule.dayOfWeek.includes(dow) && ruleIntervalAllowsDay(rule, dayStart)
-            }
-            if (rule.frequency === 'monthly') {
-              return matchesMonthlyDayWithDateKey(rule, dateKey) && ruleIntervalAllowsDay(rule, dayStart)
-            }
-            if (rule.frequency === 'annually') {
-              const dayKey = monthDayKeyFromDateKey(dateKey)
-              const ruleKey = ruleMonthDayKey(rule)
-              return ruleKey !== null && ruleKey === dayKey && ruleIntervalAllowsDay(rule, dayStart)
-            }
-            return false
-          }
-          const isWithinBoundaries = (rule: RepeatingSessionRule, baseDayStart: number) => {
-            const timeOfDayMin = Math.max(0, Math.min(1439, rule.timeOfDayMinutes))
-            const scheduledStart = baseDayStart + timeOfDayMin * MINUTE_MS
-            const startAtMs = (rule as any).startAtMs as number | undefined
-            if (Number.isFinite(startAtMs as number)) {
-              if (scheduledStart < (startAtMs as number)) return false
-            } else {
-              const createdMs = (rule as any).createdAtMs as number | undefined
-              if (Number.isFinite(createdMs as number)) {
-                if (scheduledStart <= (createdMs as number)) return false
-              }
-            }
-            const endAtMs = (rule as any).endAtMs as number | undefined
-            if (Number.isFinite(endAtMs as number)) {
-              if (scheduledStart > (endAtMs as number)) return false
-            }
-            return true
-          }
           
           // For all-day rules, check boundaries by DATE not timestamp
           // This properly handles the case where an all-day entry spawned the rule
