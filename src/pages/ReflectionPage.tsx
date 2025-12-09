@@ -5941,11 +5941,11 @@ const [showInlineExtras, setShowInlineExtras] = useState(false)
               }
             }
           }
-          // For timezone markers, sync endedAt with startedAt
+          // For timezone markers, set duration to 1 minute
           if (nextBucket === TIMEZONE_CHANGE_MARKER) {
             const startTs = base.startedAt
             if (startTs !== null) {
-              base = { ...base, endedAt: startTs }
+              base = { ...base, endedAt: startTs + MINUTE_MS }
             }
           }
           // Only auto-fill once: when choosing a Life Routine bucket, and only if name is effectively empty or default
@@ -9815,12 +9815,13 @@ useEffect(() => {
           })
         }
         if (Array.isArray(repeatingRules) && repeatingRules.length > 0) {
+          // Use display timezone to get date key (must match guide's occurrence key)
           const confirmedKeySet = (() => {
             const set = new Set<string>()
             effectiveHistory.forEach((h) => {
               const rid = (h as any).repeatingSessionId as string | undefined | null
               const ot = (h as any).originalTime as number | undefined | null
-              if (rid && Number.isFinite(ot as number)) set.add(`${rid}:${formatLocalYmd(ot as number)}`)
+              if (rid && Number.isFinite(ot as number)) set.add(`${rid}:${getDateKeyInTimezone(ot as number, displayTimezone)}`)
             })
             return set
           })()
@@ -9844,7 +9845,8 @@ useEffect(() => {
             })
             return set
           })()
-          const makeOccurrenceKey = (ruleId: string, baseMs: number) => `${ruleId}:${formatLocalYmd(baseMs)}`
+          // Use display timezone for occurrence key to match confirmedKeySet
+          const makeOccurrenceKey = (ruleId: string, baseMs: number) => `${ruleId}:${getDateKeyInTimezone(baseMs, displayTimezone)}`
           const isRuleScheduledForDay = (rule: RepeatingSessionRule, dayStart: number) => {
             if (!rule.isActive) return false
             if (rule.frequency === 'daily') return ruleIntervalAllowsDay(rule, dayStart)
@@ -10039,15 +10041,15 @@ useEffect(() => {
             
             const clampedStart = Math.max(Math.min(previewStart, previewEnd), startMs)
             const clampedEnd = Math.min(Math.max(previewStart, previewEnd), endMs)
-            // Allow timezone markers (zero duration) to pass through
+            // Timezone markers should have 1 minute duration
             const isTimezoneMarkerEntry = entry.bucketName?.trim() === TIMEZONE_CHANGE_MARKER
-            if (clampedEnd < clampedStart || (clampedEnd === clampedStart && !isTimezoneMarkerEntry)) {
+            if (clampedEnd < clampedStart) {
               return null
             }
             return {
               entry,
               start: clampedStart,
-              end: isTimezoneMarkerEntry ? clampedStart : clampedEnd, // Ensure timezone markers have start === end
+              end: isTimezoneMarkerEntry ? Math.min(clampedStart + MINUTE_MS, endMs) : clampedEnd,
               previewStart,
               previewEnd,
             }
@@ -10056,12 +10058,13 @@ useEffect(() => {
           .sort((a, b) => (a.start === b.start ? a.end - b.end : a.start - b.start))
 
         // Build lookup for confirmed occurrences and exceptions to suppress guides
+        // Use display timezone to get date key (must match guide's occurrence key)
         const confirmedKeySet = (() => {
           const set = new Set<string>()
           effectiveHistory.forEach((h) => {
             const rid = (h as any).repeatingSessionId as string | undefined | null
             const ot = (h as any).originalTime as number | undefined | null
-            if (rid && Number.isFinite(ot as number)) set.add(`${rid}:${formatLocalYmd(ot as number)}`)
+            if (rid && Number.isFinite(ot as number)) set.add(`${rid}:${getDateKeyInTimezone(ot as number, displayTimezone)}`)
           })
           return set
         })()
@@ -10097,7 +10100,8 @@ useEffect(() => {
           if (!Array.isArray(repeatingRules) || repeatingRules.length === 0) return []
           // Resolve basic day info (not needed explicitly here; kept via startMs)
 
-          const makeOccurrenceKey = (ruleId: string, baseMs: number) => `${ruleId}:${formatLocalYmd(baseMs)}`
+          // Use display timezone for occurrence key to match confirmedKeySet
+          const makeOccurrenceKey = (ruleId: string, baseMs: number) => `${ruleId}:${getDateKeyInTimezone(baseMs, displayTimezone)}`
 
           const isRuleScheduledForDay = (rule: RepeatingSessionRule, dayStart: number) => {
             if (!rule.isActive) return false
@@ -10845,7 +10849,7 @@ useEffect(() => {
                       : target.futureSession && nowInPast ? false
                       : target.futureSession
                     const isTimezoneMarkerEntry = target.bucketName?.trim() === TIMEZONE_CHANGE_MARKER
-                    const finalEnd = isTimezoneMarkerEntry ? finalStartedAt : finalEndedAt
+                    const finalEnd = isTimezoneMarkerEntry ? finalStartedAt + MINUTE_MS : finalEndedAt
                     next[idx] = { ...target, startedAt: finalStartedAt, endedAt: finalEnd, elapsed: Math.max(finalEnd - finalStartedAt, 1), futureSession: isFuture }
                     return next
                   })
