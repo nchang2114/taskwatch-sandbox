@@ -901,16 +901,6 @@ const getDayStartsInTimezone = (anchorDateKey: string, startOffset: number, coun
   return dayStarts
 }
 
-// Check if a UTC timestamp falls on a given date in a timezone
-const isOnDateInTimezone = (utcMs: number, dateKey: string, tz: string): boolean => {
-  return getDateKeyInTimezone(utcMs, tz) === dateKey
-}
-
-// Get the date key for a day index relative to an anchor
-const getDateKeyForDayIndex = (anchorDateKey: string, dayIndex: number, bufferDays: number): string => {
-  return addDaysToDateKey(anchorDateKey, dayIndex - bufferDays)
-}
-
 // Snapback virtual goal
 // Session History: use orange→crimson gradient
 // Time Overview: we render Snapback arcs with reversed sampling (crimson→orange)
@@ -2050,14 +2040,6 @@ const snapToNearestInterval = (timestamp: number, intervalMinutes: number): numb
 }
 
 // All‑day helpers (shared across calendar + popover/editor)
-// UTC midnight: floor timestamp to nearest UTC midnight (timezone-agnostic)
-const toUtcMidnight = (ms: number): number => {
-  return Math.floor(ms / DAY_DURATION_MS) * DAY_DURATION_MS
-}
-// Check if a timestamp is at UTC midnight
-const isUtcMidnight = (ms: number): boolean => {
-  return ms % DAY_DURATION_MS === 0
-}
 // Get UTC date string "YYYY-MM-DD" from a UTC midnight timestamp
 const getUtcDateKey = (utcMidnightMs: number): string => {
   const d = new Date(utcMidnightMs)
@@ -3796,12 +3778,6 @@ export default function ReflectionPage({ use24HourTime = false, weekStartDay = 0
   const formatTime = useCallback((timestamp: number) => {
     return formatTimeOfDay(timestamp, deferredAppTimezone, use24HourTime)
   }, [deferredAppTimezone, use24HourTime])
-  
-  // Format an already-adjusted timestamp (no timezone conversion needed)
-  // Use this for previewStart/previewEnd values which are already timezone-shifted
-  const formatAdjustedTime = useCallback((adjustedTimestamp: number) => {
-    return formatTimeOfDay(adjustedTimestamp, undefined, use24HourTime) // No timezone - just format as local time
-  }, [use24HourTime])
   
   // Get display name for current effective timezone (uses immediate value for UI)
   const effectiveTimezoneDisplay = useMemo(() => {
@@ -10058,7 +10034,6 @@ useEffect(() => {
             // Guide tasks use their scheduled time directly (already in display timezone local time)
             // Real sessions: since dayStarts are now UTC bounds for the display timezone,
             // we can use UTC timestamps directly without adjustment
-            const isGuideEntry = entry.id.startsWith('repeat:')
             const previewStart = rawStart
             const previewEnd = rawEnd
             
