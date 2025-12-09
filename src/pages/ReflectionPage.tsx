@@ -10187,47 +10187,43 @@ useEffect(() => {
         })()
 
         // Synthesize guide events from repeating session rules for this day
+        // SIMPLE APPROACH: Guides always render at their set time in the DISPLAY timezone.
+        // If a guide is set for 11 PM, it shows at 11 PM regardless of what timezone you view in.
         const guideRaw: RawEvent[] = (() => {
           if (!Array.isArray(repeatingRules) || repeatingRules.length === 0) return []
 
-          // Check if a rule is scheduled for a given date key (YYYY-MM-DD) in the rule's timezone
+          // Get the date key for this column in the display timezone
+          const displayDateKey = getDateKeyInTimezone(startMs, displayTimezone)
+
+          // Check if a rule is scheduled for a given date key (uses date directly, no timezone conversion)
           const isRuleScheduledForDateKey = (rule: RepeatingSessionRule, dateKey: string) => {
             if (!rule.isActive) return false
-            // Use the date key directly to determine day-of-week and pattern matching
+            // For interval checking, use display timezone midnight
+            const dayStartForInterval = getMidnightUtcForDateInTimezone(dateKey, displayTimezone)
             if (rule.frequency === 'daily') {
-              // For daily, we need to check interval against rule timezone
-              const ruleTimezone = rule.timezone || displayTimezone
-              const ruleDayStart = getMidnightUtcForDateInTimezone(dateKey, ruleTimezone)
-              return ruleIntervalAllowsDay(rule, ruleDayStart)
+              return ruleIntervalAllowsDay(rule, dayStartForInterval)
             }
             if (rule.frequency === 'weekly') {
               const dow = getDayOfWeekFromDateKey(dateKey)
-              const ruleTimezone = rule.timezone || displayTimezone
-              const ruleDayStart = getMidnightUtcForDateInTimezone(dateKey, ruleTimezone)
-              return Array.isArray(rule.dayOfWeek) && rule.dayOfWeek.includes(dow) && ruleIntervalAllowsDay(rule, ruleDayStart)
+              return Array.isArray(rule.dayOfWeek) && rule.dayOfWeek.includes(dow) && ruleIntervalAllowsDay(rule, dayStartForInterval)
             }
             if (rule.frequency === 'monthly') {
-              const ruleTimezone = rule.timezone || displayTimezone
-              const ruleDayStart = getMidnightUtcForDateInTimezone(dateKey, ruleTimezone)
-              return matchesMonthlyDayWithDateKey(rule, dateKey) && ruleIntervalAllowsDay(rule, ruleDayStart)
+              return matchesMonthlyDayWithDateKey(rule, dateKey) && ruleIntervalAllowsDay(rule, dayStartForInterval)
             }
             if (rule.frequency === 'annually') {
               const dayKey = monthDayKeyFromDateKey(dateKey)
               const ruleKey = ruleMonthDayKey(rule)
-              const ruleTimezone = rule.timezone || displayTimezone
-              const ruleDayStart = getMidnightUtcForDateInTimezone(dateKey, ruleTimezone)
-              return ruleKey !== null && ruleKey === dayKey && ruleIntervalAllowsDay(rule, ruleDayStart)
+              return ruleKey !== null && ruleKey === dayKey && ruleIntervalAllowsDay(rule, dayStartForInterval)
             }
             return false
           }
 
           const isWithinBoundariesForDateKey = (rule: RepeatingSessionRule, dateKey: string) => {
-            // Compute the scheduled startedAt for this occurrence using rule's timezone
-            const ruleTimezone = rule.timezone || displayTimezone
-            const ruleDayStart = getMidnightUtcForDateInTimezone(dateKey, ruleTimezone)
+            // Compute the scheduled startedAt using DISPLAY timezone (guide shows at set time in display tz)
+            const displayDayStart = getMidnightUtcForDateInTimezone(dateKey, displayTimezone)
             const timeOfDayMin = Math.max(0, Math.min(1439, rule.timeOfDayMinutes))
-            const scheduledStart = ruleDayStart + timeOfDayMin * MINUTE_MS
-            // Start boundary: prefer explicit startAtMs (inclusive). If absent, fall back to createdAtMs (strictly after)
+            const scheduledStart = displayDayStart + timeOfDayMin * MINUTE_MS
+            // Start boundary
             const startAtMs = (rule as any).startAtMs as number | undefined
             if (Number.isFinite(startAtMs as number)) {
               if (scheduledStart < (startAtMs as number)) return false
@@ -10237,7 +10233,7 @@ useEffect(() => {
                 if (scheduledStart <= (createdMs as number)) return false
               }
             }
-            // End boundary: inclusive (allow selected occurrence when end_date equals its start time)
+            // End boundary
             const endAtMs = (rule as any).endAtMs as number | undefined
             if (Number.isFinite(endAtMs as number)) {
               if (scheduledStart > (endAtMs as number)) return false
@@ -10245,30 +10241,31 @@ useEffect(() => {
             return true
           }
 
-          // Build a guide for a specific date key (YYYY-MM-DD), computing times in rule's timezone
+          // Build a guide using DISPLAY timezone - guide always shows at its set time
           const buildGuideForDateKey = (rule: RepeatingSessionRule, dateKey: string): RawEvent | null => {
-            // Use rule's timezone for computing the guide's actual UTC start time
-            const ruleTimezone = rule.timezone || displayTimezone
-            const ruleDayStart = getMidnightUtcForDateInTimezone(dateKey, ruleTimezone)
+            // Use DISPLAY timezone for computing guide position (guide shows at set time in display tz)
+            const displayDayStart = getMidnightUtcForDateInTimezone(dateKey, displayTimezone)
             
             // Suppression by confirmed/exception for this occurrence date
             const occKey = `${rule.id}:${dateKey}`
             if (confirmedKeySet.has(occKey) || excKeySet.has(occKey)) return null
             
-            // Compute actual UTC start time using rule's timezone
-            const startedAt = ruleDayStart + Math.max(0, Math.min(1439, rule.timeOfDayMinutes)) * MINUTE_MS
-            // Suppress if this occurrence has been linked already in session_history
+            // Compute start time: display timezone midnight + timeOfDayMinutes
+            const startedAt = displayDayStart + Math.max(0, Math.min(1439, rule.timeOfDayMinutes)) * MINUTE_MS
+            // Suppress if this occurrence has been linked already
             if (coveredOriginalSet.has(`${rule.id}:${startedAt}`)) return null
+            
             const durationMs = Math.max(1, (rule.durationMinutes ?? 60) * MINUTE_MS)
-            // Allow crossing midnight: DO NOT clamp to end of day here
             const endedAt = startedAt + durationMs
-            if (isAllDayRangeTs(startedAt, endedAt)) {
-              return null
-            }
-            const task = (rule.taskName?.trim() || 'Session')
+            
+            if (isAllDayRangeTs(startedAt, endedAt)) return null
+            
+            const task = rule.taskName?.trim() || 'Session'
             const goal = rule.goalName?.trim() || null
             const bucket = rule.bucketName?.trim() || null
-            const TOL = 60 * 1000 // 1 minute tolerance for DST/rounding
+            
+            // Check for duplicate real sessions
+            const TOL = 60 * 1000
             const duplicateReal = effectiveHistory.some((h) => {
               const sameLabel = (h.taskName?.trim() || 'Session') === task && (h.goalName ?? null) === goal && (h.bucketName ?? null) === bucket
               const startMatch = Math.abs(h.startedAt - startedAt) <= TOL
@@ -10276,8 +10273,9 @@ useEffect(() => {
               return sameLabel && startMatch && endMatch
             })
             if (duplicateReal) return null
-            // Use ruleDayStart for the entry ID to ensure consistent identification
-            const entryId = `repeat:${rule.id}:${ruleDayStart}`
+            
+            // Entry ID uses displayDayStart for consistent identification
+            const entryId = `repeat:${rule.id}:${displayDayStart}`
             const entry: HistoryEntry = {
               id: entryId,
               taskName: task,
@@ -10295,20 +10293,20 @@ useEffect(() => {
               notes: '',
               subtasks: [],
             }
-            // Check if this guide is being dragged and use preview times
+            
+            // Handle drag preview
             const isPreviewed = dragPreview && dragPreview.entryId === entry.id
             const previewStart = isPreviewed ? dragPreview.startedAt : startedAt
             const previewEnd = isPreviewed ? dragPreview.endedAt : endedAt
-            // If dragged, check if preview overlaps this column - if not, don't render here
+            
             if (isPreviewed) {
               const overlapsThisColumn = previewStart < endMs && previewEnd > startMs
               if (!overlapsThisColumn) return null
             }
-            // Check if the guide (at its actual UTC time) overlaps this display column
-            // This is crucial for cross-timezone rendering
-            if (!isPreviewed && (startedAt >= endMs || endedAt <= startMs)) {
-              return null
-            }
+            
+            // Check if guide overlaps this column's time range
+            if (!isPreviewed && (startedAt >= endMs || endedAt <= startMs)) return null
+            
             return {
               entry,
               start: Math.max(previewStart, startMs),
@@ -10320,24 +10318,27 @@ useEffect(() => {
 
           const guides: RawEvent[] = []
 
-          // For each rule, check multiple potential dates that could result in guides
-          // appearing in this display column. We need to check adjacent dates to handle
-          // timezone differences and overnight sessions.
-          const displayDateKey = getDateKeyInTimezone(startMs, displayTimezone)
-          
+          // Check today's date and previous day (for overnight carryover)
           for (const rule of repeatingRules) {
-            const datesToCheck = [
-              addDaysToDateKey(displayDateKey, -1),
-              displayDateKey,
-              addDaysToDateKey(displayDateKey, 1),
-            ]
-            
-            for (const dateKey of datesToCheck) {
-              if (!isRuleScheduledForDateKey(rule, dateKey)) continue
-              if (!isWithinBoundariesForDateKey(rule, dateKey)) continue
-              const ev = buildGuideForDateKey(rule, dateKey)
+            // Check current day
+            if (isRuleScheduledForDateKey(rule, displayDateKey) && isWithinBoundariesForDateKey(rule, displayDateKey)) {
+              const ev = buildGuideForDateKey(rule, displayDateKey)
               if (ev && !guides.some(g => g.entry.id === ev.entry.id)) {
                 guides.push(ev)
+              }
+            }
+            
+            // Check previous day for overnight carryover
+            const prevDateKey = addDaysToDateKey(displayDateKey, -1)
+            if (isRuleScheduledForDateKey(rule, prevDateKey) && isWithinBoundariesForDateKey(rule, prevDateKey)) {
+              const durationMin = Math.max(1, rule.durationMinutes ?? 60)
+              const timeOfDayMin = Math.max(0, Math.min(1439, rule.timeOfDayMinutes))
+              // Only check carryover if the rule crosses midnight
+              if (timeOfDayMin + durationMin > 24 * 60) {
+                const ev = buildGuideForDateKey(rule, prevDateKey)
+                if (ev && !guides.some(g => g.entry.id === ev.entry.id)) {
+                  guides.push(ev)
+                }
               }
             }
           }
