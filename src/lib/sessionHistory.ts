@@ -114,7 +114,7 @@ const disableHistoryNotes = () => {
 const isHistorySubtasksEnabled = (): boolean => false
 const disableHistorySubtasks = () => {}
 const HISTORY_BASE_SELECT_COLUMNS =
-  'id, task_name, elapsed_ms, started_at, ended_at, goal_name, bucket_name, goal_id, bucket_id, task_id, entry_colour, created_at, updated_at, future_session, timezone, timezone_from, timezone_to, is_all_day'
+  'id, task_name, elapsed_ms, started_at, ended_at, goal_name, bucket_name, goal_id, bucket_id, task_id, entry_colour, created_at, updated_at, future_session, timezone, is_all_day'
 
 const buildHistorySelectColumns = (): string => {
   let columns = HISTORY_BASE_SELECT_COLUMNS
