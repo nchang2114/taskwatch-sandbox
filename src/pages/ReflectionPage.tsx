@@ -10095,15 +10095,24 @@ useEffect(() => {
               // Check for duplicate: match by date key + task name for all-day entries
               // OR match by repeatingSessionId + originalTime for confirmed/skipped guides
               const duplicateReal = effectiveHistory.some((h) => {
-                // Check for repeatingSessionId + originalTime match first (most reliable for guide suppression)
+                // Check for repeatingSessionId match first (for guide suppression)
                 const hRid = (h as any).repeatingSessionId as string | undefined | null
                 const hOt = (h as any).originalTime as number | undefined | null
                 if (hRid === rule.id && Number.isFinite(hOt as number)) {
-                  // Check if originalTime matches this guide's dayStart
-                  const otDateKey = getDateKeyInTimezone(hOt as number, displayTimezone)
-                  const guideOccDateKey = getDateKeyInTimezone(dayStart, displayTimezone)
-                  if (otDateKey === guideOccDateKey) {
-                    return true
+                  // For all-day entries, originalTime is stored as UTC midnight
+                  // Use getUtcDateKey for timezone-agnostic comparison
+                  if (isEntryAllDay(h)) {
+                    const entryDateKey = getUtcDateKey(hOt as number)
+                    if (entryDateKey === columnDateKey) {
+                      return true
+                    }
+                  } else {
+                    // For time-based entries, use timezone-aware comparison
+                    const otDateKey = getDateKeyInTimezone(hOt as number, displayTimezone)
+                    const guideOccDateKey = getDateKeyInTimezone(dayStart, displayTimezone)
+                    if (otDateKey === guideOccDateKey) {
+                      return true
+                    }
                   }
                 }
                 
@@ -11489,6 +11498,13 @@ useEffect(() => {
                           const guideParts = bar.entry.id.split(':')
                           const guideRuleId = guideParts[1] ?? null
                           const guideOriginalDayStart = guideParts[2] ? Number(guideParts[2]) : null
+                          const isAllDayGuide = guideParts.length >= 4 && guideParts[3] === 'allday'
+                          // For all-day guides, convert to UTC midnight for timezone-agnostic suppression
+                          let originalTimeForStorage = guideOriginalDayStart
+                          if (isAllDayGuide && guideOriginalDayStart != null) {
+                            const ymd = getDateKeyInTimezone(guideOriginalDayStart, displayTimezone)
+                            originalTimeForStorage = dateKeyToUtcMidnight(ymd)
+                          }
                           const newEntry: HistoryEntry = {
                             ...bar.entry,
                             id: makeHistoryId(),
@@ -11498,7 +11514,7 @@ useEffect(() => {
                             futureSession: true,
                             // Link to repeating rule so the original guide date gets suppressed
                             repeatingSessionId: guideRuleId,
-                            originalTime: guideOriginalDayStart,
+                            originalTime: originalTimeForStorage,
                           }
                           flushSync(() => {
                             updateHistory((current) => {
@@ -13369,9 +13385,11 @@ useEffect(() => {
                     const storedEndedAt = parsedGuide.isAllDayGuide && parsedGuide.utcMidnight != null
                       ? parsedGuide.utcMidnight + DAY_DURATION_MS
                       : entry.endedAt
-                    // originalTime uses dayStart (display-timezone midnight) for occurrence key matching
-                    // This ensures confirmedKeySet lookup works: getDateKeyInTimezone(originalTime, displayTimezone)
-                    const originalTimeForKey = parsedGuide.dayStart
+                    // For all-day guides, store originalTime as UTC midnight for timezone-agnostic matching
+                    // For time-based guides, use dayStart (display-timezone midnight)
+                    const originalTimeForKey = parsedGuide.isAllDayGuide && parsedGuide.utcMidnight != null
+                      ? parsedGuide.utcMidnight
+                      : parsedGuide.dayStart
                     const newEntry: HistoryEntry = {
                       ...entry,
                       id: makeHistoryId(),
@@ -13379,8 +13397,8 @@ useEffect(() => {
                       endedAt: storedEndedAt,
                       elapsed: Math.max(storedEndedAt - storedStartedAt, 1),
                       repeatingSessionId: parsedGuide.ruleId,
-                      // originalTime must match the guide's dayStart for suppression lookup to work
-                      // (confirmedKeySet uses getDateKeyInTimezone(originalTime, displayTimezone))
+                      // For all-day: UTC midnight for timezone-agnostic suppression
+                      // For time-based: dayStart for display-timezone matching
                       originalTime: originalTimeForKey,
                       futureSession: false,
                     }
@@ -13415,8 +13433,10 @@ useEffect(() => {
                     const storedTime = parsedGuide.isAllDayGuide && parsedGuide.utcMidnight != null
                       ? parsedGuide.utcMidnight
                       : entry.startedAt
-                    // originalTime uses dayStart for occurrence key matching
-                    const originalTimeForKey = parsedGuide.dayStart
+                    // For all-day guides, store originalTime as UTC midnight for timezone-agnostic matching
+                    const originalTimeForKey = parsedGuide.isAllDayGuide && parsedGuide.utcMidnight != null
+                      ? parsedGuide.utcMidnight
+                      : parsedGuide.dayStart
                     const zeroEntry: HistoryEntry = {
                       ...entry,
                       id: makeHistoryId(),
@@ -13424,7 +13444,7 @@ useEffect(() => {
                       endedAt: storedTime,
                       elapsed: 0,
                       repeatingSessionId: parsedGuide.ruleId,
-                      // originalTime must match the guide's dayStart for suppression lookup to work
+                      // For all-day: UTC midnight; for time-based: dayStart
                       originalTime: originalTimeForKey,
                     }
                     updateHistory((current) => {
