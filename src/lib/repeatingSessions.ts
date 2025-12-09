@@ -6,6 +6,7 @@ import { readRepeatingExceptions } from './repeatingExceptions'
 export type RepeatingSessionRule = {
   id: string
   isActive: boolean
+  isAllDay?: boolean
   frequency: 'daily' | 'weekly' | 'monthly' | 'annually'
   // Interval multiplier: 1=daily/weekly/monthly/annually, 2=every 2 units, etc.
   repeatEvery?: number
@@ -465,6 +466,8 @@ const mapRowToRule = (row: any): RepeatingSessionRule | null => {
     ? Math.max(1, Number(row.duration_minutes))
     : (Number.isFinite(row.durationMinutes) ? Math.max(1, Number(row.durationMinutes)) : 60)
   const isActive = typeof row.is_active === 'boolean' ? row.is_active : (row.isActive !== false)
+  // Support both DB is_all_day and local isAllDay
+  const isAllDay = typeof row.is_all_day === 'boolean' ? row.is_all_day : (typeof row.isAllDay === 'boolean' ? row.isAllDay : undefined)
   const goalName = typeof row.goal_name === 'string' ? row.goal_name : (typeof row.goalName === 'string' ? row.goalName : null)
   const bucketName = typeof row.bucket_name === 'string' ? row.bucket_name : (typeof row.bucketName === 'string' ? row.bucketName : null)
   const rawTaskName = typeof row.task_name === 'string' ? row.task_name : (typeof row.taskName === 'string' ? row.taskName : '')
@@ -498,6 +501,7 @@ const mapRowToRule = (row: any): RepeatingSessionRule | null => {
   return {
     id,
     isActive,
+    isAllDay,
     frequency,
     repeatEvery,
     dayOfWeek,
@@ -583,9 +587,12 @@ export async function createRepeatingRuleForEntry(
   const dayStart = (() => { const d = new Date(entry.startedAt); d.setHours(0,0,0,0); return d.getTime() })()
   const ruleStartMs = dayStart + timeOfDayMinutes * MINUTE_MS
   const ruleTaskName = deriveRuleTaskNameFromEntry(entry)
+  // Detect if this is an all-day entry
+  const entryIsAllDay = entry.isAllDay === true
   const baseRule: RepeatingSessionRule = {
     id: 'temp',
     isActive: true,
+    isAllDay: entryIsAllDay,
     frequency,
     repeatEvery: Math.max(1, options?.repeatEvery ?? 1),
     dayOfWeek,
@@ -636,6 +643,7 @@ export async function createRepeatingRuleForEntry(
   const payload = {
     user_id: session.user.id,
     is_active: true,
+    is_all_day: entryIsAllDay || undefined,
     frequency,
     repeat_every: Math.max(1, options?.repeatEvery ?? 1),
     day_of_week: frequency === 'weekly' ? dbDayOfWeek : frequency === 'monthly' && monthlyPattern && monthlyPattern !== 'day' ? dbDayOfWeek : null,
@@ -659,6 +667,7 @@ export async function createRepeatingRuleForEntry(
     const localRule: RepeatingSessionRule = {
       id: randomRuleId(),
       isActive: true,
+      isAllDay: entryIsAllDay,
       frequency,
       dayOfWeek,
       monthlyPattern,

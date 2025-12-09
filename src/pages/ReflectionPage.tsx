@@ -9973,38 +9973,177 @@ useEffect(() => {
             }
             return true
           }
+          
+          // For all-day rules, check boundaries by DATE not timestamp
+          // This properly handles the case where an all-day entry spawned the rule
+          const isAllDayWithinBoundaries = (rule: RepeatingSessionRule, columnIndex: number) => {
+            // Use the same date key that all-day entries use for column matching
+            const columnDateKey = dayDateKeys[columnIndex]
+            const startAtMs = (rule as any).startAtMs as number | undefined
+            const createdMs = (rule as any).createdAtMs as number | undefined
+            const anchorMs = Number.isFinite(startAtMs as number) ? (startAtMs as number) : (Number.isFinite(createdMs as number) ? (createdMs as number) : null)
+            
+            if (Number.isFinite(anchorMs as number)) {
+              // Get the anchor date using UTC (same as how all-day entries compute their date key)
+              const anchorDateKey = getUtcDateKey(anchorMs as number)
+              
+              // For all-day rules, the first guide should appear on the day AFTER the anchor
+              // because the anchor day already has the original entry
+              if (columnDateKey === anchorDateKey) {
+                return false
+              }
+              // Also check if the column is before the anchor
+              if (columnDateKey < anchorDateKey) {
+                return false
+              }
+            }
+            
+            const endAtMs = (rule as any).endAtMs as number | undefined
+            if (Number.isFinite(endAtMs as number)) {
+              const endDateKey = getUtcDateKey(endAtMs as number)
+              if (columnDateKey > endDateKey) return false
+            }
+            return true
+          }
+          
           const isAllDayRule = (rule: RepeatingSessionRule) => {
+            // Check explicit isAllDay flag first
+            if (rule.isAllDay === true) return true
+            // Legacy detection: timeOfDayMinutes=0 and duration >= 24 hours
             const timeOfDayMin = Math.max(0, Math.min(1439, rule.timeOfDayMinutes))
             const durationMinutes = Math.max(1, rule.durationMinutes ?? 60)
-            return timeOfDayMin === 0 && durationMinutes >= 1440
+            if (timeOfDayMin === 0 && durationMinutes >= 1440) return true
+            // Heuristic: very short duration (< 5 min) suggests malformed all-day conversion
+            // Also check if duration is exactly 1440 (24 hours)
+            if (durationMinutes >= 1440) return true
+            return false
           }
-          const TOL = 60 * 1000
-          repeatingRules.forEach((rule) => {
+          
+          // For all-day rules, use date-based interval matching (not weekday matching)
+          // E.g., if set on the 7th, weekly repeat means 7th → 14th → 21st (not "every Monday")
+          const isAllDayRuleScheduledForDay = (rule: RepeatingSessionRule, dayStart: number): boolean => {
+            if (!rule.isActive) return false
+            const dateKey = getDateKeyInTimezone(dayStart, displayTimezone)
+            const { year, month, day } = getDatePartsFromDateKey(dateKey)
+            
+            // Get anchor date (startAtMs or createdAtMs)
+            const anchorMs = getRuleAnchorDayStart(rule)
+            if (!Number.isFinite(anchorMs as number)) return true // No anchor, allow all days
+            const anchorDateKey = getDateKeyInTimezone(anchorMs as number, displayTimezone)
+            const anchorParts = getDatePartsFromDateKey(anchorDateKey)
+            
+            const interval = Math.max(1, Number.isFinite((rule as any).repeatEvery as number) ? Math.floor((rule as any).repeatEvery as number) : 1)
+            
+            if (rule.frequency === 'daily') {
+              // Every N days from anchor
+              const DAY_MS = 24 * 60 * 60 * 1000
+              const diffDays = Math.floor((dayStart - (anchorMs as number)) / DAY_MS)
+              if (diffDays < 0) return false
+              return diffDays % interval === 0
+            }
+            
+            if (rule.frequency === 'weekly') {
+              // If dayOfWeek is specified and not empty, use weekday matching (user explicitly chose days)
+              if (Array.isArray(rule.dayOfWeek) && rule.dayOfWeek.length > 0) {
+                const dow = getDayOfWeekFromDateKey(dateKey)
+                if (!rule.dayOfWeek.includes(dow)) return false
+                // Also check week interval
+                const DAY_MS = 24 * 60 * 60 * 1000
+                const diffDays = Math.floor((dayStart - (anchorMs as number)) / DAY_MS)
+                if (diffDays < 0) return false
+                const diffWeeks = Math.floor(diffDays / 7)
+                return diffWeeks % interval === 0
+              }
+              // No dayOfWeek specified: repeat every 7*interval days from anchor
+              const DAY_MS = 24 * 60 * 60 * 1000
+              const diffDays = Math.floor((dayStart - (anchorMs as number)) / DAY_MS)
+              if (diffDays < 0) return false
+              return diffDays % (7 * interval) === 0
+            }
+            
+            if (rule.frequency === 'monthly') {
+              // Same day-of-month, every N months
+              // Handle month-end clamping: if anchor was 31st, in Feb it becomes 28th/29th
+              const lastDayOfMonth = new Date(Date.UTC(year, month, 0)).getUTCDate()
+              const expectedDay = Math.min(anchorParts.day, lastDayOfMonth)
+              if (day !== expectedDay) return false
+              // Check month interval
+              const anchorMonthIndex = anchorParts.year * 12 + (anchorParts.month - 1)
+              const currentMonthIndex = year * 12 + (month - 1)
+              const diffMonths = currentMonthIndex - anchorMonthIndex
+              if (diffMonths < 0) return false
+              return diffMonths % interval === 0
+            }
+            
+            if (rule.frequency === 'annually') {
+              // Same month-day, every N years
+              if (month !== anchorParts.month || day !== anchorParts.day) {
+                // Handle Feb 29 → Feb 28 in non-leap years
+                if (anchorParts.month === 2 && anchorParts.day === 29 && month === 2 && day === 28) {
+                  const isLeapYear = (year % 4 === 0 && year % 100 !== 0) || (year % 400 === 0)
+                  if (!isLeapYear) {
+                    // Allow Feb 28 as fallback for Feb 29 anchor in non-leap year
+                  } else {
+                    return false
+                  }
+                } else {
+                  return false
+                }
+              }
+              const diffYears = year - anchorParts.year
+              if (diffYears < 0) return false
+              return diffYears % interval === 0
+            }
+            
+            return false
+          }
+          
+          // Deduplicate rules by ID (in case the same rule appears multiple times)
+          const uniqueRules = Array.from(new Map(repeatingRules.map((r) => [r.id, r])).values())
+          
+          uniqueRules.forEach((rule) => {
             if (!isAllDayRule(rule)) return
-            // Guides show at their configured time in the display timezone
+            // All-day guides use date-based scheduling (not weekday matching)
             dayStarts.forEach((dayStart, columnIndex) => {
-              if (!isRuleScheduledForDay(rule, dayStart)) return
-              if (!isWithinBoundaries(rule, dayStart)) return
+              if (!isAllDayRuleScheduledForDay(rule, dayStart)) return
+              // Use date-based boundary check for all-day rules
+              if (!isAllDayWithinBoundaries(rule, columnIndex)) return
               const occKey = makeOccurrenceKey(rule.id, dayStart)
               if (confirmedKeySet.has(occKey) || excKeySet.has(occKey)) return
               const startedAt = dayStart
               const endedAt = dayStart + DAY_DURATION_MS
               if (coveredOriginalSet.has(`${rule.id}:${startedAt}`)) return
-              const duplicateReal = effectiveHistory.some((h) => {
-                const startMatch = Math.abs(h.startedAt - startedAt) <= TOL
-                const endMatch = Math.abs(h.endedAt - endedAt) <= TOL
-                return startMatch && endMatch
-              })
-              if (duplicateReal) return
+              
+              // Get the date key for this column - use the same dayDateKeys array
+              // that real all-day entries use for column matching
+              const columnDateKey = dayDateKeys[columnIndex]
               const taskName = rule.taskName?.trim() || 'Session'
               const goalName = rule.goalName?.trim() || null
               const bucketName = rule.bucketName?.trim() || null
+              
+              // Check for duplicate: match by date key + task name for all-day entries
+              // The entry's date key is computed using getUtcDateKey (same as column matching)
+              const duplicateReal = effectiveHistory.some((h) => {
+                if (!isEntryAllDay(h)) return false
+                
+                // Get entry's date key the same way it's used for column placement
+                const entryDateKey = getUtcDateKey(h.startedAt)
+                if (entryDateKey !== columnDateKey) return false
+                
+                // Same date - now check if it's the same task
+                const sameTask = (h.taskName?.trim() || 'Session') === taskName
+                const sameGoal = (h.goalName ?? null) === goalName
+                const sameBucket = (h.bucketName ?? null) === bucketName
+                return sameTask && sameGoal && sameBucket
+              })
+              if (duplicateReal) return
               const entry: HistoryEntry = {
                 id: `repeat:${rule.id}:${dayStart}:allday`,
                 taskName,
                 elapsed: Math.max(endedAt - startedAt, 1),
                 startedAt,
                 endedAt,
+                isAllDay: true,
                 goalName,
                 bucketName,
                 goalId: null,
@@ -10020,6 +10159,9 @@ useEffect(() => {
               const label = deriveEntryTaskName(entry)
               const colorCss = meta.colorInfo?.gradient?.css ?? meta.colorInfo?.solidColor ?? getPaletteColorForLabel(label)
               const baseColor = meta.colorInfo?.solidColor ?? meta.colorInfo?.gradient?.start ?? getPaletteColorForLabel(label)
+              // Skip if we already have a guide with the same entry ID (dedup safety)
+              if (raws.some((r) => r.entry.id === entry.id)) return
+              
               raws.push({
                 entry,
                 colStart: columnIndex,
@@ -10240,9 +10382,23 @@ useEffect(() => {
             }
             return true
           }
+          
+          // Helper to check if a rule is all-day (for time grid exclusion)
+          const isAllDayRuleForTimeGrid = (rule: RepeatingSessionRule): boolean => {
+            if (rule.isAllDay === true) return true
+            const timeOfDayMin = Math.max(0, Math.min(1439, rule.timeOfDayMinutes))
+            const durationMinutes = Math.max(1, rule.durationMinutes ?? 60)
+            if (timeOfDayMin === 0 && durationMinutes >= 1440) return true
+            // Heuristic: duration >= 24 hours means all-day regardless of start time
+            if (durationMinutes >= 1440) return true
+            return false
+          }
 
           // Build a guide using DISPLAY timezone - guide always shows at its set time
           const buildGuideForDateKey = (rule: RepeatingSessionRule, dateKey: string): RawEvent | null => {
+            // Skip all-day rules - they render in the all-day section, not time grid
+            if (isAllDayRuleForTimeGrid(rule)) return null
+            
             // Use DISPLAY timezone for computing guide position (guide shows at set time in display tz)
             const displayDayStart = getMidnightUtcForDateInTimezone(dateKey, displayTimezone)
             
@@ -13133,7 +13289,11 @@ useEffect(() => {
                     }
                     const created = await createRepeatingRuleForEntry(entry, val)
                     if (created) {
-                      setRepeatingRules((prev) => [...prev, created])
+                      // Add rule to state, but avoid duplicates (createRepeatingRuleForEntry already writes to localStorage)
+                      setRepeatingRules((prev) => {
+                        if (prev.some((r) => r.id === created.id)) return prev
+                        return [...prev, created]
+                      })
                       const scheduledStart = computeEntryScheduledStart(entry)
                       updateHistory((current) => current.map((h) => (h.id === entry.id ? { ...h, repeatingSessionId: created.id, originalTime: scheduledStart } : h)))
                     }
@@ -14260,7 +14420,11 @@ useEffect(() => {
                 }
                 const created = await createRepeatingRuleForEntry(inspectorEntry, val)
                 if (created) {
-                  setRepeatingRules((prev) => [...prev, created])
+                  // Add rule to state, but avoid duplicates (createRepeatingRuleForEntry already writes to localStorage)
+                  setRepeatingRules((prev) => {
+                    if (prev.some((r) => r.id === created.id)) return prev
+                    return [...prev, created]
+                  })
                   const scheduledStart = computeEntryScheduledStart(inspectorEntry)
                   updateHistory((current) =>
                     current.map((h) => (h.id === inspectorEntry.id ? { ...h, repeatingSessionId: created.id, originalTime: scheduledStart } : h)),
@@ -14880,7 +15044,9 @@ useEffect(() => {
             }
             const created = await createRepeatingRuleForEntry(customRecurrenceEntry, frequency, createOptions)
             if (created) {
+              // Add rule to state, but avoid duplicates (createRepeatingRuleForEntry already writes to localStorage)
               setRepeatingRules((prev) => {
+                if (prev.some((r) => r.id === created.id)) return prev
                 const next = [...prev, created]
                 storeRepeatingRulesLocal(next)
                 return next
