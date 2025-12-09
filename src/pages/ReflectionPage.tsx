@@ -764,13 +764,9 @@ const isCityInEffectiveTimezone = (cityFullName: string, appTimezoneOverride: st
   return cityTimezone === effectiveTimezone
 }
 
-// ========== TIMEZONE OFFSET CACHE ==========
-// Cache timezone offset calculations to avoid repeated Intl.DateTimeFormat instantiation.
-// Offsets only change at DST boundaries, so we cache by hour-rounded timestamps.
-// Key format: "sourceTz|targetTz|hourTimestamp"
-const timezoneOffsetCache = new Map<string, number>()
-const HOUR_MS = 60 * 60 * 1000
-const MAX_TZ_CACHE_SIZE = 500 // Prevent unbounded growth
+// ========== TIMEZONE UTILITIES (Option C: Google/Apple approach) ==========
+// Instead of calculating offsets between timezones, we ask the browser
+// "what time is this UTC timestamp in timezone X?" and use that directly.
 
 // Reusable DateTimeFormat instances per timezone (much cheaper than creating new ones)
 const dateTimeFormatCache = new Map<string, Intl.DateTimeFormat>()
@@ -792,65 +788,127 @@ const getDateTimeFormatter = (timeZone: string): Intl.DateTimeFormat => {
   return formatter
 }
 
-// Clear timezone caches when timezone changes (called from updateAppTimezone)
-const clearTimezoneCaches = () => {
-  timezoneOffsetCache.clear()
-  // Keep dateTimeFormatCache - those are still valid
+// Reusable formatter for extracting time parts (reuses dateTimeFormatCache)
+const getTimePartsInTimezone = (utcMs: number, tz: string): {
+  year: number
+  month: number  // 1-indexed (1-12)
+  day: number
+  hour: number
+  minute: number
+  second: number
+} => {
+  const formatter = getDateTimeFormatter(tz)
+  const parts = formatter.formatToParts(new Date(utcMs))
+  
+  let year = 0, month = 0, day = 0, hour = 0, minute = 0, second = 0
+  for (const part of parts) {
+    switch (part.type) {
+      case 'year': year = parseInt(part.value, 10); break
+      case 'month': month = parseInt(part.value, 10); break
+      case 'day': day = parseInt(part.value, 10); break
+      case 'hour': hour = parseInt(part.value, 10); break
+      case 'minute': minute = parseInt(part.value, 10); break
+      case 'second': second = parseInt(part.value, 10); break
+    }
+  }
+  
+  return { year, month, day, hour, minute, second }
 }
 
-// Get the offset in milliseconds between two timezones at a given timestamp
-// Returns (targetTz offset - sourceTz offset), so adding this to a sourceTz timestamp
-// gives the equivalent time in targetTz
-const getTimezoneOffsetMs = (timestamp: number, sourceTz: string, targetTz: string): number => {
-  if (sourceTz === targetTz) return 0
+// Returns "YYYY-MM-DD" date key for a UTC timestamp in the given timezone
+const getDateKeyInTimezone = (utcMs: number, tz: string): string => {
+  const { year, month, day } = getTimePartsInTimezone(utcMs, tz)
+  return `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`
+}
+
+// Returns 0-100 position on the day timeline for a UTC timestamp in the given timezone
+const getPositionPercentInTimezone = (utcMs: number, tz: string): number => {
+  const { hour, minute, second } = getTimePartsInTimezone(utcMs, tz)
+  return ((hour + minute / 60 + second / 3600) / 24) * 100
+}
+
+// Get the UTC timestamp for midnight on a given date in a given timezone
+// dateKey is "YYYY-MM-DD" format
+const getMidnightUtcForDateInTimezone = (dateKey: string, tz: string): number => {
+  // Parse the date key
+  const [year, month, day] = dateKey.split('-').map(Number)
   
-  // Round to nearest hour for cache key (offsets don't change within an hour)
-  const hourTs = Math.floor(timestamp / HOUR_MS) * HOUR_MS
-  const cacheKey = `${sourceTz}|${targetTz}|${hourTs}`
+  // Create a date string that represents midnight in the target timezone
+  // We use a binary search approach to find the exact UTC time
+  // Start with a rough estimate assuming UTC
+  const roughEstimate = Date.UTC(year, month - 1, day, 0, 0, 0, 0)
   
-  // Check cache first
-  const cached = timezoneOffsetCache.get(cacheKey)
-  if (cached !== undefined) {
-    return cached
+  // Check what date this rough estimate shows in the target timezone
+  const checkDate = getDateKeyInTimezone(roughEstimate, tz)
+  
+  if (checkDate === dateKey) {
+    // We're on the right day, now find exact midnight
+    const parts = getTimePartsInTimezone(roughEstimate, tz)
+    // Subtract the hours/minutes/seconds to get to midnight
+    const msToSubtract = (parts.hour * 3600 + parts.minute * 60 + parts.second) * 1000
+    return roughEstimate - msToSubtract
   }
   
-  // Prevent cache from growing unbounded
-  if (timezoneOffsetCache.size >= MAX_TZ_CACHE_SIZE) {
-    // Clear oldest entries (simple approach: clear all and let it rebuild)
-    timezoneOffsetCache.clear()
+  // If the date is different, we need to adjust
+  // The target timezone is ahead or behind UTC
+  if (checkDate < dateKey) {
+    // We're behind the target date, add hours
+    let adjusted = roughEstimate + 14 * 60 * 60 * 1000 // Add up to 14 hours (max TZ offset)
+    const parts = getTimePartsInTimezone(adjusted, tz)
+    const adjustedDateKey = getDateKeyInTimezone(adjusted, tz)
+    if (adjustedDateKey === dateKey) {
+      const msToSubtract = (parts.hour * 3600 + parts.minute * 60 + parts.second) * 1000
+      return adjusted - msToSubtract
+    }
+  } else {
+    // We're ahead of the target date, subtract hours
+    let adjusted = roughEstimate - 14 * 60 * 60 * 1000
+    const parts = getTimePartsInTimezone(adjusted, tz)
+    const adjustedDateKey = getDateKeyInTimezone(adjusted, tz)
+    if (adjustedDateKey === dateKey) {
+      const msToSubtract = (parts.hour * 3600 + parts.minute * 60 + parts.second) * 1000
+      return adjusted - msToSubtract
+    }
   }
   
-  // Get the local time components in each timezone using cached formatters
-  const sourceFormatter = getDateTimeFormatter(sourceTz)
-  const targetFormatter = getDateTimeFormatter(targetTz)
-  
-  const dateObj = new Date(timestamp)
-  
-  // Parse the formatted strings back to dates in UTC context
-  const parseFormattedDate = (formatted: string): number => {
-    // Format is: MM/DD/YYYY, HH:MM:SS
-    const [datePart, timePart] = formatted.split(', ')
-    const [month, day, year] = datePart.split('/')
-    const [hour, minute, second] = timePart.split(':')
-    return Date.UTC(
-      parseInt(year, 10),
-      parseInt(month, 10) - 1,
-      parseInt(day, 10),
-      parseInt(hour, 10),
-      parseInt(minute, 10),
-      parseInt(second, 10)
-    )
+  // Fallback: just return the rough estimate (shouldn't happen in practice)
+  return roughEstimate
+}
+
+// Add N days to a date key, returning the new date key
+const addDaysToDateKey = (dateKey: string, days: number): string => {
+  const [year, month, day] = dateKey.split('-').map(Number)
+  const date = new Date(year, month - 1, day)
+  date.setDate(date.getDate() + days)
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`
+}
+
+// Convert a percentage position (0-100) on a day to a UTC timestamp
+// Uses the day's midnight UTC as the base
+const percentToUtcTimestamp = (percent: number, dayMidnightUtc: number): number => {
+  return dayMidnightUtc + (percent / 100) * DAY_DURATION_MS
+}
+
+// Generate an array of midnight UTC timestamps for a range of days in a timezone
+// anchorDateKey is "YYYY-MM-DD", startOffset is days before anchor (negative), count is total days
+const getDayStartsInTimezone = (anchorDateKey: string, startOffset: number, count: number, tz: string): number[] => {
+  const startDateKey = addDaysToDateKey(anchorDateKey, startOffset)
+  const dayStarts: number[] = []
+  for (let i = 0; i < count; i++) {
+    const dateKey = addDaysToDateKey(startDateKey, i)
+    dayStarts.push(getMidnightUtcForDateInTimezone(dateKey, tz))
   }
-  
-  const sourceUtc = parseFormattedDate(sourceFormatter.format(dateObj))
-  const targetUtc = parseFormattedDate(targetFormatter.format(dateObj))
-  
-  const offset = targetUtc - sourceUtc
-  
-  // Cache the result
-  timezoneOffsetCache.set(cacheKey, offset)
-  
-  return offset
+  return dayStarts
+}
+
+// Check if a UTC timestamp falls on a given date in a timezone
+const isOnDateInTimezone = (utcMs: number, dateKey: string, tz: string): boolean => {
+  return getDateKeyInTimezone(utcMs, tz) === dateKey
+}
+
+// Get the date key for a day index relative to an anchor
+const getDateKeyForDayIndex = (anchorDateKey: string, dayIndex: number, bufferDays: number): string => {
+  return addDaysToDateKey(anchorDateKey, dayIndex - bufferDays)
 }
 
 // Snapback virtual goal
@@ -1992,6 +2050,26 @@ const snapToNearestInterval = (timestamp: number, intervalMinutes: number): numb
 }
 
 // All‑day helpers (shared across calendar + popover/editor)
+// UTC midnight: floor timestamp to nearest UTC midnight (timezone-agnostic)
+const toUtcMidnight = (ms: number): number => {
+  return Math.floor(ms / DAY_DURATION_MS) * DAY_DURATION_MS
+}
+// Check if a timestamp is at UTC midnight
+const isUtcMidnight = (ms: number): boolean => {
+  return ms % DAY_DURATION_MS === 0
+}
+// Get UTC date string "YYYY-MM-DD" from a UTC midnight timestamp
+const getUtcDateKey = (utcMidnightMs: number): string => {
+  const d = new Date(utcMidnightMs)
+  return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}-${String(d.getUTCDate()).padStart(2, '0')}`
+}
+// Convert a date string "YYYY-MM-DD" to UTC midnight timestamp
+const dateKeyToUtcMidnight = (dateKey: string): number => {
+  const [year, month, day] = dateKey.split('-').map(Number)
+  return Date.UTC(year, month - 1, day)
+}
+
+// Legacy local midnight helpers (for backwards compatibility during migration)
 const toLocalMidnightTs = (ms: number): number => {
   const d = new Date(ms)
   d.setHours(0, 0, 0, 0)
@@ -2001,6 +2079,7 @@ const isLocalMidnightTs = (ms: number): boolean => {
   const d = new Date(ms)
   return d.getHours() === 0 && d.getMinutes() === 0 && d.getSeconds() === 0 && d.getMilliseconds() === 0
 }
+// Legacy all-day detection by timestamps (for entries without isAllDay flag)
 const isAllDayRangeTs = (start: number, end: number): boolean => {
   if (!(Number.isFinite(start) && Number.isFinite(end)) || end <= start) return false
   if (!isLocalMidnightTs(start) || !isLocalMidnightTs(end)) return false
@@ -2009,6 +2088,14 @@ const isAllDayRangeTs = (start: number, end: number): boolean => {
   const days = Math.round((endMid - startMid) / DAY_DURATION_MS)
   return days >= 1
 }
+
+// Check if an entry is all-day (prefer isAllDay flag, fallback to timestamp detection)
+const isEntryAllDay = (entry: { isAllDay?: boolean; startedAt: number; endedAt: number }): boolean => {
+  if (typeof entry.isAllDay === 'boolean') return entry.isAllDay
+  // Fallback for entries without the flag
+  return isAllDayRangeTs(entry.startedAt, entry.endedAt)
+}
+
 const DRAG_DETECTION_THRESHOLD_PX = 3
 const MIN_SESSION_DURATION_DRAG_MS = MINUTE_MS
 const DRAG_HOLD_DURATION_MS = 300 // Hold duration required to start dragging/extending sessions
@@ -3662,8 +3749,6 @@ export default function ReflectionPage({ use24HourTime = false, weekStartDay = 0
   // Handler to update app timezone and persist to localStorage
   // Wrapped in startTransition to avoid blocking UI during heavy calendar re-renders
   const updateAppTimezone = useCallback((timezone: string | null) => {
-    // Clear timezone offset cache before changing timezone
-    clearTimezoneCaches()
     storeAppTimezone(timezone)
     startTransition(() => {
       setAppTimezone(timezone)
@@ -3679,13 +3764,11 @@ export default function ReflectionPage({ use24HourTime = false, weekStartDay = 0
         const newValue = event.newValue
         if (!newValue || newValue === '') {
           // Timezone was cleared (sign-out) - reset to system default
-          clearTimezoneCaches()
           startTransition(() => {
             setAppTimezone(null)
           })
         } else if (newValue !== appTimezone) {
           // Timezone was changed from another tab - sync
-          clearTimezoneCaches()
           startTransition(() => {
             setAppTimezone(newValue)
           })
@@ -3695,7 +3778,6 @@ export default function ReflectionPage({ use24HourTime = false, weekStartDay = 0
     
     // Handle same-tab timezone reset (custom event from App.tsx on sign-in/sign-out)
     const handleTimezoneReset = () => {
-      clearTimezoneCaches()
       startTransition(() => {
         setAppTimezone(null)
       })
@@ -3737,27 +3819,6 @@ export default function ReflectionPage({ use24HourTime = false, weekStartDay = 0
   const isUsingCustomTimezone = useMemo(() => {
     if (!appTimezone) return false
     return appTimezone !== getCurrentSystemTimezone()
-  }, [appTimezone])
-  
-  // Adjust a timestamp from system timezone to app timezone for visual positioning
-  // Uses DEFERRED timezone to avoid blocking UI during heavy calendar re-renders
-  const adjustTimestampForTimezone = useCallback((timestamp: number): number => {
-    if (!deferredAppTimezone) return timestamp
-    const systemTz = getCurrentSystemTimezone()
-    if (systemTz === deferredAppTimezone) return timestamp
-    
-    return timestamp + getTimezoneOffsetMs(timestamp, systemTz, deferredAppTimezone)
-  }, [deferredAppTimezone])
-  
-  // Reverse of adjustTimestampForTimezone - converts display time back to UTC for storage
-  // When creating/editing entries in a custom timezone, the visual position is in "display space"
-  // (already adjusted for the app timezone). Before saving, we need to un-adjust back to UTC.
-  const unadjustTimestampForTimezone = useCallback((displayTimestamp: number): number => {
-    if (!appTimezone) return displayTimestamp
-    const systemTz = getCurrentSystemTimezone()
-    if (systemTz === appTimezone) return displayTimestamp
-    // Subtract instead of add (reverse of adjustTimestampForTimezone)
-    return displayTimestamp - getTimezoneOffsetMs(displayTimestamp, systemTz, appTimezone)
   }, [appTimezone])
   
   type CalendarViewMode = 'day' | '3d' | 'week' | 'month' | 'year'
@@ -6563,11 +6624,10 @@ const [showInlineExtras, setShowInlineExtras] = useState(false)
     let nextNotes = draft.notes
     const nextSubtasks = cloneHistorySubtasks(draft.subtasks)
     
-    // Draft timestamps are in display-space (adjusted for app timezone) when set by the user.
-    // We need to unadjust them back to storage-space for saving.
-    // If draft.startedAt is null, we fall back to entry's existing (storage-space) timestamp.
-    const draftStartedAt = draft.startedAt !== null ? unadjustTimestampForTimezone(draft.startedAt) : selectedHistoryEntry.startedAt
-    const draftEndedAt = draft.endedAt !== null ? unadjustTimestampForTimezone(draft.endedAt) : selectedHistoryEntry.endedAt
+    // Draft timestamps are now in UTC (since dayStarts uses display timezone bounds).
+    // If draft.startedAt is null, we fall back to entry's existing timestamp.
+    const draftStartedAt = draft.startedAt !== null ? draft.startedAt : selectedHistoryEntry.startedAt
+    const draftEndedAt = draft.endedAt !== null ? draft.endedAt : selectedHistoryEntry.endedAt
     let nextStartedAt = Number.isFinite(draftStartedAt) ? draftStartedAt : selectedHistoryEntry.startedAt
     let nextEndedAt = Number.isFinite(draftEndedAt) ? draftEndedAt : selectedHistoryEntry.endedAt
     if (!Number.isFinite(nextStartedAt)) {
@@ -6775,7 +6835,6 @@ const [showInlineExtras, setShowInlineExtras] = useState(false)
     selectedHistoryId,
     setPendingNewHistoryId,
     updateHistory,
-    unadjustTimestampForTimezone,
   ])
 
   useEffect(() => {
@@ -8140,28 +8199,32 @@ useEffect(() => {
     }
     return Component
   }, [])
+  
+  // Get the effective display timezone (user-selected or system default)
+  const displayTimezone = deferredAppTimezone ?? getCurrentSystemTimezone()
+  
+  // Get today's date key in the display timezone, then apply offset
+  const selectedDateKey = useMemo(() => {
+    const todayKey = getDateKeyInTimezone(nowTick, displayTimezone)
+    if (historyDayOffset === 0) return todayKey
+    return addDaysToDateKey(todayKey, historyDayOffset)
+  }, [nowTick, historyDayOffset, displayTimezone])
+  
+  // Get UTC timestamps for the start and end of the selected day in display timezone
   const dayStart = useMemo(() => {
-    const date = new Date(nowTick)
-    date.setHours(0, 0, 0, 0)
-    if (calendarView === '3d' && historyDayOffset !== 0) {
-      const adjusted = new Date(date)
-      adjusted.setDate(adjusted.getDate() + historyDayOffset)
-      return adjusted.getTime()
-    }
-    if (historyDayOffset !== 0) {
-      date.setDate(date.getDate() + historyDayOffset)
-    }
-    return date.getTime()
-  }, [nowTick, historyDayOffset, calendarView])
+    return getMidnightUtcForDateInTimezone(selectedDateKey, displayTimezone)
+  }, [selectedDateKey, displayTimezone])
   const dayEnd = dayStart + DAY_DURATION_MS
   const anchorDate = useMemo(() => new Date(dayStart), [dayStart])
+  
+  // Current time indicator position (0-100%)
   const currentTimePercent = useMemo(() => {
-    if (nowTick < dayStart || nowTick > dayEnd) {
-      return null
-    }
-    const raw = ((nowTick - dayStart) / DAY_DURATION_MS) * 100
-    return Math.min(Math.max(raw, 0), 100)
-  }, [nowTick, dayStart, dayEnd])
+    // Check if current time is on the selected day in display timezone
+    const nowDateKey = getDateKeyInTimezone(nowTick, displayTimezone)
+    if (nowDateKey !== selectedDateKey) return null
+    return getPositionPercentInTimezone(nowTick, displayTimezone)
+  }, [nowTick, selectedDateKey, displayTimezone])
+  
   const daySegments = useMemo(() => {
     const preview = dragPreview
     const entries = effectiveHistory
@@ -8170,35 +8233,62 @@ useEffect(() => {
         const rawStartedAt = isPreviewed ? preview.startedAt : entry.startedAt
         const rawEndedAt = isPreviewed ? preview.endedAt : entry.endedAt
         
-        // Adjust timestamps for app timezone (for positioning on the timeline)
-        const startedAt = adjustTimestampForTimezone(rawStartedAt)
-        const endedAt = adjustTimestampForTimezone(rawEndedAt)
+        // Check if this entry overlaps with the selected day in display timezone
+        const startDateKey = getDateKeyInTimezone(rawStartedAt, displayTimezone)
+        const endDateKey = getDateKeyInTimezone(rawEndedAt, displayTimezone)
+        const overlapsSelectedDay = startDateKey === selectedDateKey || endDateKey === selectedDateKey ||
+          (startDateKey < selectedDateKey && endDateKey > selectedDateKey)
         
+        if (!overlapsSelectedDay) return null
+        
+        // Get position percentages in display timezone
+        const startsOnSelectedDay = startDateKey === selectedDateKey
+        const endsOnSelectedDay = endDateKey === selectedDateKey
+        
+        const startPercent = startsOnSelectedDay 
+          ? getPositionPercentInTimezone(rawStartedAt, displayTimezone) 
+          : 0
+        const endPercent = endsOnSelectedDay 
+          ? getPositionPercentInTimezone(rawEndedAt, displayTimezone) 
+          : 100
+        
+        // Skip if no visible portion
+        if (endPercent <= startPercent) return null
+        
+        // For the entry object, keep original timestamps (used for duration display etc)
         const previewedEntry = isPreviewed
           ? {
               ...entry,
-              startedAt,
-              endedAt,
-              elapsed: Math.max(endedAt - startedAt, 1),
+              startedAt: rawStartedAt,
+              endedAt: rawEndedAt,
+              elapsed: Math.max(rawEndedAt - rawStartedAt, 1),
             }
-          : {
-              ...entry,
-              startedAt,
-              endedAt,
-            }
-        const start = Math.max(previewedEntry.startedAt, dayStart)
-        const end = Math.min(previewedEntry.endedAt, dayEnd)
-        if (end <= start) {
-          return null
+          : entry
+        
+        return { 
+          entry: previewedEntry, 
+          startPercent, 
+          endPercent,
+          // Keep start/end as UTC timestamps for sorting
+          start: rawStartedAt,
+          end: rawEndedAt,
         }
-        return { entry: previewedEntry, start, end }
       })
-      .filter((segment): segment is { entry: HistoryEntry; start: number; end: number } => Boolean(segment))
+      .filter((segment): segment is { entry: HistoryEntry; startPercent: number; endPercent: number; start: number; end: number } => Boolean(segment))
 
     if (preview && preview.entryId === 'new-entry') {
-      const start = Math.max(Math.min(preview.startedAt, preview.endedAt), dayStart)
-      const end = Math.min(Math.max(preview.startedAt, preview.endedAt), dayEnd)
-      if (end > start) {
+      // For new entry preview, preview.startedAt/endedAt are already in display space (percent-based)
+      // Convert back to check if it's valid
+      const minPercent = Math.min(preview.startedAt, preview.endedAt)
+      const maxPercent = Math.max(preview.startedAt, preview.endedAt)
+      const startPercent = Math.max(minPercent, 0)
+      const endPercent = Math.min(maxPercent, 100)
+      
+      if (endPercent > startPercent) {
+        // Convert percentages to UTC timestamps for the synthetic entry
+        const syntheticStartedAt = percentToUtcTimestamp(startPercent, dayStart)
+        const syntheticEndedAt = percentToUtcTimestamp(endPercent, dayStart)
+        
         const syntheticEntry: HistoryEntry = {
           id: 'new-entry',
           taskName: '',
@@ -8207,31 +8297,38 @@ useEffect(() => {
           goalId: LIFE_ROUTINES_GOAL_ID,
           bucketId: null,
           taskId: null,
-          elapsed: Math.max(end - start, MIN_SESSION_DURATION_DRAG_MS),
-          startedAt: start,
-          endedAt: end,
+          elapsed: Math.max(syntheticEndedAt - syntheticStartedAt, MIN_SESSION_DURATION_DRAG_MS),
+          startedAt: syntheticStartedAt,
+          endedAt: syntheticEndedAt,
           goalSurface: LIFE_ROUTINES_SURFACE,
           bucketSurface: null,
           notes: '',
           subtasks: [],
         }
-        entries.push({ entry: syntheticEntry, start, end })
+        entries.push({ 
+          entry: syntheticEntry, 
+          startPercent, 
+          endPercent,
+          start: syntheticStartedAt,
+          end: syntheticEndedAt,
+        })
       }
     }
 
     entries.sort((a, b) => a.start - b.start)
     const lanes: number[] = []
-    return entries.map(({ entry, start, end }) => {
-      let lane = lanes.findIndex((laneEnd) => start >= laneEnd - 1000)
+    return entries.map(({ entry, startPercent, endPercent, start }) => {
+      // Lane assignment based on overlap (using percentages)
+      let lane = lanes.findIndex((laneEndPercent) => startPercent >= laneEndPercent - 0.5)
       if (lane === -1) {
         lane = lanes.length
-        lanes.push(end)
+        lanes.push(endPercent)
       } else {
-        lanes[lane] = end
+        lanes[lane] = endPercent
       }
-      const left = ((start - dayStart) / DAY_DURATION_MS) * 100
-      const rawWidth = ((end - start) / DAY_DURATION_MS) * 100
-      const safeLeft = Math.min(Math.max(left, 0), 100)
+      
+      const safeLeft = Math.min(Math.max(startPercent, 0), 100)
+      const rawWidth = endPercent - startPercent
       const maxWidth = Math.max(100 - safeLeft, 0)
       const widthPercent = Math.min(Math.max(rawWidth, 0.8), maxWidth)
       const labelSource = entry.goalName?.trim().length ? entry.goalName! : entry.taskName
@@ -8251,7 +8348,7 @@ useEffect(() => {
         id: entry.id,
         entry,
         start,
-        end,
+        end: entry.endedAt,
         lane,
         leftPercent: safeLeft,
         widthPercent,
@@ -8265,7 +8362,7 @@ useEffect(() => {
         tooltipTask,
       }
     })
-  }, [effectiveHistory, dayStart, dayEnd, enhancedGoalLookup, goalColorLookup, dragPreview, adjustTimestampForTimezone, use24HourTime])
+  }, [effectiveHistory, selectedDateKey, dayStart, displayTimezone, enhancedGoalLookup, goalColorLookup, dragPreview, use24HourTime])
   
   // Separate timezone markers from regular segments
   const { regularSegments, timezoneMarkers } = useMemo(() => {
@@ -9589,43 +9686,33 @@ useEffect(() => {
       const visibleDayCount = calendarView === '3d' ? Math.max(2, Math.min(multiDayCount, 14)) : calendarView === 'week' ? 7 : 1
       const bufferDays = getCalendarBufferDays(visibleDayCount)
       const totalCount = visibleDayCount + bufferDays * 2
-      // Determine range start (shifted by buffer)
-      const windowStart = new Date(anchorDate)
+      
+      // Calculate the anchor date key and apply week-start adjustment if needed
+      let anchorDateKey = selectedDateKey
       if (calendarView === 'week') {
-        const dow = windowStart.getDay() // 0=Sun, 1=Mon, etc.
+        // Get day-of-week in display timezone (0=Sun, 1=Mon, etc.)
+        const anchorParts = getTimePartsInTimezone(dayStart, displayTimezone)
+        const anchorDateObj = new Date(anchorParts.year, anchorParts.month - 1, anchorParts.day)
+        const dow = anchorDateObj.getDay()
         // Calculate days to go back to reach weekStartDay (0=Sunday, 1=Monday)
         const daysBack = (dow - weekStartDay + 7) % 7
-        windowStart.setDate(windowStart.getDate() - daysBack)
+        anchorDateKey = addDaysToDateKey(selectedDateKey, -daysBack)
       }
-      windowStart.setDate(windowStart.getDate() - bufferDays)
-      const dayStarts: number[] = []
-      for (let i = 0; i < totalCount; i += 1) {
-        const d = new Date(windowStart)
-        d.setDate(windowStart.getDate() + i)
-        d.setHours(0, 0, 0, 0)
-        dayStarts.push(d.getTime())
+      
+      // Generate dayStarts using display timezone
+      const dayStarts = getDayStartsInTimezone(anchorDateKey, -bufferDays, totalCount, displayTimezone)
+      
+      // Generate dateKeys for each day (used for filtering entries)
+      const dayDateKeys: string[] = []
+      for (let i = 0; i < totalCount; i++) {
+        dayDateKeys.push(addDaysToDateKey(anchorDateKey, i - bufferDays))
       }
 
-      // Helpers for all-day support
-      const toLocalMidnight = (ms: number): number => {
-        const d = new Date(ms)
-        d.setHours(0, 0, 0, 0)
-        return d.getTime()
-      }
-      const isLocalMidnight = (ms: number): boolean => {
-        const d = new Date(ms)
-        return d.getHours() === 0 && d.getMinutes() === 0 && d.getSeconds() === 0 && d.getMilliseconds() === 0
-      }
-      const isAllDayRange = (start: number, end: number): boolean => {
-        if (!(Number.isFinite(start) && Number.isFinite(end)) || end <= start) return false
-        // All‑day if both endpoints are at local midnight and span at least 1 day
-        if (!isLocalMidnight(start) || !isLocalMidnight(end)) return false
-        const startMid = toLocalMidnight(start)
-        const endMid = toLocalMidnight(end)
-        // Allow for DST shifts by comparing local midnight indices instead of exact ms duration
-        const days = Math.round((endMid - startMid) / DAY_DURATION_MS)
-        return days >= 1
-      }
+      // All-day detection uses SYSTEM local time (not display timezone)
+      // because all-day events are stored with local midnight timestamps
+      // and represent calendar days in the user's local context.
+      // Switching display timezone shouldn't change whether something is "all-day".
+      // We use the top-level isAllDayRangeTs function for this.
 
       type AllDayBar = {
         entry: HistoryEntry
@@ -9701,16 +9788,40 @@ useEffect(() => {
           const isPreviewed = dragPreview && dragPreview.entryId === entry.id
           const startAt = isPreviewed ? dragPreview.startedAt : entry.startedAt
           const endAt = isPreviewed ? dragPreview.endedAt : entry.endedAt
-          if (!isAllDayRange(startAt, endAt)) continue
-          // Clamp the visual range to the current window
-          const startMid = toLocalMidnight(startAt)
-          const endMid = toLocalMidnight(endAt)
-          if (endMid <= windowStartMs || startMid >= windowEndMs) continue
-          const clampedStart = Math.max(startMid, windowStartMs)
-          const clampedEnd = Math.min(endMid, windowEndMs)
-          // Map to column indices (inclusive start, exclusive end)
-          const colStart = Math.floor((clampedStart - windowStartMs) / DAY_DURATION_MS)
-          const colEnd = Math.ceil((clampedEnd - windowStartMs) / DAY_DURATION_MS)
+          if (!isEntryAllDay(entry)) continue
+          
+          // For entries with isAllDay flag, use UTC date matching (timestamps are UTC midnight)
+          // For legacy entries, use local midnight detection
+          let colStart: number
+          let colEnd: number
+          
+          if (entry.isAllDay) {
+            // UTC midnight timestamps - match by UTC date string
+            const startDateKey = getUtcDateKey(startAt)
+            const endDateKey = getUtcDateKey(endAt)
+            colStart = dayDateKeys.indexOf(startDateKey)
+            // End is exclusive, so find the end date column
+            const endColIdx = dayDateKeys.indexOf(endDateKey)
+            colEnd = endColIdx >= 0 ? endColIdx : dayDateKeys.length
+            // If start date not found in window, try to find overlap
+            if (colStart < 0) {
+              // Check if event overlaps with window at all
+              const windowFirstDate = dayDateKeys[0]
+              const windowLastDate = dayDateKeys[dayDateKeys.length - 1]
+              if (startDateKey > windowLastDate || endDateKey <= windowFirstDate) continue
+              colStart = 0
+            }
+          } else {
+            // Legacy: local midnight timestamps
+            const startMid = toLocalMidnightTs(startAt)
+            const endMid = toLocalMidnightTs(endAt)
+            if (endMid <= windowStartMs || startMid >= windowEndMs) continue
+            const clampedStart = Math.max(startMid, windowStartMs)
+            const clampedEnd = Math.min(endMid, windowEndMs)
+            colStart = Math.floor((clampedStart - windowStartMs) / DAY_DURATION_MS)
+            colEnd = Math.ceil((clampedEnd - windowStartMs) / DAY_DURATION_MS)
+          }
+          
           if (colEnd <= colStart) continue
           const meta = resolveGoalMetadata(entry, enhancedGoalLookup, goalColorLookup, lifeRoutineSurfaceLookup)
           const derivedLabel = deriveEntryTaskName(entry)
@@ -9801,6 +9912,7 @@ useEffect(() => {
           const TOL = 60 * 1000
           repeatingRules.forEach((rule) => {
             if (!isAllDayRule(rule)) return
+            // Guides show at their configured time in the display timezone
             dayStarts.forEach((dayStart, columnIndex) => {
               if (!isRuleScheduledForDay(rule, dayStart)) return
               if (!isWithinBoundaries(rule, dayStart)) return
@@ -9938,16 +10050,17 @@ useEffect(() => {
         const raw: RawEvent[] = effectiveHistory
           .map((entry) => {
             // Exclude all‑day entries from the time grid; they render in the all‑day lane
-            if (isAllDayRange(entry.startedAt, entry.endedAt)) return null
+            if (isEntryAllDay(entry)) return null
             const isPreviewed = dragPreview && dragPreview.entryId === entry.id
             const rawStart = isPreviewed ? dragPreview.startedAt : entry.startedAt
             const rawEnd = isPreviewed ? dragPreview.endedAt : entry.endedAt
             
-            // Guide tasks show at their scheduled local time (not timezone-adjusted)
-            // Real sessions are timezone-adjusted so they appear in app timezone
+            // Guide tasks use their scheduled time directly (already in display timezone local time)
+            // Real sessions: since dayStarts are now UTC bounds for the display timezone,
+            // we can use UTC timestamps directly without adjustment
             const isGuideEntry = entry.id.startsWith('repeat:')
-            const previewStart = isGuideEntry ? rawStart : adjustTimestampForTimezone(rawStart)
-            const previewEnd = isGuideEntry ? rawEnd : adjustTimestampForTimezone(rawEnd)
+            const previewStart = rawStart
+            const previewEnd = rawEnd
             
             const clampedStart = Math.max(Math.min(previewStart, previewEnd), startMs)
             const clampedEnd = Math.min(Math.max(previewStart, previewEnd), endMs)
@@ -10062,7 +10175,7 @@ useEffect(() => {
             const durationMs = Math.max(1, (rule.durationMinutes ?? 60) * MINUTE_MS)
             // Allow crossing midnight: DO NOT clamp to end of day here
             const endedAt = startedAt + durationMs
-            if (isAllDayRange(startedAt, endedAt)) {
+            if (isAllDayRangeTs(startedAt, endedAt)) {
               return null
             }
             const task = (rule.taskName?.trim() || 'Session')
@@ -10100,6 +10213,7 @@ useEffect(() => {
             const previewEnd = isPreviewed ? dragPreview.endedAt : endedAt
             return {
               entry,
+              // Use system timezone bounds for guides (guides show at their configured time in display timezone)
               start: Math.max(previewStart, startMs),
               end: Math.min(previewEnd, endMs),
               previewStart,
@@ -10392,11 +10506,8 @@ useEffect(() => {
           const isGuide = info.entry.id.startsWith('repeat:')
           const isPlanned = !!(info.entry as any).futureSession
           
-          // Guides show at scheduled local time (format without timezone)
-          // Real sessions are timezone-adjusted (format as local since already adjusted)
-          const rangeLabel = isGuide
-            ? `${formatTimeOfDay(info.previewStart)} — ${formatTimeOfDay(info.previewEnd)}`
-            : `${formatAdjustedTime(info.previewStart)} — ${formatAdjustedTime(info.previewEnd)}`
+          // Both guides and real sessions show times in the display timezone
+          const rangeLabel = `${formatTimeOfDay(info.previewStart, displayTimezone, use24HourTime)} — ${formatTimeOfDay(info.previewEnd, displayTimezone, use24HourTime)}`
 
           const duration = Math.max(info.end - info.start, 1)
           const durationScore = Math.max(0, Math.round((DAY_DURATION_MS - duration) / MINUTE_MS))
@@ -10715,14 +10826,12 @@ useEffect(() => {
             const preview = dragPreviewRef.current
             if (s && preview && preview.entryId === s.entryId && (preview.startedAt !== s.initialStart || preview.endedAt !== s.initialEnd)) {
               dragPreventClickRef.current = true
-              // For existing entries (non-guides), the drag calculation uses system timezone dayStarts,
-              // and real sessions are displayed with timezone adjustment, so no conversion needed.
-              // For guide materializations: the preview is calculated using system timezone dayStarts.
-              // Guide timestamps represent intended LOCAL time, so we need to unadjust for storage.
+              // Since dayStarts are now computed in display timezone (UTC bounds),
+              // preview timestamps are already in UTC - no conversion needed
               if (guideMaterialization) {
                 const { realEntry, ruleId, ymd } = guideMaterialization
-                const storedStartedAt = unadjustTimestampForTimezone(preview.startedAt)
-                const storedEndedAt = unadjustTimestampForTimezone(preview.endedAt)
+                const storedStartedAt = preview.startedAt
+                const storedEndedAt = preview.endedAt
                 flushSync(() => {
                   updateHistory((current) => {
                     const materialized = {
@@ -10741,7 +10850,7 @@ useEffect(() => {
                   void evaluateAndMaybeRetireRule(ruleId)
                 } catch {}
               } else if (s) {
-                // Existing real entry - preview values are already correct
+                // Existing real entry - preview values are already UTC
                 const finalStartedAt = preview.startedAt
                 const finalEndedAt = preview.endedAt
                 flushSync(() => {
@@ -10768,11 +10877,11 @@ useEffect(() => {
                 })
               }
             } else if (guideMaterialization && s) {
-              // Guide held but not moved - materialize at same visual position.
-              // Guide timestamps represent intended LOCAL time, unadjust for storage.
+              // Guide held but not moved - materialize at same visual position
+              // Guide timestamps are already UTC in the new system
               const { realEntry, ruleId, ymd } = guideMaterialization
-              const storedStartedAt = unadjustTimestampForTimezone(realEntry.startedAt)
-              const storedEndedAt = unadjustTimestampForTimezone(realEntry.endedAt)
+              const storedStartedAt = realEntry.startedAt
+              const storedEndedAt = realEntry.endedAt
               const materializedEntry = {
                 ...realEntry,
                 startedAt: storedStartedAt,
@@ -10901,15 +11010,19 @@ useEffect(() => {
                   }}
                   onPointerDown={(pev) => {
                     if (pev.button !== 0) return
+                    // Check if another interaction is already active
+                    const currentMode = calendarInteractionModeRef.current
+                    if (currentMode === 'panning' || currentMode === 'creating' || currentMode === 'dragging') return
                     // Start horizontal drag to move all-day block across days (after hold)
-                    pev.preventDefault(); pev.stopPropagation(); handleCloseCalendarPreview()
+                    pev.stopPropagation(); handleCloseCalendarPreview()
                     const track = calendarAllDayRef.current
-                    if (!track) return
+                    const area = calendarDaysAreaRef.current
+                    if (!track || !area) return
                     const rect = track.getBoundingClientRect()
                     if (!(Number.isFinite(rect.width) && rect.width > 0 && dayStarts.length > 0)) return
                     const pointerId = pev.pointerId
+                    let mode: 'pending' | 'dragging' | 'panning' = 'pending'
                     let moved = false
-                    let activated = false
                     const startX = pev.clientX
                     const startY = pev.clientY
                     const dayWidth = rect.width / Math.max(1, dayStarts.length)
@@ -10920,37 +11033,102 @@ useEffect(() => {
                     const initialStart = bar.entry.startedAt
                     const initialEnd = bar.entry.endedAt
                     let holdTimer: number | null = null
+                    
                     const activateDrag = () => {
-                      if (activated) return
-                      activated = true
+                      if (mode !== 'pending') return
+                      mode = 'dragging'
+                      calendarInteractionModeRef.current = 'dragging'
                       try { (pev.currentTarget as any).setPointerCapture?.(pointerId) } catch {}
                     }
+                    
+                    const startPan = () => {
+                      if (mode !== 'pending') return
+                      mode = 'panning'
+                      calendarInteractionModeRef.current = 'panning'
+                      // Clear hold timer
+                      if (holdTimer !== null) {
+                        try { window.clearTimeout(holdTimer) } catch {}
+                        holdTimer = null
+                      }
+                      const areaRect = area.getBoundingClientRect()
+                      if (areaRect.width <= 0) return
+                      const dayCount = calendarView === '3d'
+                        ? Math.max(2, Math.min(multiDayCount, 14))
+                        : calendarView === 'week' ? 7 : 1
+                      stopCalendarPanAnimation()
+                      const now = typeof performance !== 'undefined' ? performance.now() : Date.now()
+                      const daysEl = calendarDaysRef.current
+                      const hdrEl = calendarHeadersRef.current
+                      const allDayEl = calendarAllDayRef.current
+                      if (daysEl) daysEl.style.transition = ''
+                      if (hdrEl) hdrEl.style.transition = ''
+                      if (allDayEl) allDayEl.style.transition = ''
+                      resetCalendarPanTransform()
+                      const baseOffset = calendarPanDesiredOffsetRef.current
+                      calendarDragRef.current = {
+                        pointerId,
+                        startX,
+                        startY,
+                        startTime: now,
+                        areaWidth: areaRect.width,
+                        dayCount,
+                        baseOffset,
+                        mode: 'hdrag',
+                        lastAppliedDx: 0,
+                      }
+                      calendarEventDragRef.current = null
+                      try { area.setPointerCapture?.(pointerId) } catch {}
+                      setPageScrollLock(true)
+                    }
+                    
                     const onMove = (e: PointerEvent) => {
                       if (e.pointerId !== pointerId) return
                       const dx = e.clientX - startX
                       const dy = e.clientY - startY
-                      // Cancel hold timer if movement exceeds threshold before activation
-                      if (!activated && Math.hypot(dx, dy) > 6) {
-                        if (holdTimer !== null) {
-                          try { window.clearTimeout(holdTimer) } catch {}
-                          holdTimer = null
+                      
+                      if (mode === 'pending') {
+                        // Still waiting - check if we should transition to pan
+                        if (hasMovedPastThreshold(dx, dy, 8)) {
+                          startPan()
+                          try { e.preventDefault() } catch {}
                         }
                         return
                       }
-                      if (!activated) return
-                      const rawPointerIndex = Math.floor((e.clientX - trackLeft) / dayWidth)
-                      const pointerIndex = clampColumnIndex(rawPointerIndex)
-                      const deltaDays = pointerIndex - pointerStartIndex
-                      if (Math.abs(dx) > 4 && !moved) { moved = true; dragPreventClickRef.current = true }
-                      if (!moved) return
-                      const nextStart = initialStart + deltaDays * DAY_DURATION_MS
-                      const nextEnd = initialEnd + deltaDays * DAY_DURATION_MS
-                      const current = dragPreviewRef.current
-                      if (current && current.entryId === bar.entry.id && current.startedAt === nextStart && current.endedAt === nextEnd) return
-                      const preview = { entryId: bar.entry.id, startedAt: nextStart, endedAt: nextEnd }
-                      dragPreviewRef.current = preview
-                      setDragPreview(preview)
-                      try { e.preventDefault() } catch {}
+                      
+                      if (mode === 'panning') {
+                        // Handle pan move
+                        const state = calendarDragRef.current
+                        if (!state || e.pointerId !== state.pointerId) return
+                        const panDayWidth = state.areaWidth / Math.max(1, state.dayCount)
+                        if (!Number.isFinite(panDayWidth) || panDayWidth <= 0) return
+                        try { e.preventDefault() } catch {}
+                        const constrainedDx = clampPanDelta(dx, panDayWidth, state.dayCount)
+                        state.lastAppliedDx = constrainedDx
+                        const totalPx = calendarBaseTranslateRef.current + constrainedDx
+                        const daysEl = calendarDaysRef.current
+                        const hdrEl = calendarHeadersRef.current
+                        const allDayEl = calendarAllDayRef.current
+                        if (daysEl) daysEl.style.transform = `translateX(${totalPx}px)`
+                        if (hdrEl) hdrEl.style.transform = `translateX(${totalPx}px)`
+                        if (allDayEl) allDayEl.style.transform = `translateX(${totalPx}px)`
+                        return
+                      }
+                      
+                      if (mode === 'dragging') {
+                        const rawPointerIndex = Math.floor((e.clientX - trackLeft) / dayWidth)
+                        const pointerIndex = clampColumnIndex(rawPointerIndex)
+                        const deltaDays = pointerIndex - pointerStartIndex
+                        if (Math.abs(dx) > 4 && !moved) { moved = true; dragPreventClickRef.current = true }
+                        if (!moved) return
+                        const nextStart = initialStart + deltaDays * DAY_DURATION_MS
+                        const nextEnd = initialEnd + deltaDays * DAY_DURATION_MS
+                        const current = dragPreviewRef.current
+                        if (current && current.entryId === bar.entry.id && current.startedAt === nextStart && current.endedAt === nextEnd) return
+                        const preview = { entryId: bar.entry.id, startedAt: nextStart, endedAt: nextEnd }
+                        dragPreviewRef.current = preview
+                        setDragPreview(preview)
+                        try { e.preventDefault() } catch {}
+                      }
                     }
                     const onUp = (e: PointerEvent) => {
                       if (e.pointerId !== pointerId) return
@@ -10961,6 +11139,34 @@ useEffect(() => {
                       window.removeEventListener('pointermove', onMove)
                       window.removeEventListener('pointerup', onUp)
                       window.removeEventListener('pointercancel', onUp)
+                      
+                      if (mode === 'panning') {
+                        // Finish pan
+                        const state = calendarDragRef.current
+                        try { area.releasePointerCapture?.(pointerId) } catch {}
+                        if (state && state.pointerId === pointerId) {
+                          const dx = e.clientX - state.startX
+                          const panDayWidth = state.areaWidth / Math.max(1, state.dayCount)
+                          if (Number.isFinite(panDayWidth) && panDayWidth > 0) {
+                            const appliedDx = clampPanDelta(dx, panDayWidth, state.dayCount)
+                            state.lastAppliedDx = appliedDx
+                            const totalPx = calendarBaseTranslateRef.current + appliedDx
+                            const daysEl = calendarDaysRef.current
+                            const hdrEl = calendarHeadersRef.current
+                            const allDayEl = calendarAllDayRef.current
+                            if (daysEl) daysEl.style.transform = `translateX(${totalPx}px)`
+                            if (hdrEl) hdrEl.style.transform = `translateX(${totalPx}px)`
+                            if (allDayEl) allDayEl.style.transform = `translateX(${totalPx}px)`
+                            const { snap } = resolvePanSnap(state, dx, panDayWidth, calendarView, appliedDx)
+                            animateCalendarPan(snap, panDayWidth, state.baseOffset)
+                          }
+                        }
+                        calendarDragRef.current = null
+                        calendarInteractionModeRef.current = null
+                        setPageScrollLock(false)
+                        return
+                      }
+                      
                       try { (pev.currentTarget as any).releasePointerCapture?.(pointerId) } catch {}
                       const preview = dragPreviewRef.current
                       if (moved && preview && preview.entryId === bar.entry.id && (preview.startedAt !== initialStart || preview.endedAt !== initialEnd)) {
@@ -10981,6 +11187,7 @@ useEffect(() => {
                       }
                       dragPreviewRef.current = null
                       setDragPreview(null)
+                      calendarInteractionModeRef.current = null
                     }
                     holdTimer = window.setTimeout(() => {
                       holdTimer = null
@@ -10997,30 +11204,279 @@ useEffect(() => {
                   </div>
                 </div>
               )})}
-              {/* Click/creation hit areas per day (span all rows) */}
-              {dayStarts.map((start, i) => (
-                <button
-                  key={`adh-${i}`}
-                  type="button"
-                  className="calendar-allday-hit"
-                  style={{ gridColumn: `${i + 1} / ${i + 2}`, gridRow: `1 / ${allDayTrackRows + 1}` }}
-                  onClick={(ev) => {
-                    ev.preventDefault(); ev.stopPropagation()
-                    const newId = makeHistoryId()
-                    const dayStart = start
-                    const newEntry: HistoryEntry = {
-                      id: newId, taskName: '', elapsed: DAY_DURATION_MS,
-                      startedAt: dayStart, endedAt: dayStart + DAY_DURATION_MS,
-                      goalName: LIFE_ROUTINES_NAME, bucketName: null, goalId: LIFE_ROUTINES_GOAL_ID, bucketId: null, taskId: null,
-                      goalSurface: LIFE_ROUTINES_SURFACE, bucketSurface: null, notes: '', subtasks: [],
+              {/* Hold-to-create hit area for all-day sessions (single element spanning all days) */}
+              <div
+                className="calendar-allday-hit-area"
+                style={{ gridColumn: `1 / ${dayStarts.length + 1}`, gridRow: `1 / ${allDayTrackRows + 1}` }}
+                onPointerDown={(pev) => {
+                  if (pev.button !== 0) return
+                  // Check if another interaction is already active
+                  const currentMode = calendarInteractionModeRef.current
+                  if (currentMode === 'panning' || currentMode === 'creating' || currentMode === 'dragging') return
+                  // Ignore if starting on an existing all-day event
+                  const rawTarget = pev.target as HTMLElement | null
+                  if (rawTarget && rawTarget.closest('.calendar-allday-event')) return
+                  pev.stopPropagation()
+
+                  const track = calendarAllDayRef.current
+                  const area = calendarDaysAreaRef.current
+                  if (!track || !area) return
+                  const rect = track.getBoundingClientRect()
+                  if (!(Number.isFinite(rect.width) && rect.width > 0 && dayStarts.length > 0)) return
+
+                  const pointerId = pev.pointerId
+                  const startX = pev.clientX
+                  const startY = pev.clientY
+                  const dayWidth = rect.width / Math.max(1, dayStarts.length)
+                  const trackLeft = rect.left
+                  const clampColumnIndex = (value: number) =>
+                    Math.max(0, Math.min(dayStarts.length - 1, Number.isFinite(value) ? value : 0))
+                  const pointerStartIndex = clampColumnIndex(Math.floor((startX - trackLeft) / dayWidth))
+
+                  // Set interaction mode to pending
+                  calendarInteractionModeRef.current = 'pending'
+
+                  let creatingNewAllDay = false
+                  let newEntryId: string | null = null
+                  let initialColIndex = pointerStartIndex
+                  let currentColIndex = pointerStartIndex
+
+                  const startCreate = () => {
+                    if (calendarInteractionModeRef.current !== 'pending') return
+                    calendarInteractionModeRef.current = 'creating'
+                    creatingNewAllDay = true
+                    newEntryId = makeHistoryId()
+                    // Initial preview: single day
+                    const dateKey = dayDateKeys[initialColIndex]
+                    const utcMidnight = dateKeyToUtcMidnight(dateKey)
+                    const preview = { entryId: 'new-allday', startedAt: utcMidnight, endedAt: utcMidnight + DAY_DURATION_MS }
+                    dragPreviewRef.current = preview
+                    setDragPreview(preview)
+                    setPageScrollLock(true)
+                    try { (pev.currentTarget as any).setPointerCapture?.(pointerId) } catch {}
+                  }
+
+                  const startPan = () => {
+                    if (calendarInteractionModeRef.current !== 'pending') return
+                    calendarInteractionModeRef.current = 'panning'
+                    if (calendarHoldTimerRef.current !== null) {
+                      try { window.clearTimeout(calendarHoldTimerRef.current) } catch {}
+                      calendarHoldTimerRef.current = null
                     }
-                    updateHistory((current) => { const next = [...current, newEntry]; next.sort((a, b) => a.startedAt - b.startedAt); return next })
-                    setPendingNewHistoryId(newId)
-                    setTimeout(() => { openCalendarInspector(newEntry) }, 0)
-                  }}
-                  aria-label={`Create all-day session for ${new Date(start).toDateString()}`}
-                />
-              ))}
+                    const areaRect = area.getBoundingClientRect()
+                    if (areaRect.width <= 0) return
+                    const dayCount = calendarView === '3d'
+                      ? Math.max(2, Math.min(multiDayCount, 14))
+                      : calendarView === 'week' ? 7 : 1
+                    stopCalendarPanAnimation()
+                    const now = typeof performance !== 'undefined' ? performance.now() : Date.now()
+                    const daysEl = calendarDaysRef.current
+                    const hdrEl = calendarHeadersRef.current
+                    if (daysEl) daysEl.style.transition = ''
+                    if (hdrEl) hdrEl.style.transition = ''
+                    resetCalendarPanTransform()
+                    const baseOffset = calendarPanDesiredOffsetRef.current
+                    calendarDragRef.current = {
+                      pointerId,
+                      startX,
+                      startY,
+                      startTime: now,
+                      areaWidth: areaRect.width,
+                      dayCount,
+                      baseOffset,
+                      mode: 'hdrag',
+                      lastAppliedDx: 0,
+                    }
+                    try { area.setPointerCapture?.(pointerId) } catch {}
+                    setPageScrollLock(true)
+                  }
+
+                  const onMove = (e: PointerEvent) => {
+                    if (e.pointerId !== pointerId) return
+                    const dx = e.clientX - startX
+                    const dy = e.clientY - startY
+                    const mode = calendarInteractionModeRef.current
+
+                    if (mode === 'pending') {
+                      // Movement before hold timer - start panning
+                      if (hasMovedPastThreshold(dx, dy, 8)) {
+                        startPan()
+                        try { e.preventDefault() } catch {}
+                        return
+                      }
+                      return
+                    }
+
+                    if (mode === 'panning') {
+                      const state = calendarDragRef.current
+                      if (!state || e.pointerId !== state.pointerId) return
+                      const panDayWidth = state.areaWidth / Math.max(1, state.dayCount)
+                      if (!Number.isFinite(panDayWidth) || panDayWidth <= 0) return
+                      try { e.preventDefault() } catch {}
+                      const constrainedDx = clampPanDelta(dx, panDayWidth, state.dayCount)
+                      state.lastAppliedDx = constrainedDx
+                      const totalPx = calendarBaseTranslateRef.current + constrainedDx
+                      const daysEl = calendarDaysRef.current
+                      const allDayEl = calendarAllDayRef.current
+                      if (daysEl) daysEl.style.transform = `translateX(${totalPx}px)`
+                      const hdrEl = calendarHeadersRef.current
+                      if (hdrEl) hdrEl.style.transform = `translateX(${totalPx}px)`
+                      if (allDayEl) allDayEl.style.transform = `translateX(${totalPx}px)`
+                      return
+                    }
+
+                    if (mode === 'creating' && creatingNewAllDay) {
+                      try { e.preventDefault() } catch {}
+                      const rawPointerIndex = Math.floor((e.clientX - trackLeft) / dayWidth)
+                      const pointerIndex = clampColumnIndex(rawPointerIndex)
+                      if (pointerIndex === currentColIndex) return
+                      currentColIndex = pointerIndex
+                      // Calculate start and end columns (can drag left or right)
+                      const startCol = Math.min(initialColIndex, currentColIndex)
+                      const endCol = Math.max(initialColIndex, currentColIndex)
+                      const startDateKey = dayDateKeys[startCol]
+                      const endDateKey = dayDateKeys[endCol]
+                      const startUtc = dateKeyToUtcMidnight(startDateKey)
+                      const endUtc = dateKeyToUtcMidnight(endDateKey) + DAY_DURATION_MS
+                      const preview = { entryId: 'new-allday', startedAt: startUtc, endedAt: endUtc }
+                      dragPreviewRef.current = preview
+                      setDragPreview(preview)
+                      return
+                    }
+                  }
+
+                  const onUp = (e: PointerEvent) => {
+                    if (e.pointerId !== pointerId) return
+                    if (calendarHoldTimerRef.current !== null) {
+                      try { window.clearTimeout(calendarHoldTimerRef.current) } catch {}
+                      calendarHoldTimerRef.current = null
+                    }
+                    window.removeEventListener('pointermove', onMove)
+                    window.removeEventListener('pointerup', onUp)
+                    window.removeEventListener('pointercancel', onUp)
+                    try { (pev.currentTarget as any).releasePointerCapture?.(pointerId) } catch {}
+
+                    const finalMode = calendarInteractionModeRef.current
+
+                    if (finalMode === 'panning') {
+                      const state = calendarDragRef.current
+                      if (state && e.pointerId === state.pointerId) {
+                        area.releasePointerCapture?.(state.pointerId)
+                        const dx = e.clientX - state.startX
+                        const panDayWidth = state.areaWidth / Math.max(1, state.dayCount)
+                        if (Number.isFinite(panDayWidth) && panDayWidth > 0) {
+                          const appliedDx = clampPanDelta(dx, panDayWidth, state.dayCount)
+                          state.lastAppliedDx = appliedDx
+                          const totalPx = calendarBaseTranslateRef.current + appliedDx
+                          const daysEl = calendarDaysRef.current
+                          if (daysEl) daysEl.style.transform = `translateX(${totalPx}px)`
+                          const hdrEl = calendarHeadersRef.current
+                          if (hdrEl) hdrEl.style.transform = `translateX(${totalPx}px)`
+                          const { snap } = resolvePanSnap(state, dx, panDayWidth, calendarView, appliedDx)
+                          animateCalendarPan(snap, panDayWidth, state.baseOffset)
+                        } else {
+                          const base = calendarBaseTranslateRef.current
+                          const daysEl = calendarDaysRef.current
+                          if (daysEl) daysEl.style.transform = `translateX(${base}px)`
+                          const hdrEl = calendarHeadersRef.current
+                          if (hdrEl) hdrEl.style.transform = `translateX(${base}px)`
+                        }
+                      }
+                      calendarDragRef.current = null
+                      setPageScrollLock(false)
+                      calendarInteractionModeRef.current = null
+                      return
+                    }
+
+                    if (finalMode === 'creating' && creatingNewAllDay && newEntryId) {
+                      setPageScrollLock(false)
+                      const preview = dragPreviewRef.current
+                      if (preview && preview.entryId === 'new-allday') {
+                        const startCol = Math.min(initialColIndex, currentColIndex)
+                        const endCol = Math.max(initialColIndex, currentColIndex)
+                        const startDateKey = dayDateKeys[startCol]
+                        const endDateKey = dayDateKeys[endCol]
+                        const startUtc = dateKeyToUtcMidnight(startDateKey)
+                        const endUtc = dateKeyToUtcMidnight(endDateKey) + DAY_DURATION_MS
+                        const elapsed = endUtc - startUtc
+                        const newEntry: HistoryEntry = {
+                          id: newEntryId,
+                          taskName: '',
+                          elapsed,
+                          startedAt: startUtc,
+                          endedAt: endUtc,
+                          goalName: LIFE_ROUTINES_NAME,
+                          bucketName: null,
+                          goalId: LIFE_ROUTINES_GOAL_ID,
+                          bucketId: null,
+                          taskId: null,
+                          goalSurface: LIFE_ROUTINES_SURFACE,
+                          bucketSurface: null,
+                          notes: '',
+                          subtasks: [],
+                          isAllDay: true,
+                        }
+                        flushSync(() => {
+                          updateHistory((current) => {
+                            const next = [...current, newEntry]
+                            next.sort((a, b) => a.startedAt - b.startedAt)
+                            return next
+                          })
+                        })
+                        setPendingNewHistoryId(newEntryId)
+                        setTimeout(() => { openCalendarInspector(newEntry) }, 0)
+                      }
+                      dragPreviewRef.current = null
+                      setDragPreview(null)
+                      calendarInteractionModeRef.current = null
+                      return
+                    }
+
+                    // Mode was pending - just a click, do nothing
+                    calendarInteractionModeRef.current = null
+                    setPageScrollLock(false)
+                  }
+
+                  // Start hold timer for creating
+                  calendarHoldTimerRef.current = window.setTimeout(() => {
+                    calendarHoldTimerRef.current = null
+                    startCreate()
+                  }, DRAG_HOLD_DURATION_MS)
+
+                  window.addEventListener('pointermove', onMove)
+                  window.addEventListener('pointerup', onUp)
+                  window.addEventListener('pointercancel', onUp)
+                }}
+                aria-label="Hold to create all-day session"
+              />
+              {/* Preview element for new all-day session being created */}
+              {(() => {
+                const preview = dragPreview
+                if (!preview || preview.entryId !== 'new-allday') return null
+                // Calculate columns from UTC midnight timestamps
+                const startDateKey = getUtcDateKey(preview.startedAt)
+                const endDateKey = getUtcDateKey(preview.endedAt)
+                const colStart = dayDateKeys.indexOf(startDateKey)
+                const endColIdx = dayDateKeys.indexOf(endDateKey)
+                const colEnd = endColIdx >= 0 ? endColIdx : dayDateKeys.length
+                if (colStart < 0 || colEnd <= colStart) return null
+                return (
+                  <div
+                    className="calendar-allday-event calendar-allday-event--preview"
+                    style={{
+                      gridColumn: `${colStart + 1} / ${colEnd + 1}`,
+                      gridRow: `${allDayTrackRows}`,
+                      background: 'rgba(104, 124, 255, 0.6)',
+                      pointerEvents: 'none',
+                    }}
+                    aria-hidden
+                  >
+                    <div className="calendar-allday-event__content">
+                      <div className="calendar-allday-event__title">New session</div>
+                    </div>
+                  </div>
+                )
+              })()}
             </div>
           </div>
           <div className="calendar-time-axis" aria-hidden>
@@ -11275,9 +11731,9 @@ useEffect(() => {
                       try { targetEl.releasePointerCapture?.(pointerId) } catch {}
                       const preview = dragPreviewRef.current
                       if (preview && preview.entryId === 'new-entry') {
-                        // Convert from display time back to UTC for storage
-                        const rawStartedAt = unadjustTimestampForTimezone(Math.min(preview.startedAt, preview.endedAt))
-                        const rawEndedAt = unadjustTimestampForTimezone(Math.max(preview.startedAt, preview.endedAt))
+                        // Preview timestamps are already UTC (dayStarts uses display timezone bounds)
+                        const rawStartedAt = Math.min(preview.startedAt, preview.endedAt)
+                        const rawEndedAt = Math.max(preview.startedAt, preview.endedAt)
                         const elapsed = Math.max(rawEndedAt - rawStartedAt, MIN_SESSION_DURATION_DRAG_MS)
                         const newId = makeHistoryId()
                         const newEntry: HistoryEntry = {
@@ -11504,9 +11960,9 @@ useEffect(() => {
                             const ruleId = parts[1]
                             const dayStart = Number(parts[2])
                             const ymd = formatLocalYmd(dayStart)
-                            // Guide timestamps represent intended LOCAL time, unadjust for storage.
-                            const storedStartedAt = unadjustTimestampForTimezone(ev.entry.startedAt)
-                            const storedEndedAt = unadjustTimestampForTimezone(ev.entry.endedAt)
+                            // Guide timestamps are now UTC (dayStarts uses display timezone bounds)
+                            const storedStartedAt = ev.entry.startedAt
+                            const storedEndedAt = ev.entry.endedAt
                             const newEntry: HistoryEntry = {
                               ...ev.entry,
                               id: makeHistoryId(),
@@ -11594,8 +12050,8 @@ useEffect(() => {
                       if (endClamped <= startClamped) return null
                       const topPct = ((startClamped - dayStart) / DAY_DURATION_MS) * 100
                       const heightPct = Math.max(((endClamped - startClamped) / DAY_DURATION_MS) * 100, (MINUTE_MS / DAY_DURATION_MS) * 100)
-                      // Drag preview values are computed from dayStarts (system timezone), so format as local
-                      const label = `${formatAdjustedTime(startClamped)} — ${formatAdjustedTime(endClamped)}`
+                      // Drag preview values are computed from dayStarts (display timezone)
+                      const label = `${formatTimeOfDay(startClamped, displayTimezone, use24HourTime)} — ${formatTimeOfDay(endClamped, displayTimezone, use24HourTime)}`
                       return (
                         <div
                           className="calendar-event calendar-event--dragging"
@@ -12026,7 +12482,6 @@ useEffect(() => {
     setHistoryDayOffset,
     navigateByDelta,
     stepSizeByView,
-    adjustTimestampForTimezone,
     formatTime,
     weekStartDay,
     snapToInterval,
@@ -12059,7 +12514,7 @@ useEffect(() => {
   const entry = effectiveHistory.find((h) => h.id === calendarPreview.entryId) || calendarPreview.entrySnapshot || null
     if (!entry) return null
     const dateLabel = (() => {
-      if (isAllDayRangeTs(entry.startedAt, entry.endedAt)) {
+      if (isEntryAllDay(entry)) {
         // All‑day rendering: same‑day => "Mon, Oct 14 · All day"; multi‑day => "Oct 14 – Oct 16"
         const startD = new Date(entry.startedAt)
         const endD = new Date(entry.endedAt)
@@ -12560,12 +13015,9 @@ useEffect(() => {
                   className="history-timeline__action-button history-timeline__action-button--primary"
                   onClick={() => {
                     if (!parsedGuide) return
-                    // Guide timestamps are computed in system timezone (baseDayStart + timeOfDayMinutes).
-                    // Guide timestamps represent intended LOCAL time (e.g., "11 AM wherever I am").
-                    // We need to unadjust them so that when displayed with adjustTimestampForTimezone,
-                    // the session appears at the same visual position as the guide.
-                    const storedStartedAt = unadjustTimestampForTimezone(entry.startedAt)
-                    const storedEndedAt = unadjustTimestampForTimezone(entry.endedAt)
+                    // Guide timestamps are now UTC (dayStarts uses display timezone bounds)
+                    const storedStartedAt = entry.startedAt
+                    const storedEndedAt = entry.endedAt
                     const newEntry: HistoryEntry = {
                       ...entry,
                       id: makeHistoryId(),
@@ -12605,8 +13057,8 @@ useEffect(() => {
                   onClick={async () => {
                     if (!parsedGuide) return
                     // Create a zero-duration entry to mark this occurrence as resolved without rendering.
-                    // Guide timestamps represent intended LOCAL time, unadjust for storage.
-                    const storedTime = unadjustTimestampForTimezone(entry.startedAt)
+                    // Guide timestamps are now UTC
+                    const storedTime = entry.startedAt
                     const zeroEntry: HistoryEntry = {
                       ...entry,
                       id: makeHistoryId(),
@@ -12859,12 +13311,11 @@ useEffect(() => {
       currentGoal.toLowerCase() === LIFE_ROUTINES_NAME.toLowerCase() &&
       currentBucket === TIMEZONE_CHANGE_MARKER
     
-    // Guide entries (repeat:xxx IDs) display without timezone adjustment
-    // Real sessions are timezone-adjusted for display
-    const isGuideEntry = entry.id.startsWith('repeat:')
-    const adjustForDisplay = (ts: number) => isGuideEntry ? ts : adjustTimestampForTimezone(ts)
+    // All timestamps are now UTC - dayStarts uses display timezone bounds
+    // so no adjustment needed for display
+    const adjustForDisplay = (ts: number) => ts
     
-    // Resolve current values - adjust base times for display in the inputs
+    // Resolve current values - timestamps are already in UTC
     const startBase = adjustForDisplay(entry.startedAt)
     const endBase = adjustForDisplay(entry.endedAt)
     const resolvedStart = resolveTimestamp(historyDraft.startedAt, startBase)
@@ -12882,7 +13333,8 @@ useEffect(() => {
       const d = new Date(resolvedStart)
       return d.getHours() * 60 + d.getMinutes()
     })()
-    const isDraftAllDay = isAllDayRangeTs(resolvedStart, resolvedEnd)
+    // Use the entry's isAllDay flag (not timestamp detection) - all-day entries can't be converted to timed and vice versa
+    const isDraftAllDay = entry.isAllDay === true
   // Using inspector pickers for date/time in the editor panel; input-formatted strings no longer needed here
 
     return createPortal(
@@ -13128,7 +13580,6 @@ useEffect(() => {
       document.body,
     )
   }, [
-    adjustTimestampForTimezone,
     calendarEditorEntryId,
     history,
     historyDraft.bucketName,
@@ -13339,15 +13790,10 @@ useEffect(() => {
 
       const preview = dragPreviewRef.current
       if (state.hasMoved && preview) {
-        // For NEW entries: preview is in display time, need to unadjust for storage
-        // For EXISTING entries: preview is already in system timezone space (dayStarts uses system local time)
+        // Preview timestamps are now UTC (dayStarts uses display timezone bounds)
+        const rawStartedAt = Math.min(preview.startedAt, preview.endedAt)
+        const rawEndedAt = Math.max(preview.startedAt, preview.endedAt)
         const isNewEntry = state.entryId === 'new-entry'
-        const rawStartedAt = isNewEntry
-          ? unadjustTimestampForTimezone(Math.min(preview.startedAt, preview.endedAt))
-          : Math.min(preview.startedAt, preview.endedAt)
-        const rawEndedAt = isNewEntry
-          ? unadjustTimestampForTimezone(Math.max(preview.startedAt, preview.endedAt))
-          : Math.max(preview.startedAt, preview.endedAt)
         if (isNewEntry) {
           const elapsed = Math.max(rawEndedAt - rawStartedAt, MIN_SESSION_DURATION_DRAG_MS)
           const newEntry: HistoryEntry = {
@@ -13550,10 +13996,9 @@ useEffect(() => {
   let calendarInspectorPanel: ReactElement | null = null
   if (calendarInspectorEntryId !== null) {
     if (inspectorEntry) {
-      // Guide entries (repeat:xxx IDs) display without timezone adjustment
-      // Real sessions are timezone-adjusted for display
-      const isInspectorGuide = inspectorEntry.id.startsWith('repeat:')
-      const adjustForDisplay = (ts: number) => isInspectorGuide ? ts : adjustTimestampForTimezone(ts)
+      // All timestamps are now UTC - dayStarts uses display timezone bounds
+      // so no adjustment needed for display
+      const adjustForDisplay = (ts: number) => ts
       
       const startBase = adjustForDisplay(inspectorEntry.startedAt)
       const endBase = adjustForDisplay(inspectorEntry.endedAt)
