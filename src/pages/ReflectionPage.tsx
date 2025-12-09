@@ -9619,11 +9619,8 @@ useEffect(() => {
       setView('month')
     }
 
-    const todayMidnightMs = (() => {
-      const t = new Date()
-      t.setHours(0, 0, 0, 0)
-      return t.getTime()
-    })()
+    // Use display timezone for today detection
+    const todayDateKeyInDisplayTz = getDateKeyInTimezone(Date.now(), displayTimezone)
 
     const renderCell = (date: Date, isCurrentMonth: boolean) => {
       const start = new Date(date)
@@ -9631,7 +9628,9 @@ useEffect(() => {
       const end = new Date(start)
       end.setDate(end.getDate() + 1)
       const has = dayHasSessions(start.getTime(), end.getTime())
-      const isToday = start.getTime() === todayMidnightMs
+      // Compare date key strings instead of timestamps for accurate today detection
+      const cellDateKey = `${start.getFullYear()}-${String(start.getMonth() + 1).padStart(2, '0')}-${String(start.getDate()).padStart(2, '0')}`
+      const isToday = cellDateKey === todayDateKeyInDisplayTz
       return (
         <div
           key={`cell-${start.toISOString()}`}
@@ -10520,11 +10519,8 @@ useEffect(() => {
       }
 
       // Set CSS var for column count via inline style on container later
-      const todayMidnight = (() => {
-        const t = new Date()
-        t.setHours(0, 0, 0, 0)
-        return t.getTime()
-      })()
+      // Use display timezone for today detection to match dayStarts
+      const todayMidnight = getMidnightUtcForDateInTimezone(getDateKeyInTimezone(Date.now(), displayTimezone), displayTimezone)
 
       const handleCalendarEventPointerDown = (
         entry: HistoryEntry,
@@ -12255,11 +12251,8 @@ useEffect(() => {
 
     if (calendarView === 'year') {
       const year = anchorDate.getFullYear()
-      const todayMidnight = (() => {
-        const t = new Date()
-        t.setHours(0, 0, 0, 0)
-        return t.getTime()
-      })()
+      // Use display timezone for today detection
+      const todayDateKeyInDisplayTz = getDateKeyInTimezone(Date.now(), displayTimezone)
 
       const buildYearPanel = (yr: number) => {
         const months = Array.from({ length: 12 }).map((_, idx) => {
@@ -12283,7 +12276,9 @@ useEffect(() => {
             d.setDate(start.getDate() + i)
             d.setHours(0, 0, 0, 0)
             const inMonth = d.getMonth() === idx
-            const isToday = d.getTime() === todayMidnight
+            // Compare date key strings instead of timestamps for accurate today detection
+            const cellDateKey = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+            const isToday = cellDateKey === todayDateKeyInDisplayTz
             const cell = (
               <div
                 key={`y-${yr}-${idx}-${i}`}
