@@ -10073,9 +10073,17 @@ useEffect(() => {
               if (!isAllDayWithinBoundaries(rule, columnIndex)) return
               const occKey = makeOccurrenceKey(rule.id, dayStart)
               if (confirmedKeySet.has(occKey) || excKeySet.has(occKey)) return
-              const startedAt = dayStart
-              const endedAt = dayStart + DAY_DURATION_MS
-              if (coveredOriginalSet.has(`${rule.id}:${startedAt}`)) return
+              const guideEntryId = `repeat:${rule.id}:${dayStart}:allday`
+              
+              // Check if this guide is being dragged
+              const isBeingDragged = dragPreview && dragPreview.entryId === guideEntryId
+              
+              // Use preview position if dragging, otherwise use scheduled position
+              const startedAt = isBeingDragged ? dragPreview.startedAt : dayStart
+              const endedAt = isBeingDragged ? dragPreview.endedAt : dayStart + DAY_DURATION_MS
+              
+              // Skip this iteration if not dragged and already covered
+              if (!isBeingDragged && coveredOriginalSet.has(`${rule.id}:${dayStart}`)) return
               
               // Get the date key for this column - use the same dayDateKeys array
               // that real all-day entries use for column matching
@@ -10085,8 +10093,25 @@ useEffect(() => {
               const bucketName = rule.bucketName?.trim() || null
               
               // Check for duplicate: match by date key + task name for all-day entries
-              // The entry's date key is computed using getUtcDateKey (same as column matching)
+              // OR match by repeatingSessionId + originalTime for confirmed/skipped guides
               const duplicateReal = effectiveHistory.some((h) => {
+                // Check for repeatingSessionId + originalTime match first (most reliable for guide suppression)
+                const hRid = (h as any).repeatingSessionId as string | undefined | null
+                const hOt = (h as any).originalTime as number | undefined | null
+                if (hRid === rule.id && Number.isFinite(hOt as number)) {
+                  // Check if originalTime matches this guide's dayStart
+                  const otDateKey = getDateKeyInTimezone(hOt as number, displayTimezone)
+                  const guideOccDateKey = getDateKeyInTimezone(dayStart, displayTimezone)
+                  if (otDateKey === guideOccDateKey) {
+                    return true
+                  }
+                }
+                
+                // Fallback: check by all-day entry date + task match for MANUALLY CREATED entries only
+                // If the entry has a repeatingSessionId, it should only suppress via the originalTime check above
+                // (so dragging a linked entry to another date doesn't suppress that date's guide)
+                if (hRid) return false
+                
                 if (!isEntryAllDay(h)) return false
                 
                 // Get entry's date key the same way it's used for column placement
@@ -10101,7 +10126,7 @@ useEffect(() => {
               })
               if (duplicateReal) return
               const entry: HistoryEntry = {
-                id: `repeat:${rule.id}:${dayStart}:allday`,
+                id: guideEntryId,
                 taskName,
                 elapsed: Math.max(endedAt - startedAt, 1),
                 startedAt,
@@ -10117,6 +10142,7 @@ useEffect(() => {
                 entryColor: gradientFromSurface(DEFAULT_SURFACE_STYLE),
                 notes: '',
                 subtasks: [],
+                repeatingSessionId: rule.id,
               }
               const meta = resolveGoalMetadata(entry, enhancedGoalLookup, goalColorLookup, lifeRoutineSurfaceLookup)
               const label = deriveEntryTaskName(entry)
@@ -10125,10 +10151,27 @@ useEffect(() => {
               // Skip if we already have a guide with the same entry ID (dedup safety)
               if (raws.some((r) => r.entry.id === entry.id)) return
               
+              // Calculate column position based on actual timestamps (handles drag preview)
+              let guideColStart: number
+              let guideColEnd: number
+              if (isBeingDragged) {
+                // Use UTC date key from the preview timestamps
+                const previewStartDateKey = getUtcDateKey(startedAt)
+                const previewEndDateKey = getUtcDateKey(endedAt)
+                guideColStart = dayDateKeys.indexOf(previewStartDateKey)
+                const endColIdx = dayDateKeys.indexOf(previewEndDateKey)
+                guideColEnd = endColIdx >= 0 ? endColIdx : dayDateKeys.length
+                // If start not found, clamp to visible range
+                if (guideColStart < 0) guideColStart = 0
+              } else {
+                guideColStart = columnIndex
+                guideColEnd = Math.min(dayStarts.length, columnIndex + 1)
+              }
+              
               raws.push({
                 entry,
-                colStart: columnIndex,
-                colEnd: Math.min(dayStarts.length, columnIndex + 1),
+                colStart: guideColStart,
+                colEnd: guideColEnd,
                 label,
                 colorCss,
                 baseColor,
@@ -10464,7 +10507,8 @@ useEffect(() => {
 
           // Handle dragged guide appearing in a different column than its original day
           // When a guide is dragged to another day, we need to render it in the target column
-          if (dragPreview && dragPreview.entryId.startsWith('repeat:')) {
+          // NOTE: Skip all-day guides - they should only render in the all-day section, not the time grid
+          if (dragPreview && dragPreview.entryId.startsWith('repeat:') && !dragPreview.entryId.endsWith(':allday')) {
             const previewStart = dragPreview.startedAt
             const previewEnd = dragPreview.endedAt
             // Check if the dragged guide overlaps with this column's day range
@@ -11437,16 +11481,45 @@ useEffect(() => {
                         // (dayStarts uses system local time, so no unadjust needed for existing entries)
                         const finalStartedAt = preview.startedAt
                         const finalEndedAt = preview.endedAt
-                        flushSync(() => {
-                          updateHistory((current) => {
-                            const idx = current.findIndex((h) => h.id === bar.entry.id)
-                            if (idx === -1) return current
-                            const target = current[idx]
-                            const next = [...current]
-                            next[idx] = { ...target, startedAt: finalStartedAt, endedAt: finalEndedAt, elapsed: Math.max(finalEndedAt - finalStartedAt, 1) }
-                            return next
+                        
+                        // Check if this is a guide (synthetic entry from repeating rule)
+                        if (bar.isGuide && bar.entry.id.startsWith('repeat:')) {
+                          // For guides, create a new future session entry instead of updating
+                          // Extract rule ID and original dayStart from guide ID format: repeat:${ruleId}:${dayStart}:allday
+                          const guideParts = bar.entry.id.split(':')
+                          const guideRuleId = guideParts[1] ?? null
+                          const guideOriginalDayStart = guideParts[2] ? Number(guideParts[2]) : null
+                          const newEntry: HistoryEntry = {
+                            ...bar.entry,
+                            id: makeHistoryId(),
+                            startedAt: finalStartedAt,
+                            endedAt: finalEndedAt,
+                            elapsed: Math.max(finalEndedAt - finalStartedAt, 1),
+                            futureSession: true,
+                            // Link to repeating rule so the original guide date gets suppressed
+                            repeatingSessionId: guideRuleId,
+                            originalTime: guideOriginalDayStart,
+                          }
+                          flushSync(() => {
+                            updateHistory((current) => {
+                              const next = [...current, newEntry]
+                              next.sort((a, b) => a.startedAt - b.startedAt)
+                              return next
+                            })
                           })
-                        })
+                        } else {
+                          // For real entries, update in place
+                          flushSync(() => {
+                            updateHistory((current) => {
+                              const idx = current.findIndex((h) => h.id === bar.entry.id)
+                              if (idx === -1) return current
+                              const target = current[idx]
+                              const next = [...current]
+                              next[idx] = { ...target, startedAt: finalStartedAt, endedAt: finalEndedAt, elapsed: Math.max(finalEndedAt - finalStartedAt, 1) }
+                              return next
+                            })
+                          })
+                        }
                       }
                       dragPreviewRef.current = null
                       setDragPreview(null)
@@ -13010,8 +13083,15 @@ useEffect(() => {
       if (parts.length < 3) return null
       const ruleId = parts[1]
       const dayStart = Number(parts[2])
-      const ymd = formatLocalYmd(dayStart)
-      return { ruleId, dayStart, ymd }
+      // Check if this is an all-day guide (has ':allday' suffix)
+      const isAllDayGuide = parts.length >= 4 && parts[3] === 'allday'
+      // Use display timezone for date key to match how occurrence keys are built
+      // (confirmedKeySet and excKeySet both use displayTimezone)
+      const ymd = getDateKeyInTimezone(dayStart, displayTimezone)
+      // For all-day guides, compute UTC midnight for storage
+      // (all-day entries use getUtcDateKey for column matching, which expects UTC midnight)
+      const utcMidnight = isAllDayGuide ? dateKeyToUtcMidnight(ymd) : null
+      return { ruleId, dayStart, ymd, isAllDayGuide, utcMidnight }
     })()
     return createPortal(
       <div
@@ -13281,19 +13361,27 @@ useEffect(() => {
                   className="history-timeline__action-button history-timeline__action-button--primary"
                   onClick={() => {
                     if (!parsedGuide) return
-                    // Guide timestamps are now UTC (dayStarts uses display timezone bounds)
-                    const storedStartedAt = entry.startedAt
-                    const storedEndedAt = entry.endedAt
+                    // For all-day guides, use UTC midnight for storage so getUtcDateKey works correctly
+                    // For regular guides, use the display-timezone timestamps
+                    const storedStartedAt = parsedGuide.isAllDayGuide && parsedGuide.utcMidnight != null
+                      ? parsedGuide.utcMidnight
+                      : entry.startedAt
+                    const storedEndedAt = parsedGuide.isAllDayGuide && parsedGuide.utcMidnight != null
+                      ? parsedGuide.utcMidnight + DAY_DURATION_MS
+                      : entry.endedAt
+                    // originalTime uses dayStart (display-timezone midnight) for occurrence key matching
+                    // This ensures confirmedKeySet lookup works: getDateKeyInTimezone(originalTime, displayTimezone)
+                    const originalTimeForKey = parsedGuide.dayStart
                     const newEntry: HistoryEntry = {
                       ...entry,
                       id: makeHistoryId(),
                       startedAt: storedStartedAt,
                       endedAt: storedEndedAt,
-                      elapsed: Math.max(entry.endedAt - entry.startedAt, 1),
+                      elapsed: Math.max(storedEndedAt - storedStartedAt, 1),
                       repeatingSessionId: parsedGuide.ruleId,
-                      // originalTime must match the guide's time for suppression lookup to work
-                      // (confirmedKeySet uses formatLocalYmd(originalTime) to match guide's dayStart)
-                      originalTime: entry.startedAt,
+                      // originalTime must match the guide's dayStart for suppression lookup to work
+                      // (confirmedKeySet uses getDateKeyInTimezone(originalTime, displayTimezone))
+                      originalTime: originalTimeForKey,
                       futureSession: false,
                     }
                     updateHistory((current) => {
@@ -13323,8 +13411,12 @@ useEffect(() => {
                   onClick={async () => {
                     if (!parsedGuide) return
                     // Create a zero-duration entry to mark this occurrence as resolved without rendering.
-                    // Guide timestamps are now UTC
-                    const storedTime = entry.startedAt
+                    // For all-day guides, use UTC midnight; for regular guides, use display-timezone time
+                    const storedTime = parsedGuide.isAllDayGuide && parsedGuide.utcMidnight != null
+                      ? parsedGuide.utcMidnight
+                      : entry.startedAt
+                    // originalTime uses dayStart for occurrence key matching
+                    const originalTimeForKey = parsedGuide.dayStart
                     const zeroEntry: HistoryEntry = {
                       ...entry,
                       id: makeHistoryId(),
@@ -13332,8 +13424,8 @@ useEffect(() => {
                       endedAt: storedTime,
                       elapsed: 0,
                       repeatingSessionId: parsedGuide.ruleId,
-                      // originalTime must match the guide's time for suppression lookup to work
-                      originalTime: entry.startedAt,
+                      // originalTime must match the guide's dayStart for suppression lookup to work
+                      originalTime: originalTimeForKey,
                     }
                     updateHistory((current) => {
                       const next = [...current, zeroEntry]
