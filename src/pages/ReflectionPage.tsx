@@ -827,6 +827,13 @@ const getPositionPercentInTimezone = (utcMs: number, tz: string): number => {
   return ((hour + minute / 60 + second / 3600) / 24) * 100
 }
 
+// Get minutes from midnight (0-1439) for a UTC timestamp in the given timezone
+// This is useful for extracting the wall-clock time for repeating rule creation
+const getMinutesFromMidnightInTimezone = (utcMs: number, tz: string): number => {
+  const { hour, minute } = getTimePartsInTimezone(utcMs, tz)
+  return hour * 60 + minute
+}
+
 // Get the UTC timestamp for midnight on a given date in a given timezone
 // dateKey is "YYYY-MM-DD" format
 const getMidnightUtcForDateInTimezone = (dateKey: string, tz: string): number => {
@@ -4874,12 +4881,12 @@ const [showInlineExtras, setShowInlineExtras] = useState(false)
     [cacheSubtasksForEntry],
   )
 
-  const computeEntryScheduledStart = useCallback((entry: HistoryEntry): number => {
-    const start = new Date(entry.startedAt)
-    const minutes = start.getHours() * 60 + start.getMinutes()
-    const dayStart = new Date(entry.startedAt)
-    dayStart.setHours(0, 0, 0, 0)
-    return dayStart.getTime() + minutes * 60000
+  const computeEntryScheduledStart = useCallback((entry: HistoryEntry, tz: string): number => {
+    // Use provided timezone for wall-clock time extraction
+    const minutes = getMinutesFromMidnightInTimezone(entry.startedAt, tz)
+    const dateKey = getDateKeyInTimezone(entry.startedAt, tz)
+    const dayStart = getMidnightUtcForDateInTimezone(dateKey, tz)
+    return dayStart + minutes * 60000
   }, [])
 
   useEffect(() => {
@@ -10409,12 +10416,14 @@ useEffect(() => {
             return false
           }
 
-          // Build a guide using DISPLAY timezone - guide always shows at its set time
+          // Build a guide using DISPLAY timezone - guide shows at its set wall-clock time
+          // (e.g., a 2pm rule always shows at 2pm in whatever timezone you're viewing)
           const buildGuideForDateKey = (rule: RepeatingSessionRule, dateKey: string): RawEvent | null => {
             // Skip all-day rules - they render in the all-day section, not time grid
             if (isAllDayRuleForTimeGrid(rule)) return null
             
-            // Use DISPLAY timezone for computing guide position (guide shows at set time in display tz)
+            // Use DISPLAY timezone for computing guide position
+            // timeOfDayMinutes is the wall-clock time (e.g., 840 = 2pm), applied to display timezone
             const displayDayStart = getMidnightUtcForDateInTimezone(dateKey, displayTimezone)
             
             // Suppression by confirmed/exception for this occurrence date
@@ -10463,6 +10472,7 @@ useEffect(() => {
               entryColor: gradientFromSurface(DEFAULT_SURFACE_STYLE),
               notes: '',
               subtasks: [],
+              repeatingSessionId: rule.id,
             }
             
             // Handle drag preview
@@ -13221,12 +13231,16 @@ useEffect(() => {
               <span className="calendar-popover__repeat-icon calendar-popover__repeat-icon--caret">▸</span>
             </span>
             {(() => {
-              const start = new Date(entry.startedAt)
-              const minutes = start.getHours() * 60 + start.getMinutes()
+              // Use display timezone for wall-clock time extraction
+              const minutes = getMinutesFromMidnightInTimezone(entry.startedAt, displayTimezone)
               const durMin = Math.max(1, Math.round((entry.endedAt - entry.startedAt) / 60000))
-              const dow = start.getDay()
-              const dayStartMs = (() => { const d = new Date(entry.startedAt); d.setHours(0,0,0,0); return d.getTime() })()
-              const monthDay = monthDayKey(start.getTime())
+              const timeParts = getTimePartsInTimezone(entry.startedAt, displayTimezone)
+              const dateKey = getDateKeyInTimezone(entry.startedAt, displayTimezone)
+              const dayStartMs = getMidnightUtcForDateInTimezone(dateKey, displayTimezone)
+              // Get day of week in display timezone
+              const dowDate = new Date(dayStartMs + 12 * 60 * 60 * 1000) // noon to avoid DST issues
+              const dow = dowDate.getUTCDay()
+              const monthDay = `${String(timeParts.month).padStart(2, '0')}-${String(timeParts.day).padStart(2, '0')}`
               const matches = (r: RepeatingSessionRule) =>
                 r.isActive &&
                 r.timeOfDayMinutes === minutes &&
@@ -13280,10 +13294,10 @@ useEffect(() => {
                       if (isGuide) {
                         // parsedGuide contains ruleId and ymd for this guide
                         if (parsedGuide) {
-                          const guideMinutes = start.getHours() * 60 + start.getMinutes()
-                          const guideDay = new Date(entry.startedAt)
-                          guideDay.setHours(0, 0, 0, 0)
-                          const scheduledStart = guideDay.getTime() + guideMinutes * 60000
+                          const guideMinutes = getMinutesFromMidnightInTimezone(entry.startedAt, displayTimezone)
+                          const guideDateKey = getDateKeyInTimezone(entry.startedAt, displayTimezone)
+                          const guideDayStart = getMidnightUtcForDateInTimezone(guideDateKey, displayTimezone)
+                          const scheduledStart = guideDayStart + guideMinutes * 60000
                           const preciseStart = Math.max(entry.startedAt, scheduledStart)
                           await setRepeatToNoneAfterTimestamp(parsedGuide.ruleId, preciseStart)
                           // Update local cache to reflect new end boundary but keep the rule so this occurrence remains
@@ -13296,25 +13310,28 @@ useEffect(() => {
                         }
                       } else {
                         // Non-guide: if this entry is the seed (rule start), delete by rule id; else fall back to shape deletion
-                        const start = new Date(entry.startedAt)
-                        const minutes = start.getHours() * 60 + start.getMinutes()
+                        const noneMinutes = getMinutesFromMidnightInTimezone(entry.startedAt, displayTimezone)
                         const durMin = Math.max(1, Math.round((entry.endedAt - entry.startedAt) / 60000))
-                        const dow = start.getDay()
+                        const noneDateKey = getDateKeyInTimezone(entry.startedAt, displayTimezone)
+                        const noneDayStartMs = getMidnightUtcForDateInTimezone(noneDateKey, displayTimezone)
+                        // Get day of week in display timezone
+                        const noneDowDate = new Date(noneDayStartMs + 12 * 60 * 60 * 1000)
+                        const noneDow = noneDowDate.getUTCDay()
+                        const noneTimeParts = getTimePartsInTimezone(entry.startedAt, displayTimezone)
+                        const noneMonthDay = `${String(noneTimeParts.month).padStart(2, '0')}-${String(noneTimeParts.day).padStart(2, '0')}`
                         const labelTask = (entry.taskName?.trim() || '')
                         const labelGoal = (entry.goalName?.trim() || null)
                         const labelBucket = (entry.bucketName?.trim() || null)
                         // Compute scheduled start (truncate seconds/ms) to match how rules store startAtMs
-                        const dayStart = new Date(entry.startedAt)
-                        dayStart.setHours(0, 0, 0, 0)
-                        const scheduledStart = dayStart.getTime() + minutes * 60000
+                        const scheduledStart = noneDayStartMs + noneMinutes * 60000
                         const seedRules = repeatingRules.filter((r) => {
                           const labelMatch = (r.taskName?.trim() || '') === labelTask && (r.goalName?.trim() || null) === labelGoal && (r.bucketName?.trim() || null) === labelBucket
-                          const timeMatch = r.timeOfDayMinutes === minutes && r.durationMinutes === durMin
+                          const timeMatch = r.timeOfDayMinutes === noneMinutes && r.durationMinutes === durMin
                           const freqMatch =
                             r.frequency === 'daily' ||
-                            (r.frequency === 'weekly' && Array.isArray(r.dayOfWeek) && r.dayOfWeek.includes(dow)) ||
-                            (r.frequency === 'monthly' && matchesMonthlyDay(r, dayStart.getTime())) ||
-                            (r.frequency === 'annually' && ruleMonthDayKey(r) === monthDay)
+                            (r.frequency === 'weekly' && Array.isArray(r.dayOfWeek) && r.dayOfWeek.includes(noneDow)) ||
+                            (r.frequency === 'monthly' && matchesMonthlyDay(r, noneDayStartMs)) ||
+                            (r.frequency === 'annually' && ruleMonthDayKey(r) === noneMonthDay)
                           const startAt = (r as any).startAtMs as number | undefined
                           const startMatch = Number.isFinite(startAt as number) && (startAt as number) === scheduledStart
                           return labelMatch && timeMatch && freqMatch && startMatch
@@ -13334,26 +13351,26 @@ useEffect(() => {
                           // Fallback: remove locally by matching shape
                           setRepeatingRules((prev) => prev.filter((r) => {
                             const labelMatch = (r.taskName?.trim() || '') === (entry.taskName?.trim() || '') && (r.goalName?.trim() || null) === (entry.goalName?.trim() || null) && (r.bucketName?.trim() || null) === (entry.bucketName?.trim() || null)
-                            const timeMatch = r.timeOfDayMinutes === minutes && r.durationMinutes === durMin
+                            const timeMatch = r.timeOfDayMinutes === noneMinutes && r.durationMinutes === durMin
                             const freqMatch =
                               r.frequency === 'daily' ||
-                              (r.frequency === 'weekly' && Array.isArray(r.dayOfWeek) && r.dayOfWeek.includes(dow)) ||
-                              (r.frequency === 'monthly' && matchesMonthlyDay(r, dayStart.getTime())) ||
-                              (r.frequency === 'annually' && ruleMonthDayKey(r) === monthDay)
+                              (r.frequency === 'weekly' && Array.isArray(r.dayOfWeek) && r.dayOfWeek.includes(noneDow)) ||
+                              (r.frequency === 'monthly' && matchesMonthlyDay(r, noneDayStartMs)) ||
+                              (r.frequency === 'annually' && ruleMonthDayKey(r) === noneMonthDay)
                             return !(labelMatch && timeMatch && freqMatch)
                           }))
                         }
                       }
                       return
                     }
-                    const created = await createRepeatingRuleForEntry(entry, val)
+                    const created = await createRepeatingRuleForEntry(entry, val, { displayTimezone })
                     if (created) {
                       // Add rule to state, but avoid duplicates (createRepeatingRuleForEntry already writes to localStorage)
                       setRepeatingRules((prev) => {
                         if (prev.some((r) => r.id === created.id)) return prev
                         return [...prev, created]
                       })
-                      const scheduledStart = computeEntryScheduledStart(entry)
+                      const scheduledStart = computeEntryScheduledStart(entry, displayTimezone)
                       updateHistory((current) => current.map((h) => (h.id === entry.id ? { ...h, repeatingSessionId: created.id, originalTime: scheduledStart } : h)))
                     }
                   }}
@@ -14411,11 +14428,16 @@ useEffect(() => {
       const inspectorDurationLabel = formatDuration(Math.max(resolvedEnd - resolvedStart, 0))
 
       const inspectorRepeatControl = (() => {
-        const start = new Date(inspectorEntry.startedAt)
-        const minutes = start.getHours() * 60 + start.getMinutes()
+        // Use display timezone for wall-clock time extraction
+        const minutes = getMinutesFromMidnightInTimezone(inspectorEntry.startedAt, displayTimezone)
         const durMin = Math.max(1, Math.round((inspectorEntry.endedAt - inspectorEntry.startedAt) / 60000))
-        const dow = start.getDay()
-        const dayStartMs = (() => { const d = new Date(inspectorEntry.startedAt); d.setHours(0,0,0,0); return d.getTime() })()
+        const inspDateKey = getDateKeyInTimezone(inspectorEntry.startedAt, displayTimezone)
+        const dayStartMs = getMidnightUtcForDateInTimezone(inspDateKey, displayTimezone)
+        // Get day of week in display timezone
+        const inspDowDate = new Date(dayStartMs + 12 * 60 * 60 * 1000)
+        const dow = inspDowDate.getUTCDay()
+        const inspTimeParts = getTimePartsInTimezone(inspectorEntry.startedAt, displayTimezone)
+        const monthDay = `${String(inspTimeParts.month).padStart(2, '0')}-${String(inspTimeParts.day).padStart(2, '0')}`
         const matches = (r: RepeatingSessionRule) =>
           r.isActive &&
           r.timeOfDayMinutes === minutes &&
@@ -14431,7 +14453,6 @@ useEffect(() => {
           (r) => matches(r) && r.frequency === 'weekly' && Array.isArray(r.dayOfWeek) && r.dayOfWeek.includes(dow),
         )
         const hasMonthly = repeatingRules.some((r) => matches(r) && r.frequency === 'monthly' && matchesMonthlyDay(r, dayStartMs))
-        const monthDay = monthDayKey(inspectorEntry.startedAt)
         const hasAnnual = repeatingRules.some((r) => matches(r) && r.frequency === 'annually' && ruleMonthDayKey(r) === monthDay)
         const currentVal: 'none' | 'daily' | 'weekly' | 'monthly' | 'annually' | 'custom' =
           hasCustom
@@ -14493,14 +14514,14 @@ useEffect(() => {
                   }
                   return
                 }
-                const created = await createRepeatingRuleForEntry(inspectorEntry, val)
+                const created = await createRepeatingRuleForEntry(inspectorEntry, val, { displayTimezone })
                 if (created) {
                   // Add rule to state, but avoid duplicates (createRepeatingRuleForEntry already writes to localStorage)
                   setRepeatingRules((prev) => {
                     if (prev.some((r) => r.id === created.id)) return prev
                     return [...prev, created]
                   })
-                  const scheduledStart = computeEntryScheduledStart(inspectorEntry)
+                  const scheduledStart = computeEntryScheduledStart(inspectorEntry, displayTimezone)
                   updateHistory((current) =>
                     current.map((h) => (h.id === inspectorEntry.id ? { ...h, repeatingSessionId: created.id, originalTime: scheduledStart } : h)),
                   )
@@ -15117,7 +15138,7 @@ useEffect(() => {
             } else {
               frequency = 'daily'
             }
-            const created = await createRepeatingRuleForEntry(customRecurrenceEntry, frequency, createOptions)
+            const created = await createRepeatingRuleForEntry(customRecurrenceEntry, frequency, { ...createOptions, displayTimezone })
             if (created) {
               // Add rule to state, but avoid duplicates (createRepeatingRuleForEntry already writes to localStorage)
               setRepeatingRules((prev) => {
@@ -15126,7 +15147,7 @@ useEffect(() => {
                 storeRepeatingRulesLocal(next)
                 return next
               })
-              const scheduledStart = computeEntryScheduledStart(customRecurrenceEntry)
+              const scheduledStart = computeEntryScheduledStart(customRecurrenceEntry, displayTimezone)
               updateHistory((current) =>
                 current.map((h) => (h.id === customRecurrenceEntry.id ? { ...h, repeatingSessionId: created.id, originalTime: scheduledStart } : h)),
               )
