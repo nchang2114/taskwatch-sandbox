@@ -51,7 +51,7 @@ export const DEMO_GOALS: DemoGoal[] = [
           { id: 't_demo_4', text: 'Submit weekly homework', completed: false, difficulty: 'green' },
         ],
       },
-      {
+      { 
         id: 'b_demo_2',
         name: 'Assignment (10%)',
         favorite: true,
