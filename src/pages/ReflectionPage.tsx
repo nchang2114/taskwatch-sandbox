@@ -13284,6 +13284,13 @@ useEffect(() => {
                 }
               })()
               
+              // Check if entry is linked to a rule that has ended
+              // If so, this entry (and all future entries with this ID) should show "None"
+              const entryRepeatId = (entry as any).repeatingSessionId as string | undefined | null
+              const linkedRule = entryRepeatId ? repeatingRules.find((r) => r.id === entryRepeatId) : null
+              const linkedRuleEndAtMs = linkedRule ? ((linkedRule as any).endAtMs as number | undefined | null) : null
+              const isPastLinkedRuleEnd = Number.isFinite(linkedRuleEndAtMs as number) && entry.startedAt >= (linkedRuleEndAtMs as number)
+              
               // Helper to check if a rule is all-day
               const ruleIsAllDay = (r: RepeatingSessionRule) => 
                 r.isAllDay === true || (r.timeOfDayMinutes === 0 && (r.durationMinutes ?? 60) >= 1440)
@@ -13291,6 +13298,14 @@ useEffect(() => {
                 if (!r.isActive) return false
                 // If entry has been moved from original time, don't match any rules
                 if (hasBeenMoved) return false
+                // If entry is past its linked rule's end, don't match any rules
+                if (isPastLinkedRuleEnd) return false
+                // If the rule has ended at or before this entry's scheduled time, don't match
+                // This ensures entries at the end boundary show "None" in the dropdown
+                const ruleEndAtMs = (r as any).endAtMs as number | undefined | null
+                if (Number.isFinite(ruleEndAtMs as number) && entry.startedAt >= (ruleEndAtMs as number)) {
+                  return false
+                }
                 // Match task/goal/bucket names
                 const taskMatch = (r.taskName?.trim() || '') === (entry.taskName?.trim() || '')
                 const goalMatch = (r.goalName?.trim() || null) === (entry.goalName?.trim() || null)
@@ -14514,6 +14529,13 @@ useEffect(() => {
           }
         })()
         
+        // Check if entry is linked to a rule that has ended
+        // If so, this entry (and all future entries with this ID) should show "None"
+        const entryRepeatId = (inspectorEntry as any).repeatingSessionId as string | undefined | null
+        const linkedRule = entryRepeatId ? repeatingRules.find((r) => r.id === entryRepeatId) : null
+        const linkedRuleEndAtMs = linkedRule ? ((linkedRule as any).endAtMs as number | undefined | null) : null
+        const isPastLinkedRuleEnd = Number.isFinite(linkedRuleEndAtMs as number) && inspectorEntry.startedAt >= (linkedRuleEndAtMs as number)
+        
         // Helper to check if a rule is all-day
         const ruleIsAllDay = (r: RepeatingSessionRule) => 
           r.isAllDay === true || (r.timeOfDayMinutes === 0 && (r.durationMinutes ?? 60) >= 1440)
@@ -14521,6 +14543,13 @@ useEffect(() => {
           if (!r.isActive) return false
           // If entry has been moved from original time, don't match any rules
           if (hasBeenMoved) return false
+          // If entry is past its linked rule's end, don't match any rules
+          if (isPastLinkedRuleEnd) return false
+          // If the rule has ended at or before this entry's scheduled time, don't match
+          const ruleEndAtMs = (r as any).endAtMs as number | undefined | null
+          if (Number.isFinite(ruleEndAtMs as number) && inspectorEntry.startedAt >= (ruleEndAtMs as number)) {
+            return false
+          }
           // Match task/goal/bucket names
           const taskMatch = (r.taskName?.trim() || '') === (inspectorEntry.taskName?.trim() || '')
           const goalMatch = (r.goalName?.trim() || null) === (inspectorEntry.goalName?.trim() || null)
