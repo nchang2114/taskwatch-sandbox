@@ -1244,9 +1244,18 @@ export const persistHistorySnapshot = (nextEntries: HistoryEntry[]): HistoryEntr
     }
   })
 
+  // In guest mode (no Supabase), immediately remove deleted records.
+  // In logged-in mode, mark them pending delete for sync.
+  const isGuestMode = !supabase
   recordsById.forEach((record, id) => {
     if (!activeIds.has(id)) {
-      recordsById.set(id, markRecordPendingDelete(record, timestamp))
+      if (isGuestMode) {
+        // Guest mode: remove immediately from localStorage
+        recordsById.delete(id)
+      } else {
+        // Logged-in mode: mark pending delete for Supabase sync
+        recordsById.set(id, markRecordPendingDelete(record, timestamp))
+      }
     }
   })
 
