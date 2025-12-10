@@ -1,6 +1,6 @@
 import { supabase, ensureSingleUserSession } from './supabaseClient'
 import type { HistoryEntry } from './sessionHistory'
-import { readStoredHistory, pruneFuturePlannedForRuleAfter, SAMPLE_SLEEP_ROUTINE_ID } from './sessionHistory'
+import { readStoredHistory, SAMPLE_SLEEP_ROUTINE_ID } from './sessionHistory'
 import { readRepeatingExceptions } from './repeatingExceptions'
 
 export type RepeatingSessionRule = {
@@ -1512,10 +1512,10 @@ export function isRuleWindowFullyResolved(
 
 // Set repeat to none for all future occurrences after the selected occurrence date (YYYY-MM-DD, local).
 // This updates the rule's end boundary to the final occurrence on or before that day.
+// Virtual guides will stop appearing; real future sessions are preserved.
 export async function setRepeatToNoneAfterOccurrence(
   ruleId: string,
   occurrenceDateYmd: string,
-  prunePlanned: (ruleId: string, afterYmd: string) => Promise<void> | void,
 ): Promise<boolean> {
   const occStart = parseLocalYmd(occurrenceDateYmd)
   if (!Number.isFinite(occStart)) return false
@@ -1534,25 +1534,13 @@ export async function setRepeatToNoneAfterOccurrence(
     }
   } catch {}
   const ok = await updateRepeatingRuleEndDate(ruleId, Math.max(0, endAt))
-  try {
-    await prunePlanned(ruleId, occurrenceDateYmd)
-  } catch {}
   return ok
 }
 
-// Convenience wrapper that uses the built-in planned-entry pruner
-export async function setRepeatToNoneAfterOccurrenceDefault(ruleId: string, occurrenceDateYmd: string): Promise<boolean> {
-  return await setRepeatToNoneAfterOccurrence(ruleId, occurrenceDateYmd, pruneFuturePlannedForRuleAfter)
-}
-
 // Variant that uses a precise selected startedAt timestamp (ms). end_date is set to this timestamp,
-// and planned entries after the selected LOCAL day are pruned.
+// so future virtual guides stop appearing. No need to prune real entries - they should persist.
 export async function setRepeatToNoneAfterTimestamp(ruleId: string, selectedStartMs: number): Promise<boolean> {
-  const ymd = formatLocalYmd(selectedStartMs)
   const ok = await updateRepeatingRuleEndDate(ruleId, Math.max(0, selectedStartMs))
-  try {
-    await pruneFuturePlannedForRuleAfter(ruleId, ymd)
-  } catch {}
   return ok
 }
 
