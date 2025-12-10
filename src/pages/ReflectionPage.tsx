@@ -13345,6 +13345,8 @@ useEffect(() => {
                       return
                     }
                     if (val === 'none') {
+                      // If already showing 'none', do nothing
+                      if (currentVal === 'none') return
                       // If this entry is a guide from a repeating rule, cut the series after this instance
                       if (isGuide) {
                         // parsedGuide contains ruleId and ymd for this guide
@@ -14578,6 +14580,8 @@ useEffect(() => {
                   return
                 }
                 if (val === 'none') {
+                  // If already showing 'none', do nothing
+                  if (currentVal === 'none') return
                   const ids = await deactivateMatchingRulesForEntry(inspectorEntry)
                   if (Array.isArray(ids) && ids.length > 0) {
                     setRepeatingRules((prev) => prev.map((r) => (ids.includes(r.id) ? { ...r, isActive: false } : r)))
