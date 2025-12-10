@@ -1633,6 +1633,8 @@ export const pushPendingHistoryToSupabase = async (): Promise<void> => {
 
 // Remove planned (futureSession) entries for a given rule that occur strictly AFTER the given local date (YYYY-MM-DD).
 // Used when setting a repeating rule to "none" after a selected occurrence to avoid lingering planned rows.
+// NOTE: Only deletes entries that have NOT been moved/rescheduled (startedAt === originalTime).
+// Moved future sessions should persist even when the rule is set to "none".
 export const pruneFuturePlannedForRuleAfter = async (ruleId: string, afterYmd: string): Promise<void> => {
   const records = readHistoryRecords()
   if (!Array.isArray(records) || records.length === 0) return
@@ -1644,7 +1646,10 @@ export const pruneFuturePlannedForRuleAfter = async (ruleId: string, afterYmd: s
     const ot = Number.isFinite(r.originalTime) ? Number(r.originalTime) : null
     const od = ot ? formatOccurrenceDate(ot) : null
     const isGuidePlaceholder = Boolean(r.futureSession) && rid && ot !== null
-    if (isGuidePlaceholder && rid === ruleId && od && od > afterYmd && (records[i] as any).pendingAction !== 'delete') {
+    // Check if this entry has been moved/rescheduled - if startedAt differs from originalTime, it was moved
+    // and should NOT be deleted when the rule is set to "none"
+    const hasBeenMoved = ot !== null && r.startedAt !== ot
+    if (isGuidePlaceholder && !hasBeenMoved && rid === ruleId && od && od > afterYmd && (records[i] as any).pendingAction !== 'delete') {
       records[i] = { ...records[i], pendingAction: 'delete', updatedAt: now }
       changed = true
     }
@@ -1769,10 +1774,18 @@ export const pushAllHistoryToSupabase = async (
     // (the rule doesn't exist in the database, so we can't reference it)
     let mappedRepeatingId: string | null = null
     if (record.repeatingSessionId) {
-      if (ruleIdMap && ruleIdMap[record.repeatingSessionId]) {
+      // Check if it's a sample/demo ID (not a valid UUID) - these don't exist in DB
+      const isSampleId = record.repeatingSessionId.startsWith('sample-') || !isUuid(record.repeatingSessionId)
+      if (isSampleId) {
+        // Sample IDs should be mapped via ruleIdMap or set to null
+        if (ruleIdMap && ruleIdMap[record.repeatingSessionId]) {
+          mappedRepeatingId = ruleIdMap[record.repeatingSessionId]
+        }
+        // else: sample ID with no mapping -> null
+      } else if (ruleIdMap && ruleIdMap[record.repeatingSessionId]) {
         mappedRepeatingId = ruleIdMap[record.repeatingSessionId]
       } else if (!ruleIdMap) {
-        // No ruleIdMap provided, keep original (for non-migration syncs)
+        // No ruleIdMap provided and it's a valid UUID, keep original
         mappedRepeatingId = record.repeatingSessionId
       }
       // else: ruleIdMap exists but doesn't contain this ID -> null (rule doesn't exist)
