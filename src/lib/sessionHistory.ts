@@ -1633,23 +1633,31 @@ export const pushPendingHistoryToSupabase = async (): Promise<void> => {
 
 // Remove planned (futureSession) entries for a given rule that occur strictly AFTER the given local date (YYYY-MM-DD).
 // Used when setting a repeating rule to "none" after a selected occurrence to avoid lingering planned rows.
-// NOTE: Only deletes entries that have NOT been moved/rescheduled (startedAt === originalTime).
-// Moved future sessions should persist even when the rule is set to "none".
+// NOTE: Only deletes entries that have NOT been modified by the user (moved, extended, edited, etc.).
+// Modified future sessions should persist even when the rule is set to "none".
 export const pruneFuturePlannedForRuleAfter = async (ruleId: string, afterYmd: string): Promise<void> => {
   const records = readHistoryRecords()
   if (!Array.isArray(records) || records.length === 0) return
   const now = Date.now()
   let changed = false
+  // Threshold for detecting user edits: if updatedAt is more than 1 second after createdAt,
+  // the entry was likely edited by the user after initial creation
+  const EDIT_THRESHOLD_MS = 1000
   for (let i = 0; i < records.length; i += 1) {
     const r = records[i] as any
     const rid = typeof r.repeatingSessionId === 'string' ? (r.repeatingSessionId as string) : null
     const ot = Number.isFinite(r.originalTime) ? Number(r.originalTime) : null
     const od = ot ? formatOccurrenceDate(ot) : null
     const isGuidePlaceholder = Boolean(r.futureSession) && rid && ot !== null
-    // Check if this entry has been moved/rescheduled - if startedAt differs from originalTime, it was moved
-    // and should NOT be deleted when the rule is set to "none"
+    // Check if this entry has been moved (startedAt differs from originalTime)
     const hasBeenMoved = ot !== null && r.startedAt !== ot
-    if (isGuidePlaceholder && !hasBeenMoved && rid === ruleId && od && od > afterYmd && (records[i] as any).pendingAction !== 'delete') {
+    // Check if this entry has been edited after creation (updatedAt significantly after createdAt)
+    const createdAt = Number.isFinite(r.createdAt) ? Number(r.createdAt) : 0
+    const updatedAt = Number.isFinite(r.updatedAt) ? Number(r.updatedAt) : 0
+    const hasBeenEdited = updatedAt > createdAt + EDIT_THRESHOLD_MS
+    // Only delete if the entry is untouched (not moved and not edited)
+    const isUntouched = !hasBeenMoved && !hasBeenEdited
+    if (isGuidePlaceholder && isUntouched && rid === ruleId && od && od > afterYmd && (records[i] as any).pendingAction !== 'delete') {
       records[i] = { ...records[i], pendingAction: 'delete', updatedAt: now }
       changed = true
     }
