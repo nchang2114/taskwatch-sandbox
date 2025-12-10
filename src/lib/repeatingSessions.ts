@@ -1,7 +1,6 @@
 import { supabase, ensureSingleUserSession } from './supabaseClient'
 import type { HistoryEntry } from './sessionHistory'
 import { readStoredHistory, SAMPLE_SLEEP_ROUTINE_ID } from './sessionHistory'
-import { readRepeatingExceptions } from './repeatingExceptions'
 
 export type RepeatingSessionRule = {
   id: string
@@ -1552,7 +1551,6 @@ export async function evaluateAndMaybeRetireRule(ruleId: string): Promise<boolea
   if (!rule) return false
   if (!Number.isFinite(rule.endAtMs as number)) return false
   const history = readStoredHistory()
-  const exceptions = readRepeatingExceptions()
   const resolved = isRuleWindowFullyResolved(rule, {
     history: history.map((h) => {
       const rid = (h as any).repeatingSessionId ?? null
@@ -1560,7 +1558,7 @@ export async function evaluateAndMaybeRetireRule(ruleId: string): Promise<boolea
       const occ = rid && Number.isFinite(ot as number) ? formatLocalYmd(ot as number) : null
       return { routineId: rid, occurrenceDate: occ }
     }),
-    exceptions: exceptions.map((e) => ({ routineId: e.routineId, occurrenceDate: e.occurrenceDate })),
+    exceptions: [], // No longer using exceptions - suppression is via history entries
   })
   if (!resolved) return false
   return await deleteRepeatingRuleById(ruleId)
