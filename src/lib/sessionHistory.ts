@@ -656,16 +656,16 @@ export const createSampleHistoryRecords = (): HistoryRecord[] => {
       bucketSurface: 'neutral-grey-blue',
       notes: 'Inbox, bills, planning.',
     },
-    quicklist: {
-      taskName: 'Quick List task',
-      goalName: 'Quick List',
-      bucketName: 'Quick List',
-      goalId: null as unknown as string,
-      bucketId: null as unknown as string,
-      taskId: null as unknown as string,
+    demo: {
+      taskName: 'Hold a 1-min plank',
+      goalName: 'Get in Shape',
+      bucketName: 'Strength',
+      goalId: 'g3',
+      bucketId: 'b8',
+      taskId: 't27',
       goalSurface: 'glass',
-      bucketSurface: 'cool-blue',
-      notes: 'Quick task from the list.',
+      bucketSurface: 'fresh-teal',
+      notes: 'Core workout session.',
     },
   }
 
@@ -681,7 +681,7 @@ export const createSampleHistoryRecords = (): HistoryRecord[] => {
       { preset: 'study', duration: 180, overrideName: 'Finish Maple TA (Week 4)' },
       { preset: 'internship', duration: 150, overrideName: 'Submit 2 applications this week' },
       {
-        preset: 'quicklist',
+        preset: 'demo',
         duration: 240,
         overrideName: 'End Taskwatch Demo event',
         notes: 'Wrap up guest walkthrough and share highlights.',
