@@ -8464,9 +8464,9 @@ useEffect(() => {
   } | null>(null)
   const monthCellOverviewRef = useRef<HTMLDivElement | null>(null)
 
-  // --- Dynamic month cell max events calculation ---
-  const [monthCellMaxEvents, setMonthCellMaxEvents] = useState(4) // Default fallback
-  const [monthCellMoreFontSize, setMonthCellMoreFontSize] = useState('0.6rem') // Dynamic font size for "+N more"
+  // --- Fixed month cell max events ---
+  const monthCellMaxEvents = 2
+  const monthCellMoreFontSize = '0.6rem'
 
   // Add data attribute to body when modal is open to block pointer events via CSS
   // Also lock body scroll when modal is open
@@ -8483,61 +8483,6 @@ useEffect(() => {
       document.body.style.overflow = ''
     }
   }, [monthCellOverview])
-
-  // Calculate max visible events based on cell height
-  useEffect(() => {
-    if (calendarView !== 'month') return
-    
-    const carousel = monthYearCarouselRef.current
-    if (!carousel) return
-
-    const calculateMaxEvents = () => {
-      // Find first calendar cell in the visible month grid (center panel)
-      const cell = carousel.querySelector('.calendar-grid--month .calendar-cell') as HTMLElement | null
-      if (!cell) return
-
-      const cellHeight = cell.clientHeight
-      const cellWidth = cell.clientWidth
-      
-      // Account for: cell padding (0.35rem * 2 ≈ 11px), date number (~24px), margin-top on events (4px)
-      const dateNumberHeight = 24
-      const cellPadding = 11
-      const eventsMarginTop = 4
-      const moreIndicatorHeight = 18 // Height of "+N more" indicator
-      const eventHeight = 18 // ~16px content + 2px gap
-
-      const availableHeight = cellHeight - cellPadding - dateNumberHeight - eventsMarginTop - moreIndicatorHeight
-      const maxEvents = Math.max(1, Math.floor(availableHeight / eventHeight))
-      
-      setMonthCellMaxEvents(maxEvents)
-      
-      // Dynamically calculate font size for "+N more" based on cell width
-      // At ~120px width, use 0.6rem; scale down for narrower cells
-      const baseFontRem = 0.6
-      const minFontRem = 0.45
-      const baseWidth = 120
-      const minWidth = 50
-      const scaledFont = Math.max(
-        minFontRem,
-        Math.min(baseFontRem, baseFontRem * (cellWidth - minWidth) / (baseWidth - minWidth))
-      )
-      setMonthCellMoreFontSize(`${scaledFont.toFixed(3)}rem`)
-    }
-
-    // Initial calculation with slight delay for layout to settle
-    const timeoutId = setTimeout(calculateMaxEvents, 50)
-
-    // Observe resize on the carousel container
-    const resizeObserver = new ResizeObserver(() => {
-      calculateMaxEvents()
-    })
-    resizeObserver.observe(carousel)
-
-    return () => {
-      clearTimeout(timeoutId)
-      resizeObserver.disconnect()
-    }
-  }, [calendarView]) // Re-run when view changes
 
   // --- Calendar event preview (popover) ---
   const [calendarPreview, setCalendarPreview] = useState<
