@@ -5994,9 +5994,11 @@ const [showInlineExtras, setShowInlineExtras] = useState(false)
           }
           // For timezone markers, set duration to 1 minute
           if (nextBucket === TIMEZONE_CHANGE_MARKER) {
-            const startTs = base.startedAt
+            // Use draft's startedAt if available, otherwise fall back to entry's startedAt
+            const startTs = base.startedAt ?? selectedHistoryEntryRef.current?.startedAt ?? null
             if (startTs !== null) {
-              base = { ...base, endedAt: startTs + MINUTE_MS }
+              const endTs = startTs + MINUTE_MS
+              base = { ...base, startedAt: startTs, endedAt: endTs }
             }
           }
           // For Life Routines: clear task name when bucket changes, then auto-fill with bucket name
@@ -6663,6 +6665,10 @@ const [showInlineExtras, setShowInlineExtras] = useState(false)
     }
     if (nextEndedAt <= nextStartedAt) {
       nextEndedAt = nextStartedAt + MIN_SESSION_DURATION_DRAG_MS
+    }
+    // Timezone change markers are always 1 minute in duration
+    if (nextBucketName === TIMEZONE_CHANGE_MARKER) {
+      nextEndedAt = nextStartedAt + MINUTE_MS
     }
     const nextElapsed = Math.max(nextEndedAt - nextStartedAt, 1)
     const normalizedGoalName = nextGoalName
