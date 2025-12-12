@@ -24,6 +24,7 @@ type UserProfile = {
   name: string
   email: string
   avatarUrl?: string
+  appTimezone?: string | null
 }
 type SyncStatus = 'synced' | 'syncing' | 'offline' | 'pending'
 
@@ -195,10 +196,11 @@ const sanitizeStoredProfile = (value: unknown): UserProfile | null => {
   const name = typeof candidate.name === 'string' ? candidate.name : null
   const email = typeof candidate.email === 'string' ? candidate.email : null
   const avatarUrl = typeof candidate.avatarUrl === 'string' ? candidate.avatarUrl : undefined
+  const appTimezone = typeof candidate.appTimezone === 'string' ? candidate.appTimezone : null
   if (!name || !email) {
     return null
   }
-  return avatarUrl ? { name, email, avatarUrl } : { name, email }
+  return { name, email, avatarUrl, appTimezone }
 }
 
 const readStoredProfile = (): UserProfile | null => {
@@ -217,7 +219,7 @@ const readStoredProfile = (): UserProfile | null => {
   }
 }
 
-const deriveProfileFromSupabaseUser = (user: User | null | undefined): UserProfile | null => {
+const deriveProfileFromSupabaseUser = (user: User | null | undefined, appTimezone?: string | null): UserProfile | null => {
   if (!user) {
     return null
   }
@@ -240,6 +242,7 @@ const deriveProfileFromSupabaseUser = (user: User | null | undefined): UserProfi
     name: resolvedName,
     email,
     avatarUrl: avatar,
+    appTimezone: appTimezone ?? null,
   }
 }
 
@@ -1082,13 +1085,31 @@ function MainApp() {
     }
   }, [])
 
-  // Update timezone and persist to storage
+  // Update timezone and persist to storage + DB
   const updateAppTimezone = useCallback((timezone: string | null) => {
     storeAppTimezone(timezone)
     setAppTimezone(timezone)
     setTimezonePickerOpen(false)
     setTimezoneSearch('')
-  }, [])
+    
+    // Save to DB if signed in
+    if (userProfile && supabase) {
+      // Get current user ID
+      void (async () => {
+        try {
+          const { data: { user } } = await supabase.auth.getUser()
+          if (user?.id) {
+            await supabase
+              .from('profiles')
+              .update({ app_timezone: timezone })
+              .eq('id', user.id)
+          }
+        } catch {
+          // Ignore errors - localStorage is the source of truth for UI
+        }
+      })()
+    }
+  }, [userProfile])
 
   // Filtered timezone options based on search
   const filteredTimezoneOptions = useMemo(() => {
@@ -1287,11 +1308,49 @@ function MainApp() {
         } catch {}
       }
       
-      const profile = deriveProfileFromSupabaseUser(user ?? null)
+      // Fetch timezone from DB for signed-in users
+      let dbTimezone: string | null = null
+      if (user?.id && client) {
+        try {
+          const { data } = await client
+            .from('profiles')
+            .select('app_timezone')
+            .eq('id', user.id)
+            .maybeSingle()
+          dbTimezone = typeof data?.app_timezone === 'string' ? data.app_timezone : null
+          
+          // If DB has a timezone, sync it to localStorage and notify components
+          if (dbTimezone) {
+            storeAppTimezone(dbTimezone)
+          } else {
+            // If DB has no timezone but localStorage does (e.g., from guest session),
+            // migrate localStorage value to DB
+            const localTimezone = readStoredAppTimezone()
+            if (localTimezone) {
+              dbTimezone = localTimezone
+              // Fire-and-forget save to DB
+              void client
+                .from('profiles')
+                .update({ app_timezone: localTimezone })
+                .eq('id', user.id)
+            }
+          }
+        } catch {
+          // Ignore errors, fall back to localStorage
+        }
+      }
+      
+      const profile = deriveProfileFromSupabaseUser(user ?? null, dbTimezone)
       
       // Fetch all data BEFORE updating the profile (which triggers UI change)
       // Keep the auth modal open during this time - user just sees the sign-in screen
       await alignLocalStoresForUser(user?.id ?? null)
+      
+      // Sync app timezone state with what we loaded from DB
+      if (mounted && user?.id) {
+        const effectiveTimezone = dbTimezone ?? readStoredAppTimezone()
+        setAppTimezone(effectiveTimezone)
+      }
       
       // Now that data is ready, update the profile and close the modal
       if (mounted) {
