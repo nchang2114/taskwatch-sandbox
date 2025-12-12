@@ -3827,12 +3827,27 @@ export default function ReflectionPage({ use24HourTime = false, weekStartDay = 0
         setAppTimezone(null)
       })
     }
+
+    // Handle same-tab timezone changes (from settings panel)
+    const handleTimezoneChanged = (event: Event) => {
+      const customEvent = event as CustomEvent<{ timezone: string | null }>
+      if (customEvent.detail) {
+        const newTimezone = customEvent.detail.timezone
+        if (newTimezone !== appTimezone) {
+          startTransition(() => {
+            setAppTimezone(newTimezone)
+          })
+        }
+      }
+    }
     
     window.addEventListener('storage', handleStorageChange)
     window.addEventListener('taskwatch-timezone-reset', handleTimezoneReset)
+    window.addEventListener('taskwatch-timezone-changed', handleTimezoneChanged)
     return () => {
       window.removeEventListener('storage', handleStorageChange)
       window.removeEventListener('taskwatch-timezone-reset', handleTimezoneReset)
+      window.removeEventListener('taskwatch-timezone-changed', handleTimezoneChanged)
     }
   }, [appTimezone])
   
