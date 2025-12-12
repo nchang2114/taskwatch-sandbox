@@ -2824,11 +2824,6 @@ body[data-month-cell-overview-open='true'] .month-cell-overview {
   margin-right: 0.5rem;
 }
 
-.month-cell-overview__event--planned .month-cell-overview__event-color {
-  border: 1.5px dashed;
-  background: transparent !important;
-}
-
 html[data-theme='light'] .month-cell-overview__backdrop {
   background: rgba(200, 210, 240, 0.5);
 }

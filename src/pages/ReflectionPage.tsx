@@ -13877,7 +13877,7 @@ useEffect(() => {
                 >
                   <div
                     className="month-cell-overview__event-color"
-                    style={isPlanned ? { borderColor: baseColor, background: 'transparent' } : { background: colorCss }}
+                    style={{ background: colorCss }}
                   />
                   <div className="month-cell-overview__event-content">
                     <div className="month-cell-overview__event-title">{label || 'Untitled'}</div>
