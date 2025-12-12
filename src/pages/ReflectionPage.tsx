@@ -9859,7 +9859,6 @@ useEffect(() => {
                       style={{ background: baseColor }}
                     />
                     <span className="calendar-cell__event-title">{label}</span>
-                    {timeStr && <span className="calendar-cell__event-time">{timeStr}</span>}
                   </div>
                 )
               })}
