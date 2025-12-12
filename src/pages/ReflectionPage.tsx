@@ -8459,14 +8459,18 @@ useEffect(() => {
   const monthCellOverviewRef = useRef<HTMLDivElement | null>(null)
 
   // Add data attribute to body when modal is open to block pointer events via CSS
+  // Also lock body scroll when modal is open
   useEffect(() => {
     if (monthCellOverview) {
       document.body.setAttribute('data-month-cell-overview-open', 'true')
+      document.body.style.overflow = 'hidden'
     } else {
       document.body.removeAttribute('data-month-cell-overview-open')
+      document.body.style.overflow = ''
     }
     return () => {
       document.body.removeAttribute('data-month-cell-overview-open')
+      document.body.style.overflow = ''
     }
   }, [monthCellOverview])
 
@@ -9700,26 +9704,46 @@ useEffect(() => {
   const renderCalendarContent = useCallback(() => {
     const entries = effectiveHistory
 
-    // Get all-day entries that should appear on a given date
-    const getAllDayEntriesForDate = (dateKey: string) =>
-      entries.filter((e) => {
-        if (!isEntryAllDay(e) || isSkippedSession(e)) return false
+    // Get ALL entries for a date (both all-day and timed sessions) for month view
+    const getAllEntriesForDate = (dateKey: string) => {
+      const [year, month, day] = dateKey.split('-').map(Number)
+      const dayStart = new Date(year, month - 1, day, 0, 0, 0, 0).getTime()
+      const dayEnd = dayStart + DAY_DURATION_MS
+      
+      return entries.filter((e) => {
+        if (isSkippedSession(e)) return false
         
         if (e.isAllDay) {
           // For entries with isAllDay flag, use UTC date key matching
-          // startedAt/endedAt are UTC midnights, endedAt is exclusive
           const startDateKey = getUtcDateKey(e.startedAt)
           const endDateKey = getUtcDateKey(e.endedAt)
-          // Entry appears on this date if dateKey >= startDateKey and dateKey < endDateKey
           return dateKey >= startDateKey && dateKey < endDateKey
         } else {
-          // Legacy: use local midnight timestamp overlap
-          const [year, month, day] = dateKey.split('-').map(Number)
-          const dayStart = new Date(year, month - 1, day, 0, 0, 0, 0).getTime()
-          const dayEnd = dayStart + DAY_DURATION_MS
+          // Check if entry overlaps with this day
           return Math.min(e.endedAt, dayEnd) > Math.max(e.startedAt, dayStart)
         }
+      }).sort((a, b) => {
+        // Sort all-day entries first, then by start time
+        const aIsAllDay = isEntryAllDay(a)
+        const bIsAllDay = isEntryAllDay(b)
+        if (aIsAllDay && !bIsAllDay) return -1
+        if (!aIsAllDay && bIsAllDay) return 1
+        return a.startedAt - b.startedAt
       })
+    }
+
+    // Format time for month cell display (e.g., "9:30a" or "2p")
+    const formatMonthCellTime = (timestamp: number) => {
+      const date = new Date(timestamp)
+      const hours = date.getHours()
+      const minutes = date.getMinutes()
+      const ampm = hours >= 12 ? 'p' : 'a'
+      const displayHour = hours % 12 || 12
+      if (minutes === 0) {
+        return `${displayHour}${ampm}`
+      }
+      return `${displayHour}:${String(minutes).padStart(2, '0')}${ampm}`
+    }
 
     // (removed unused legacy swipe handler for month/year grids)
 
@@ -9749,9 +9773,10 @@ useEffect(() => {
       start.setHours(0, 0, 0, 0)
       // Build date key for this cell
       const cellDateKey = `${start.getFullYear()}-${String(start.getMonth() + 1).padStart(2, '0')}-${String(start.getDate()).padStart(2, '0')}`
-      const allDayEntries = getAllDayEntriesForDate(cellDateKey)
+      const cellEntries = getAllEntriesForDate(cellDateKey)
       const isToday = cellDateKey === todayDateKeyInDisplayTz
       const dateLabel = start.toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' })
+      const maxVisibleEvents = 4
       return (
         <div
           key={`cell-${start.toISOString()}`}
@@ -9773,41 +9798,63 @@ useEffect(() => {
           >
             {start.getDate()}
           </div>
-          {allDayEntries.length > 0 && (
+          {cellEntries.length > 0 && (
             <div
               className="calendar-cell__events"
               role="button"
               tabIndex={0}
               onClick={(e) => {
                 e.stopPropagation()
-                setMonthCellOverview({ dateKey: cellDateKey, dateLabel, entries: allDayEntries })
+                setMonthCellOverview({ dateKey: cellDateKey, dateLabel, entries: cellEntries })
               }}
               onKeyDown={(e) => {
                 if (e.key === 'Enter' || e.key === ' ') {
                   e.preventDefault()
-                  setMonthCellOverview({ dateKey: cellDateKey, dateLabel, entries: allDayEntries })
+                  setMonthCellOverview({ dateKey: cellDateKey, dateLabel, entries: cellEntries })
                 }
               }}
             >
-              {allDayEntries.slice(0, 3).map((entry) => {
+              {cellEntries.slice(0, maxVisibleEvents).map((entry) => {
                 const meta = resolveGoalMetadata(entry, enhancedGoalLookup, goalColorLookup, lifeRoutineSurfaceLookup)
                 const label = deriveEntryTaskName(entry)
                 const colorCss = meta.colorInfo?.gradient?.css ?? meta.colorInfo?.solidColor ?? getPaletteColorForLabel(label)
                 const isPlanned = !!entry.futureSession
                 const baseColor = meta.colorInfo?.solidColor ?? meta.colorInfo?.gradient?.start ?? getPaletteColorForLabel(label)
+                const entryIsAllDay = isEntryAllDay(entry)
+                const timeStr = entryIsAllDay ? null : formatMonthCellTime(entry.startedAt)
+                
+                // All-day events render as full-width colored bars (original style)
+                // Timed events render with marker + title + time
+                if (entryIsAllDay) {
+                  return (
+                    <div
+                      key={entry.id}
+                      className={`calendar-cell__event calendar-cell__event--allday${isPlanned ? ' calendar-cell__event--planned' : ''}`}
+                      style={isPlanned ? { color: baseColor, borderColor: baseColor } : { background: colorCss }}
+                      title={label}
+                    >
+                      <span className="calendar-cell__event-title">{label}</span>
+                    </div>
+                  )
+                }
+                
                 return (
                   <div
                     key={entry.id}
                     className={`calendar-cell__event${isPlanned ? ' calendar-cell__event--planned' : ''}`}
-                    style={isPlanned ? { color: baseColor, borderColor: baseColor } : { background: colorCss }}
                     title={label}
                   >
+                    <span
+                      className="calendar-cell__event-marker"
+                      style={isPlanned ? { borderColor: baseColor, background: 'transparent' } : { background: baseColor }}
+                    />
                     <span className="calendar-cell__event-title">{label}</span>
+                    {timeStr && <span className="calendar-cell__event-time">{timeStr}</span>}
                   </div>
                 )
               })}
-              {allDayEntries.length > 3 && (
-                <div className="calendar-cell__more">+{allDayEntries.length - 3} more</div>
+              {cellEntries.length > maxVisibleEvents && (
+                <div className="calendar-cell__more">+{cellEntries.length - maxVisibleEvents} more</div>
               )}
             </div>
           )}
@@ -13811,6 +13858,17 @@ useEffect(() => {
               const isPlanned = !!entry.futureSession
               const baseColor = meta.colorInfo?.solidColor ?? meta.colorInfo?.gradient?.start ?? getPaletteColorForLabel(label)
               const goalLabel = entry.goalName || 'No goal'
+              const entryIsAllDay = isEntryAllDay(entry)
+              // Format time range for timed entries
+              const formatTime = (ts: number) => {
+                const d = new Date(ts)
+                const h = d.getHours()
+                const m = d.getMinutes()
+                const ampm = h >= 12 ? 'pm' : 'am'
+                const displayH = h % 12 || 12
+                return m === 0 ? `${displayH}${ampm}` : `${displayH}:${String(m).padStart(2, '0')}${ampm}`
+              }
+              const timeRange = entryIsAllDay ? 'All day' : `${formatTime(entry.startedAt)} – ${formatTime(entry.endedAt)}`
               return (
                 <div
                   key={entry.id}
@@ -13819,11 +13877,14 @@ useEffect(() => {
                 >
                   <div
                     className="month-cell-overview__event-color"
-                    style={{ background: colorCss }}
+                    style={isPlanned ? { borderColor: baseColor, background: 'transparent' } : { background: colorCss }}
                   />
                   <div className="month-cell-overview__event-content">
                     <div className="month-cell-overview__event-title">{label || 'Untitled'}</div>
-                    <div className="month-cell-overview__event-goal">{goalLabel}</div>
+                    <div className="month-cell-overview__event-meta">
+                      <span className="month-cell-overview__event-time">{timeRange}</span>
+                      <span className="month-cell-overview__event-goal">{goalLabel}</span>
+                    </div>
                   </div>
                 </div>
               )
