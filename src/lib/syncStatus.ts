@@ -10,9 +10,10 @@ export type SyncStatusState = 'synced' | 'syncing' | 'offline' | 'pending'
 export const SYNC_STATUS_CHANGE_EVENT = 'nc-taskwatch:sync-status-change'
 
 // Internal state
-let currentOnlineState = typeof navigator !== 'undefined' ? navigator.onLine : true
+let currentOnlineState = true // Default to online, will be set properly in initSyncStatusListeners
 let pendingCount = 0
 let isSyncing = false
+let initialized = false
 
 /**
  * Calculate the current sync status based on online state and pending operations
@@ -102,6 +103,8 @@ export const onBackOnline = (callback: () => void) => {
  */
 export const initSyncStatusListeners = () => {
   if (typeof window === 'undefined') return
+  if (initialized) return
+  initialized = true
 
   const handleOnline = () => {
     const wasOffline = !currentOnlineState
@@ -124,8 +127,8 @@ export const initSyncStatusListeners = () => {
   window.addEventListener('online', handleOnline)
   window.addEventListener('offline', handleOffline)
 
-  // Set initial state
-  currentOnlineState = navigator.onLine
+  // Set initial state from navigator
+  currentOnlineState = typeof navigator !== 'undefined' ? navigator.onLine : true
   dispatchStatusChange()
 }
 
