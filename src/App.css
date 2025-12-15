@@ -1174,6 +1174,15 @@ html[data-theme='light'] .profile-menu__link-status--synced {
   color: #45adff;
 }
 
+.profile-menu__link-status--syncing .profile-menu__link-status-icon {
+  animation: sync-spin 1s linear infinite;
+}
+
+@keyframes sync-spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
 html[data-theme='light'] .profile-menu__link-status--syncing {
   color: #2563eb;
 }

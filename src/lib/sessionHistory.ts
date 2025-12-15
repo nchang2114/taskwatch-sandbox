@@ -6,6 +6,7 @@ import {
   sanitizeSurfaceStyle,
   type SurfaceStyle,
 } from './surfaceStyles'
+import { setPendingCount, setSyncing, isOnline, onBackOnline } from './syncStatus'
 
 export const HISTORY_STORAGE_KEY = 'nc-taskwatch-session-history'
 export const HISTORY_EVENT_NAME = 'nc-taskwatch:history-update'
@@ -1167,6 +1168,9 @@ const persistRecords = (records: HistoryRecord[]): HistoryEntry[] => {
   writeHistoryRecords(sorted)
   const activeEntries = recordsToActiveEntries(sorted)
   broadcastHistoryRecords(sorted)
+  // Update pending count for sync status indicator
+  const pendingCount = sorted.filter(r => r.pendingAction === 'upsert' || r.pendingAction === 'delete').length
+  setPendingCount(pendingCount)
   return activeEntries
 }
 
@@ -1222,6 +1226,23 @@ const setupLifeRoutineSurfaceSync = (): void => {
 }
 
 setupLifeRoutineSurfaceSync()
+
+// Register to retry pending pushes when coming back online
+if (typeof window !== 'undefined') {
+  onBackOnline(() => {
+    // Small delay to let the network stabilize
+    setTimeout(() => {
+      void pushPendingHistoryToSupabase()
+    }, 500)
+  })
+  
+  // Initialize pending count from existing records on module load
+  try {
+    const records = readHistoryRecords()
+    const pendingCount = records.filter(r => r.pendingAction === 'upsert' || r.pendingAction === 'delete').length
+    setPendingCount(pendingCount)
+  } catch {}
+}
 
 export const persistHistorySnapshot = (nextEntries: HistoryEntry[]): HistoryEntry[] => {
   const sanitized = sanitizeHistoryEntries(nextEntries).map(normalizeEntryTimes)
@@ -1573,6 +1594,10 @@ export const pushPendingHistoryToSupabase = async (): Promise<void> => {
   if (!supabase) {
     return
   }
+  // Don't attempt to push if offline
+  if (!isOnline()) {
+    return
+  }
   const session = await ensureSingleUserSession()
   if (!session) {
     return
@@ -1586,58 +1611,69 @@ export const pushPendingHistoryToSupabase = async (): Promise<void> => {
   const records = readHistoryRecords()
   const pendingUpserts = records.filter((record) => record.pendingAction === 'upsert')
   const pendingDeletes = records.filter((record) => record.pendingAction === 'delete')
-  if (pendingUpserts.length > 0) {
-    const client = supabase!
-    const timestamp = Date.now()
-    let payloads = pendingUpserts.map((record) => payloadFromRecord(record, userId, timestamp))
-    let { resp: upsertResp, usedPayloads } = await upsertHistoryPayloads(client, payloads)
-    if (upsertResp.error) {
-      const code = String((upsertResp.error as any)?.code || '')
-      const details =
-        String((upsertResp.error as any)?.details || '') + ' ' + String((upsertResp.error as any)?.message || '')
-      if (code === '23503' && details.toLowerCase().includes('repeating_sessions')) {
-        const stripped = usedPayloads.map((payload) => stripHistoryPayloadColumns(payload, { repeat: true }))
-        upsertResp = await client.from('session_history').upsert(stripped, { onConflict: 'id' })
-        usedPayloads = stripped
-      } else if (isConflictError(upsertResp.error)) {
-        upsertResp = { ...upsertResp, error: null as any }
+  
+  // Nothing to sync
+  if (pendingUpserts.length === 0 && pendingDeletes.length === 0) {
+    return
+  }
+  
+  setSyncing(true)
+  try {
+    if (pendingUpserts.length > 0) {
+      const client = supabase!
+      const timestamp = Date.now()
+      let payloads = pendingUpserts.map((record) => payloadFromRecord(record, userId, timestamp))
+      let { resp: upsertResp, usedPayloads } = await upsertHistoryPayloads(client, payloads)
+      if (upsertResp.error) {
+        const code = String((upsertResp.error as any)?.code || '')
+        const details =
+          String((upsertResp.error as any)?.details || '') + ' ' + String((upsertResp.error as any)?.message || '')
+        if (code === '23503' && details.toLowerCase().includes('repeating_sessions')) {
+          const stripped = usedPayloads.map((payload) => stripHistoryPayloadColumns(payload, { repeat: true }))
+          upsertResp = await client.from('session_history').upsert(stripped, { onConflict: 'id' })
+          usedPayloads = stripped
+        } else if (isConflictError(upsertResp.error)) {
+          upsertResp = { ...upsertResp, error: null as any }
+        }
+      }
+      if (!upsertResp.error) {
+        pendingUpserts.forEach((record, index) => {
+          const payload = usedPayloads[index]
+          const updatedIso = typeof payload.updated_at === 'string' ? payload.updated_at : new Date().toISOString()
+          const updatedAt = Date.parse(updatedIso)
+          record.pendingAction = null
+          record.updatedAt = Number.isFinite(updatedAt) ? updatedAt : Date.now()
+        })
       }
     }
-    if (!upsertResp.error) {
-      pendingUpserts.forEach((record, index) => {
-        const payload = usedPayloads[index]
-        const updatedIso = typeof payload.updated_at === 'string' ? payload.updated_at : new Date().toISOString()
-        const updatedAt = Date.parse(updatedIso)
-        record.pendingAction = null
-        record.updatedAt = Number.isFinite(updatedAt) ? updatedAt : Date.now()
-      })
-    }
-  }
 
-  if (pendingDeletes.length > 0) {
-    const uuidDeleteIds = pendingDeletes.map((record) => record.id).filter((id) => isUuid(id))
-    if (uuidDeleteIds.length > 0) {
-      const { error: deleteError } = await supabase.from('session_history').delete().in('id', uuidDeleteIds)
-      if (!deleteError) {
-        for (let index = records.length - 1; index >= 0; index -= 1) {
-          if (uuidDeleteIds.includes(records[index].id)) {
-            records.splice(index, 1)
+    if (pendingDeletes.length > 0) {
+      const uuidDeleteIds = pendingDeletes.map((record) => record.id).filter((id) => isUuid(id))
+      if (uuidDeleteIds.length > 0) {
+        const { error: deleteError } = await supabase.from('session_history').delete().in('id', uuidDeleteIds)
+        if (!deleteError) {
+          for (let index = records.length - 1; index >= 0; index -= 1) {
+            if (uuidDeleteIds.includes(records[index].id)) {
+              records.splice(index, 1)
+            }
           }
         }
       }
+      // Remove local-only ids that have no remote UUID equivalent.
+      pendingDeletes
+        .filter((record) => !isUuid(record.id))
+        .forEach((record) => {
+          const idx = records.findIndex((r) => r.id === record.id)
+          if (idx !== -1) {
+            records.splice(idx, 1)
+          }
+        })
     }
-    // Remove local-only ids that have no remote UUID equivalent.
-    pendingDeletes
-      .filter((record) => !isUuid(record.id))
-      .forEach((record) => {
-        const idx = records.findIndex((r) => r.id === record.id)
-        if (idx !== -1) {
-          records.splice(idx, 1)
-        }
-      })
-  }
 
-  persistRecords(records)
+    persistRecords(records)
+  } finally {
+    setSyncing(false)
+  }
 }
 
 // Remove planned (futureSession) entries for a given rule that occur strictly AFTER the given local date (YYYY-MM-DD).

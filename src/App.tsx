@@ -17,6 +17,7 @@ import { ensureHistoryUser } from './lib/sessionHistory'
 import { ensureRepeatingRulesUser } from './lib/repeatingSessions'
 import { bootstrapGuestDataIfNeeded, clearAllLocalStorage, clearLastFullSyncTimestamp } from './lib/bootstrap'
 import { ensureGoalsUser } from './lib/goalsSync'
+import { initSyncStatusListeners, subscribeSyncStatus, type SyncStatusState } from './lib/syncStatus'
 
 type Theme = 'light' | 'dark'
 type TabKey = 'goals' | 'focus' | 'reflection'
@@ -26,7 +27,7 @@ type UserProfile = {
   avatarUrl?: string
   appTimezone?: string | null
 }
-type SyncStatus = 'synced' | 'syncing' | 'offline' | 'pending'
+type SyncStatus = SyncStatusState
 
 const THEME_STORAGE_KEY = 'nc-taskwatch-theme'
 const QUICK_LIST_EXPANDED_STORAGE_KEY = 'nc-taskwatch-quick-list-expanded-v1'
@@ -246,11 +247,11 @@ const deriveProfileFromSupabaseUser = (user: User | null | undefined, appTimezon
   }
 }
 
-const SYNC_STATUS_COPY: Record<SyncStatus, { icon: string; label: string }> = {
-  synced: { icon: '✓', label: 'Synced just now' },
+const SYNC_STATUS_COPY: Record<SyncStatus, { icon: string; label: string | ((count: number) => string) }> = {
+  synced: { icon: '✓', label: 'Synced' },
   syncing: { icon: '⟳', label: 'Syncing…' },
   offline: { icon: '⚠', label: 'Offline — changes saved locally' },
-  pending: { icon: '⛁', label: 'Local changes pending upload (3)' },
+  pending: { icon: '⛁', label: (count: number) => `${count} change${count === 1 ? '' : 's'} pending sync` },
 }
 
 const createHelpIcon = (children: ReactNode): ReactNode => (
@@ -479,7 +480,8 @@ function MainApp() {
   const [isNavCollapsed, setIsNavCollapsed] = useState(false)
   const [isNavOpen, setIsNavOpen] = useState(false)
   const [userProfile, setUserProfile] = useState<UserProfile | null>(() => readStoredProfile())
-  const [syncStatus] = useState<SyncStatus>('synced')
+  const [syncStatus, setSyncStatus] = useState<SyncStatus>('synced')
+  const [pendingCount, setPendingCount] = useState(0)
   const [profileMenuOpen, setProfileMenuOpen] = useState(false)
   const [profileHelpMenuOpen, setProfileHelpMenuOpen] = useState(false)
   const [authModalOpen, setAuthModalOpen] = useState(false)
@@ -547,6 +549,9 @@ function MainApp() {
     return initials || 'U'
   }, [userProfile])
   const syncStatusCopy = SYNC_STATUS_COPY[syncStatus]
+  const syncStatusLabel = typeof syncStatusCopy.label === 'function' 
+    ? syncStatusCopy.label(pendingCount) 
+    : syncStatusCopy.label
   const profileButtonClassName = useMemo(
     () =>
       ['profile-button', isSignedIn ? 'profile-button--signed-in' : 'profile-button--guest', profileMenuOpen ? 'profile-button--open' : '']
@@ -1661,6 +1666,16 @@ function MainApp() {
     applyTheme(theme)
   }, [applyTheme, theme])
 
+  // Initialize sync status listeners and subscribe to changes
+  useEffect(() => {
+    initSyncStatusListeners()
+    const unsubscribe = subscribeSyncStatus((status, count) => {
+      setSyncStatus(status)
+      setPendingCount(count)
+    })
+    return unsubscribe
+  }, [])
+
   // Gate hover-only visuals with a root class to avoid accidental previews on touch devices
   useEffect(() => {
     if (typeof window === 'undefined' || typeof document === 'undefined') return
@@ -2491,7 +2506,7 @@ const nextThemeLabel = theme === 'dark' ? 'light' : 'dark'
             <span className="profile-menu__link-status-icon" aria-hidden="true">
               {syncStatusCopy.icon}
             </span>
-            <span>{syncStatusCopy.label}</span>
+            <span>{syncStatusLabel}</span>
           </div>
         </div>
         <hr className="profile-menu__divider" />
