@@ -6,7 +6,7 @@ import {
   sanitizeSurfaceStyle,
   type SurfaceStyle,
 } from './surfaceStyles'
-import { setPendingCount, setSyncing, isOnline, onBackOnline } from './syncStatus'
+import { setPendingCountForSource, setSyncing, isOnline, onBackOnline } from './syncStatus'
 
 export const HISTORY_STORAGE_KEY = 'nc-taskwatch-session-history'
 export const HISTORY_EVENT_NAME = 'nc-taskwatch:history-update'
@@ -1170,7 +1170,7 @@ const persistRecords = (records: HistoryRecord[]): HistoryEntry[] => {
   broadcastHistoryRecords(sorted)
   // Update pending count for sync status indicator
   const pendingCount = sorted.filter(r => r.pendingAction === 'upsert' || r.pendingAction === 'delete').length
-  setPendingCount(pendingCount)
+  setPendingCountForSource('history', pendingCount)
   return activeEntries
 }
 
@@ -1240,7 +1240,7 @@ if (typeof window !== 'undefined') {
   try {
     const records = readHistoryRecords()
     const pendingCount = records.filter(r => r.pendingAction === 'upsert' || r.pendingAction === 'delete').length
-    setPendingCount(pendingCount)
+    setPendingCountForSource('history', pendingCount)
   } catch {}
 }
 

@@ -11,9 +11,20 @@ export const SYNC_STATUS_CHANGE_EVENT = 'nc-taskwatch:sync-status-change'
 
 // Internal state
 let currentOnlineState = true // Default to online, will be set properly in initSyncStatusListeners
-let pendingCount = 0
 let isSyncing = false
 let initialized = false
+
+// Track pending counts from different sources
+const pendingCounts: Map<string, number> = new Map()
+
+/**
+ * Get total pending count from all sources
+ */
+const getTotalPendingCount = (): number => {
+  let total = 0
+  pendingCounts.forEach(count => { total += count })
+  return total
+}
 
 /**
  * Calculate the current sync status based on online state and pending operations
@@ -25,7 +36,7 @@ const calculateStatus = (): SyncStatusState => {
   if (isSyncing) {
     return 'syncing'
   }
-  if (pendingCount > 0) {
+  if (getTotalPendingCount() > 0) {
     return 'pending'
   }
   return 'synced'
@@ -39,7 +50,7 @@ const dispatchStatusChange = () => {
   const status = calculateStatus()
   const event = new CustomEvent<{ status: SyncStatusState; pendingCount: number }>(
     SYNC_STATUS_CHANGE_EVENT,
-    { detail: { status, pendingCount } }
+    { detail: { status, pendingCount: getTotalPendingCount() } }
   )
   window.dispatchEvent(event)
 }
@@ -50,9 +61,16 @@ const dispatchStatusChange = () => {
 export const getSyncStatus = (): SyncStatusState => calculateStatus()
 
 /**
- * Get the current pending operation count
+ * Get the current pending operation count (total from all sources)
  */
-export const getPendingCount = (): number => pendingCount
+export const getPendingCount = (): number => getTotalPendingCount()
+
+/**
+ * Get pending count for a specific source
+ */
+export const getPendingCountForSource = (source: string): number => {
+  return pendingCounts.get(source) || 0
+}
 
 /**
  * Check if currently online
@@ -60,14 +78,28 @@ export const getPendingCount = (): number => pendingCount
 export const isOnline = (): boolean => currentOnlineState
 
 /**
- * Update the pending count (called by sync modules)
+ * Set pending count for a specific source (e.g., 'history', 'queue')
+ * This allows multiple modules to track their own pending operations
  */
-export const setPendingCount = (count: number) => {
-  const prev = pendingCount
-  pendingCount = Math.max(0, count)
-  if (prev !== pendingCount) {
+export const setPendingCountForSource = (source: string, count: number) => {
+  const prev = getTotalPendingCount()
+  const safeCount = Math.max(0, count)
+  if (safeCount === 0) {
+    pendingCounts.delete(source)
+  } else {
+    pendingCounts.set(source, safeCount)
+  }
+  if (prev !== getTotalPendingCount()) {
     dispatchStatusChange()
   }
+}
+
+/**
+ * Update the pending count (legacy - uses 'default' source)
+ * @deprecated Use setPendingCountForSource instead
+ */
+export const setPendingCount = (count: number) => {
+  setPendingCountForSource('default', count)
 }
 
 /**
@@ -148,7 +180,7 @@ export const subscribeSyncStatus = (
   window.addEventListener(SYNC_STATUS_CHANGE_EVENT, handler)
   
   // Immediately call with current state
-  callback(calculateStatus(), pendingCount)
+  callback(calculateStatus(), getTotalPendingCount())
 
   return () => {
     window.removeEventListener(SYNC_STATUS_CHANGE_EVENT, handler)

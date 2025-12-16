@@ -27,7 +27,8 @@ import './GoalsPage.css'
 import { readStoredGoalsSnapshot, subscribeToGoalsSnapshot, publishGoalsSnapshot, createGoalsSnapshot, syncGoalsSnapshotFromSupabase, readGoalsSnapshotOwner, GOALS_GUEST_USER_ID, type GoalSnapshot } from '../lib/goalsSync'
 import { SCHEDULE_EVENT_TYPE, type ScheduleBroadcastEvent } from '../lib/scheduleChannel'
 import { broadcastPauseFocus } from '../lib/focusChannel'
-import { createTask as apiCreateTask, fetchGoalsHierarchy, moveTaskToBucket, updateTaskNotes as apiUpdateTaskNotes } from '../lib/goalsApi'
+import { fetchGoalsHierarchy } from '../lib/goalsApi'
+import { createTask as apiCreateTask, moveTaskToBucket, updateTaskNotes as apiUpdateTaskNotes } from '../lib/goalsApiOffline'
 import {
   DEFAULT_SURFACE_STYLE,
   ensureSurfaceStyle,
