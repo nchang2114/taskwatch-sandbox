@@ -106,7 +106,15 @@ export async function createTask(
   bucketId: string,
   text: string,
   options?: { clientId?: string; insertAtTop?: boolean }
-): Promise<{ id: string; text: string; completed: boolean } | null> {
+): Promise<{
+  id: string
+  text: string
+  completed: boolean
+  difficulty: 'none' | 'green' | 'yellow' | 'red'
+  priority: boolean
+  sort_index: number
+  notes: string | null
+} | null> {
   const taskId = options?.clientId ?? generateTempId()
   const insertAtTop = options?.insertAtTop ?? false
   
@@ -147,12 +155,12 @@ export async function createTask(
     } catch (error) {
       // Queue for retry
       queueOperation('createTask', { bucketId, text, taskId, insertAtTop }, taskId)
-      return { id: taskId, text, completed: false }
+      return { id: taskId, text, completed: false, difficulty: 'none', priority: false, sort_index: 0, notes: null }
     }
   } else {
     // Queue for later
     queueOperation('createTask', { bucketId, text, taskId, insertAtTop }, taskId)
-    return { id: taskId, text, completed: false }
+    return { id: taskId, text, completed: false, difficulty: 'none', priority: false, sort_index: 0, notes: null }
   }
 }
 
@@ -354,7 +362,12 @@ export async function deleteTask(taskId: string, bucketId: string): Promise<void
 /**
  * Move task to another bucket
  */
-export async function moveTaskToBucket(taskId: string, fromBucketId: string, toBucketId: string): Promise<void> {
+export async function moveTaskToBucket(
+  taskId: string,
+  fromBucketId: string,
+  toBucketId: string,
+  toIndex?: number
+): Promise<void> {
   const resolvedTaskId = resolveId(taskId)
   const resolvedFromBucketId = resolveId(fromBucketId)
   const resolvedToBucketId = resolveId(toBucketId)
@@ -367,20 +380,24 @@ export async function moveTaskToBucket(taskId: string, fromBucketId: string, toB
     if (fromFound && toFound) {
       // Remove from source bucket
       const [task] = fromFound.bucket.tasks.splice(fromFound.taskIndex, 1)
-      // Add to target bucket
-      toFound.bucket.tasks.push(task)
+      // Add to target bucket at specified index or end
+      if (toIndex !== undefined) {
+        toFound.bucket.tasks.splice(toIndex, 0, task)
+      } else {
+        toFound.bucket.tasks.push(task)
+      }
     }
     return snapshot
   })
   
   if (isOnline() && !isTempId(resolvedTaskId)) {
     try {
-      await apiMoveTaskToBucket(resolvedTaskId, resolvedFromBucketId, resolvedToBucketId)
+      await apiMoveTaskToBucket(resolvedTaskId, resolvedFromBucketId, resolvedToBucketId, toIndex)
     } catch {
-      queueOperation('moveTask', { taskId: resolvedTaskId, fromBucketId: resolvedFromBucketId, toBucketId: resolvedToBucketId })
+      queueOperation('moveTask', { taskId: resolvedTaskId, fromBucketId: resolvedFromBucketId, toBucketId: resolvedToBucketId, toIndex })
     }
   } else {
-    queueOperation('moveTask', { taskId: resolvedTaskId, fromBucketId: resolvedFromBucketId, toBucketId: resolvedToBucketId })
+    queueOperation('moveTask', { taskId: resolvedTaskId, fromBucketId: resolvedFromBucketId, toBucketId: resolvedToBucketId, toIndex })
   }
 }
 
@@ -389,47 +406,54 @@ export async function moveTaskToBucket(taskId: string, fromBucketId: string, toB
  */
 export async function upsertTaskSubtask(
   taskId: string,
-  subtaskId: string,
-  text: string,
-  completed: boolean,
-  sortIndex: number
+  subtask: { id: string; text: string; completed: boolean; sort_index: number; updated_at?: string }
 ): Promise<void> {
   const resolvedTaskId = resolveId(taskId)
-  const isNewSubtask = isTempId(subtaskId)
-  const resolvedSubtaskId = isNewSubtask ? subtaskId : resolveId(subtaskId)
+  const isNewSubtask = isTempId(subtask.id)
+  const resolvedSubtaskId = isNewSubtask ? subtask.id : resolveId(subtask.id)
   
   // Optimistically update local state
   updateLocalSnapshot((snapshot) => {
     const found = findTaskInSnapshot(snapshot, taskId)
     if (found) {
-      const existingIndex = found.task.subtasks.findIndex(s => s.id === subtaskId)
-      const subtask: GoalTaskSubtaskSnapshot = {
+      const existingIndex = found.task.subtasks.findIndex(s => s.id === subtask.id)
+      const subtaskSnapshot: GoalTaskSubtaskSnapshot = {
         id: resolvedSubtaskId,
-        text,
-        completed,
-        sortIndex,
+        text: subtask.text,
+        completed: subtask.completed,
+        sortIndex: subtask.sort_index,
       }
       
       if (existingIndex !== -1) {
-        found.task.subtasks[existingIndex] = subtask
+        found.task.subtasks[existingIndex] = subtaskSnapshot
       } else {
-        found.task.subtasks.push(subtask)
+        found.task.subtasks.push(subtaskSnapshot)
         found.task.subtasks.sort((a, b) => a.sortIndex - b.sortIndex)
       }
     }
     return snapshot
   })
   
-  const subtaskPayload = { id: resolvedSubtaskId, text, completed, sort_index: sortIndex }
-  
   if (isOnline() && !isTempId(resolvedTaskId)) {
     try {
-      await apiUpsertTaskSubtask(resolvedTaskId, subtaskPayload)
+      await apiUpsertTaskSubtask(resolvedTaskId, subtask)
     } catch {
-      queueOperation('createSubtask', { taskId: resolvedTaskId, subtaskId: resolvedSubtaskId, text, completed, sortIndex }, isNewSubtask ? subtaskId : undefined)
+      queueOperation('createSubtask', { 
+        taskId: resolvedTaskId, 
+        subtaskId: resolvedSubtaskId, 
+        text: subtask.text, 
+        completed: subtask.completed, 
+        sortIndex: subtask.sort_index 
+      }, isNewSubtask ? subtask.id : undefined)
     }
   } else {
-    queueOperation('createSubtask', { taskId: resolvedTaskId, subtaskId: resolvedSubtaskId, text, completed, sortIndex }, isNewSubtask ? subtaskId : undefined)
+    queueOperation('createSubtask', { 
+      taskId: resolvedTaskId, 
+      subtaskId: resolvedSubtaskId, 
+      text: subtask.text, 
+      completed: subtask.completed, 
+      sortIndex: subtask.sort_index 
+    }, isNewSubtask ? subtask.id : undefined)
   }
 }
 
@@ -541,8 +565,8 @@ registerOperationHandler('deleteTask', async (op: OfflineOperation) => {
 
 registerOperationHandler('moveTask', async (op: OfflineOperation) => {
   try {
-    const { taskId, fromBucketId, toBucketId } = op.payload as { taskId: string; fromBucketId: string; toBucketId: string }
-    await apiMoveTaskToBucket(taskId, fromBucketId, toBucketId)
+    const { taskId, fromBucketId, toBucketId, toIndex } = op.payload as { taskId: string; fromBucketId: string; toBucketId: string; toIndex?: number }
+    await apiMoveTaskToBucket(taskId, fromBucketId, toBucketId, toIndex)
     return { success: true }
   } catch (error) {
     return { success: false, error: error instanceof Error ? error.message : String(error) }
