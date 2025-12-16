@@ -178,6 +178,7 @@ const processOperation = async (operation: OfflineOperation): Promise<boolean> =
   const handler = operationHandlers.get(operation.type)
   if (!handler) {
     console.warn(`[offlineQueue] No handler registered for operation type: ${operation.type}`)
+    console.log('[offlineQueue] Registered handlers:', Array.from(operationHandlers.keys()))
     return false
   }
   
@@ -224,13 +225,16 @@ const processOperation = async (operation: OfflineOperation): Promise<boolean> =
  */
 export const processQueue = async (): Promise<void> => {
   if (!isOnline()) {
+    console.log('[offlineQueue] Skipping queue processing: offline')
     return
   }
   
   if (operationQueue.length === 0) {
+    console.log('[offlineQueue] Queue is empty, nothing to process')
     return
   }
   
+  console.log(`[offlineQueue] Processing ${operationQueue.length} pending operations...`)
   setSyncing(true)
   
   try {
@@ -241,14 +245,18 @@ export const processQueue = async (): Promise<void> => {
     for (const operation of queueCopy) {
       if (!isOnline()) {
         // Went offline during processing, stop
+        console.log('[offlineQueue] Went offline during processing, stopping')
         break
       }
       
-      await processOperation(operation)
+      console.log(`[offlineQueue] Processing operation: ${operation.type}`, operation.payload)
+      const success = await processOperation(operation)
+      console.log(`[offlineQueue] Operation ${operation.type} ${success ? 'succeeded' : 'failed'}`)
     }
   } finally {
     setSyncing(false)
     updatePendingCount()
+    console.log(`[offlineQueue] Queue processing complete. ${operationQueue.length} operations remaining.`)
   }
 }
 
@@ -287,4 +295,24 @@ if (typeof window !== 'undefined') {
       void processQueue()
     }, 1000)
   })
+  
+  // Also process queue on initial page load if online and have pending items
+  // Use a longer delay to ensure all operation handlers are registered
+  setTimeout(() => {
+    if (isOnline() && operationQueue.length > 0) {
+      console.log('[offlineQueue] Processing pending operations on page load')
+      void processQueue()
+    }
+  }, 2000)
+}
+
+/**
+ * Manually trigger queue processing (for retry button)
+ */
+export const retryPendingOperations = async (): Promise<void> => {
+  if (!isOnline()) {
+    console.warn('[offlineQueue] Cannot retry: currently offline')
+    return
+  }
+  await processQueue()
 }

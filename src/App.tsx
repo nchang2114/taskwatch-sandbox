@@ -18,6 +18,7 @@ import { ensureRepeatingRulesUser } from './lib/repeatingSessions'
 import { bootstrapGuestDataIfNeeded, clearAllLocalStorage, clearLastFullSyncTimestamp } from './lib/bootstrap'
 import { ensureGoalsUser } from './lib/goalsSync'
 import { initSyncStatusListeners, subscribeSyncStatus, type SyncStatusState } from './lib/syncStatus'
+import { retryPendingOperations } from './lib/offlineQueue'
 
 type Theme = 'light' | 'dark'
 type TabKey = 'goals' | 'focus' | 'reflection'
@@ -247,11 +248,11 @@ const deriveProfileFromSupabaseUser = (user: User | null | undefined, appTimezon
   }
 }
 
-const SYNC_STATUS_COPY: Record<SyncStatus, { icon: string; label: string | ((count: number) => string) }> = {
+const SYNC_STATUS_COPY: Record<SyncStatus, { icon: string; label: string | ((count: number) => string); canRetry?: boolean }> = {
   synced: { icon: '✓', label: 'Synced' },
   syncing: { icon: '⟳', label: 'Syncing…' },
   offline: { icon: '⚠', label: 'Offline — changes saved locally' },
-  pending: { icon: '⛁', label: (count: number) => `${count} change${count === 1 ? '' : 's'} pending sync` },
+  pending: { icon: '⛁', label: (count: number) => `${count} change${count === 1 ? '' : 's'} pending sync`, canRetry: true },
 }
 
 const createHelpIcon = (children: ReactNode): ReactNode => (
@@ -2502,12 +2503,32 @@ const nextThemeLabel = theme === 'dark' ? 'light' : 'dark'
         </div>
         <hr className="profile-menu__divider" />
         <div className="profile-menu__section profile-menu__section--links">
-          <div className={`profile-menu__link-status profile-menu__link-status--${syncStatus}`} role="status" aria-live="polite">
-            <span className="profile-menu__link-status-icon" aria-hidden="true">
-              {syncStatusCopy.icon}
-            </span>
-            <span>{syncStatusLabel}</span>
-          </div>
+          {syncStatusCopy.canRetry ? (
+            <button
+              type="button"
+              className={`profile-menu__link-status profile-menu__link-status--${syncStatus} profile-menu__link-status--clickable`}
+              role="status"
+              aria-live="polite"
+              onClick={() => {
+                console.log('[App] Manual retry triggered')
+                void retryPendingOperations()
+              }}
+              title="Click to retry sync"
+            >
+              <span className="profile-menu__link-status-icon" aria-hidden="true">
+                {syncStatusCopy.icon}
+              </span>
+              <span>{syncStatusLabel}</span>
+              <span className="profile-menu__link-status-retry" aria-hidden="true">↻</span>
+            </button>
+          ) : (
+            <div className={`profile-menu__link-status profile-menu__link-status--${syncStatus}`} role="status" aria-live="polite">
+              <span className="profile-menu__link-status-icon" aria-hidden="true">
+                {syncStatusCopy.icon}
+              </span>
+              <span>{syncStatusLabel}</span>
+            </div>
+          )}
         </div>
         <hr className="profile-menu__divider" />
         <div className="profile-menu__section profile-menu__section--links">
