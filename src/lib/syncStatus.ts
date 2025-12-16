@@ -13,6 +13,7 @@ export const SYNC_STATUS_CHANGE_EVENT = 'nc-taskwatch:sync-status-change'
 let currentOnlineState = true // Default to online, will be set properly in initSyncStatusListeners
 let isSyncing = false
 let initialized = false
+let inFlightCount = 0 // Track number of active API requests
 
 // Track pending counts from different sources
 const pendingCounts: Map<string, number> = new Map()
@@ -33,7 +34,7 @@ const calculateStatus = (): SyncStatusState => {
   if (!currentOnlineState) {
     return 'offline'
   }
-  if (isSyncing) {
+  if (isSyncing || inFlightCount > 0) {
     return 'syncing'
   }
   if (getTotalPendingCount() > 0) {
@@ -110,6 +111,34 @@ export const setSyncing = (syncing: boolean) => {
   isSyncing = syncing
   if (prev !== isSyncing) {
     dispatchStatusChange()
+  }
+}
+
+/**
+ * Track an in-flight API request starting
+ */
+export const startInFlightRequest = () => {
+  inFlightCount++
+  dispatchStatusChange()
+}
+
+/**
+ * Track an in-flight API request completing
+ */
+export const endInFlightRequest = () => {
+  inFlightCount = Math.max(0, inFlightCount - 1)
+  dispatchStatusChange()
+}
+
+/**
+ * Wrap an async operation to track its in-flight status
+ */
+export const trackRequest = async <T>(operation: () => Promise<T>): Promise<T> => {
+  startInFlightRequest()
+  try {
+    return await operation()
+  } finally {
+    endInFlightRequest()
   }
 }
 

@@ -9,7 +9,7 @@
  * This module provides the same API surface as goalsApi but with offline support.
  */
 
-import { isOnline } from './syncStatus'
+import { isOnline, trackRequest } from './syncStatus'
 import {
   queueOperation,
   registerOperationHandler,
@@ -150,7 +150,7 @@ export async function createTask(
   // If online, sync immediately
   if (isOnline()) {
     try {
-      const result = await apiCreateTask(bucketId, text, { clientId: taskId, insertAtTop })
+      const result = await trackRequest(() => apiCreateTask(bucketId, text, { clientId: taskId, insertAtTop }))
       return result
     } catch (error) {
       // Queue for retry
@@ -181,7 +181,7 @@ export async function updateTaskText(taskId: string, text: string): Promise<void
   
   if (isOnline() && !isTempId(resolvedTaskId)) {
     try {
-      await apiUpdateTaskText(resolvedTaskId, text)
+      await trackRequest(() => apiUpdateTaskText(resolvedTaskId, text))
     } catch {
       queueOperation('updateTaskText', { taskId: resolvedTaskId, text })
     }
@@ -229,7 +229,7 @@ export async function setTaskCompletedAndResort(
   
   if (isOnline() && !isTempId(resolvedTaskId)) {
     try {
-      return await apiSetTaskCompletedAndResort(resolvedTaskId, resolvedBucketId, completed)
+      return await trackRequest(() => apiSetTaskCompletedAndResort(resolvedTaskId, resolvedBucketId, completed))
     } catch {
       queueOperation('updateTaskCompleted', { taskId: resolvedTaskId, bucketId: resolvedBucketId, completed })
       return null
@@ -263,7 +263,7 @@ export async function setTaskPriorityAndResort(
   
   if (isOnline() && !isTempId(resolvedTaskId)) {
     try {
-      await apiSetTaskPriorityAndResort(resolvedTaskId, resolvedBucketId, completed, priority)
+      await trackRequest(() => apiSetTaskPriorityAndResort(resolvedTaskId, resolvedBucketId, completed, priority))
     } catch {
       queueOperation('updateTaskPriority', { taskId: resolvedTaskId, bucketId: resolvedBucketId, completed, priority })
     }
@@ -292,7 +292,7 @@ export async function setTaskDifficulty(
   
   if (isOnline() && !isTempId(resolvedTaskId)) {
     try {
-      await apiSetTaskDifficulty(resolvedTaskId, difficulty)
+      await trackRequest(() => apiSetTaskDifficulty(resolvedTaskId, difficulty))
     } catch {
       queueOperation('updateTaskDifficulty', { taskId: resolvedTaskId, difficulty })
     }
@@ -318,7 +318,7 @@ export async function updateTaskNotes(taskId: string, notes: string): Promise<vo
   
   if (isOnline() && !isTempId(resolvedTaskId)) {
     try {
-      await apiUpdateTaskNotes(resolvedTaskId, notes)
+      await trackRequest(() => apiUpdateTaskNotes(resolvedTaskId, notes))
     } catch {
       queueOperation('updateTaskNotes', { taskId: resolvedTaskId, notes })
     }
@@ -350,7 +350,7 @@ export async function deleteTask(taskId: string, bucketId: string): Promise<void
   
   if (isOnline()) {
     try {
-      await apiDeleteTask(resolvedTaskId, resolvedBucketId)
+      await trackRequest(() => apiDeleteTask(resolvedTaskId, resolvedBucketId))
     } catch {
       queueOperation('deleteTask', { taskId: resolvedTaskId, bucketId: resolvedBucketId })
     }
@@ -392,7 +392,7 @@ export async function moveTaskToBucket(
   
   if (isOnline() && !isTempId(resolvedTaskId)) {
     try {
-      await apiMoveTaskToBucket(resolvedTaskId, resolvedFromBucketId, resolvedToBucketId, toIndex)
+      await trackRequest(() => apiMoveTaskToBucket(resolvedTaskId, resolvedFromBucketId, resolvedToBucketId, toIndex))
     } catch {
       queueOperation('moveTask', { taskId: resolvedTaskId, fromBucketId: resolvedFromBucketId, toBucketId: resolvedToBucketId, toIndex })
     }
@@ -436,7 +436,7 @@ export async function upsertTaskSubtask(
   
   if (isOnline() && !isTempId(resolvedTaskId)) {
     try {
-      await apiUpsertTaskSubtask(resolvedTaskId, subtask)
+      await trackRequest(() => apiUpsertTaskSubtask(resolvedTaskId, subtask))
     } catch {
       queueOperation('createSubtask', { 
         taskId: resolvedTaskId, 
@@ -480,7 +480,7 @@ export async function deleteTaskSubtask(taskId: string, subtaskId: string): Prom
   
   if (isOnline() && !isTempId(resolvedTaskId)) {
     try {
-      await apiDeleteTaskSubtask(resolvedTaskId, resolvedSubtaskId)
+      await trackRequest(() => apiDeleteTaskSubtask(resolvedTaskId, resolvedSubtaskId))
     } catch {
       queueOperation('deleteSubtask', { taskId: resolvedTaskId, subtaskId: resolvedSubtaskId })
     }
