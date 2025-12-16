@@ -37,12 +37,41 @@ import {
   moveTaskToBucket as apiMoveTaskToBucket,
   upsertTaskSubtask as apiUpsertTaskSubtask,
   deleteTaskSubtask as apiDeleteTaskSubtask,
+  // Goal operations
+  createGoal as apiCreateGoal,
+  renameGoal as apiRenameGoal,
+  setGoalColor as apiSetGoalColor,
+  setGoalSurface as apiSetGoalSurface,
+  setGoalStarred as apiSetGoalStarred,
+  setGoalArchived as apiSetGoalArchived,
+  deleteGoalById as apiDeleteGoalById,
+  // Bucket operations
+  createBucket as apiCreateBucket,
+  renameBucket as apiRenameBucket,
+  setBucketSurface as apiSetBucketSurface,
+  setBucketFavorite as apiSetBucketFavorite,
+  setBucketArchived as apiSetBucketArchived,
+  deleteBucketById as apiDeleteBucketById,
   type DbTask,
 } from './goalsApi'
 
 // ============================================================================
 // Helper functions for updating local snapshot
 // ============================================================================
+
+/**
+ * Find a goal in the goals snapshot
+ */
+const findGoalInSnapshot = (
+  snapshot: GoalSnapshot[],
+  goalId: string
+): { goal: GoalSnapshot; goalIndex: number } | null => {
+  const goalIndex = snapshot.findIndex(g => g.id === goalId)
+  if (goalIndex !== -1) {
+    return { goal: snapshot[goalIndex], goalIndex }
+  }
+  return null
+}
 
 /**
  * Find a task in the goals snapshot
@@ -490,6 +519,403 @@ export async function deleteTaskSubtask(taskId: string, subtaskId: string): Prom
 }
 
 // ============================================================================
+// Goal operations (offline-aware)
+// ============================================================================
+
+/**
+ * Create a new goal
+ */
+export async function createGoal(
+  name: string,
+  color: string
+): Promise<{ id: string; name: string; goal_colour: string; sort_index: number; card_surface?: string | null; starred: boolean; goal_archive?: boolean; milestones_shown?: boolean } | null> {
+  const goalId = generateTempId()
+  
+  // Optimistically update local state
+  updateLocalSnapshot((snapshot) => {
+    const newGoal: GoalSnapshot = {
+      id: goalId,
+      name,
+      goalColour: color,
+      surfaceStyle: 'glass',
+      starred: false,
+      archived: false,
+      buckets: [],
+    }
+    snapshot.push(newGoal)
+    return snapshot
+  })
+  
+  if (isOnline()) {
+    try {
+      const result = await trackRequest(() => apiCreateGoal(name, color))
+      if (result) {
+        // Update local state with real ID
+        updateLocalSnapshot((snapshot) => {
+          const found = findGoalInSnapshot(snapshot, goalId)
+          if (found) {
+            found.goal.id = result.id
+          }
+          return snapshot
+        })
+        return result
+      }
+      return null
+    } catch {
+      queueOperation('createGoal', { name, color, goalId }, goalId)
+      return { id: goalId, name, goal_colour: color, sort_index: 0, starred: false, goal_archive: false }
+    }
+  } else {
+    queueOperation('createGoal', { name, color, goalId }, goalId)
+    return { id: goalId, name, goal_colour: color, sort_index: 0, starred: false, goal_archive: false }
+  }
+}
+
+/**
+ * Rename a goal
+ */
+export async function renameGoal(goalId: string, name: string): Promise<void> {
+  const resolvedGoalId = resolveId(goalId)
+  
+  updateLocalSnapshot((snapshot) => {
+    const found = findGoalInSnapshot(snapshot, goalId)
+    if (found) {
+      found.goal.name = name
+    }
+    return snapshot
+  })
+  
+  if (isOnline() && !isTempId(resolvedGoalId)) {
+    try {
+      await trackRequest(() => apiRenameGoal(resolvedGoalId, name))
+    } catch {
+      queueOperation('updateGoal', { goalId: resolvedGoalId, name })
+    }
+  } else {
+    queueOperation('updateGoal', { goalId: resolvedGoalId, name })
+  }
+}
+
+/**
+ * Set goal color
+ */
+export async function setGoalColor(goalId: string, color: string): Promise<void> {
+  const resolvedGoalId = resolveId(goalId)
+  
+  updateLocalSnapshot((snapshot) => {
+    const found = findGoalInSnapshot(snapshot, goalId)
+    if (found) {
+      found.goal.goalColour = color
+    }
+    return snapshot
+  })
+  
+  if (isOnline() && !isTempId(resolvedGoalId)) {
+    try {
+      await trackRequest(() => apiSetGoalColor(resolvedGoalId, color))
+    } catch {
+      queueOperation('updateGoalColor', { goalId: resolvedGoalId, color })
+    }
+  } else {
+    queueOperation('updateGoalColor', { goalId: resolvedGoalId, color })
+  }
+}
+
+/**
+ * Set goal surface
+ */
+export async function setGoalSurface(goalId: string, surface: string | null): Promise<void> {
+  const resolvedGoalId = resolveId(goalId)
+  
+  updateLocalSnapshot((snapshot) => {
+    const found = findGoalInSnapshot(snapshot, goalId)
+    if (found) {
+      found.goal.surfaceStyle = (surface ?? 'glass') as GoalSnapshot['surfaceStyle']
+    }
+    return snapshot
+  })
+  
+  if (isOnline() && !isTempId(resolvedGoalId)) {
+    try {
+      await trackRequest(() => apiSetGoalSurface(resolvedGoalId, surface))
+    } catch {
+      queueOperation('updateGoalSurface', { goalId: resolvedGoalId, surface })
+    }
+  } else {
+    queueOperation('updateGoalSurface', { goalId: resolvedGoalId, surface })
+  }
+}
+
+/**
+ * Set goal starred
+ */
+export async function setGoalStarred(goalId: string, starred: boolean): Promise<void> {
+  const resolvedGoalId = resolveId(goalId)
+  
+  updateLocalSnapshot((snapshot) => {
+    const found = findGoalInSnapshot(snapshot, goalId)
+    if (found) {
+      found.goal.starred = starred
+    }
+    return snapshot
+  })
+  
+  if (isOnline() && !isTempId(resolvedGoalId)) {
+    try {
+      await trackRequest(() => apiSetGoalStarred(resolvedGoalId, starred))
+    } catch {
+      queueOperation('updateGoalStarred', { goalId: resolvedGoalId, starred })
+    }
+  } else {
+    queueOperation('updateGoalStarred', { goalId: resolvedGoalId, starred })
+  }
+}
+
+/**
+ * Set goal archived
+ */
+export async function setGoalArchived(goalId: string, archived: boolean): Promise<void> {
+  const resolvedGoalId = resolveId(goalId)
+  
+  updateLocalSnapshot((snapshot) => {
+    const found = findGoalInSnapshot(snapshot, goalId)
+    if (found) {
+      found.goal.archived = archived
+    }
+    return snapshot
+  })
+  
+  if (isOnline() && !isTempId(resolvedGoalId)) {
+    try {
+      await trackRequest(() => apiSetGoalArchived(resolvedGoalId, archived))
+    } catch {
+      queueOperation('updateGoalArchived', { goalId: resolvedGoalId, archived })
+    }
+  } else {
+    queueOperation('updateGoalArchived', { goalId: resolvedGoalId, archived })
+  }
+}
+
+/**
+ * Delete a goal
+ */
+export async function deleteGoalById(goalId: string): Promise<void> {
+  const resolvedGoalId = resolveId(goalId)
+  
+  updateLocalSnapshot((snapshot) => {
+    return snapshot.filter(g => g.id !== goalId)
+  })
+  
+  // Don't queue deletes for temp IDs - they were never synced
+  if (isTempId(goalId)) {
+    return
+  }
+  
+  if (isOnline()) {
+    try {
+      await trackRequest(() => apiDeleteGoalById(resolvedGoalId))
+    } catch {
+      queueOperation('deleteGoal', { goalId: resolvedGoalId })
+    }
+  } else {
+    queueOperation('deleteGoal', { goalId: resolvedGoalId })
+  }
+}
+
+// ============================================================================
+// Bucket operations (offline-aware)
+// ============================================================================
+
+/**
+ * Create a new bucket
+ */
+export async function createBucket(
+  goalId: string,
+  name: string,
+  surface: string = 'glass'
+): Promise<{ id: string; name: string; favorite: boolean; bucket_archive?: boolean; sort_index: number } | null> {
+  const resolvedGoalId = resolveId(goalId)
+  const bucketId = generateTempId()
+  
+  // Optimistically update local state
+  updateLocalSnapshot((snapshot) => {
+    const found = findGoalInSnapshot(snapshot, goalId)
+    if (found) {
+      const newBucket: GoalBucketSnapshot = {
+        id: bucketId,
+        name,
+        favorite: false,
+        archived: false,
+        surfaceStyle: surface as GoalBucketSnapshot['surfaceStyle'],
+        tasks: [],
+      }
+      found.goal.buckets.push(newBucket)
+    }
+    return snapshot
+  })
+  
+  if (isOnline() && !isTempId(resolvedGoalId)) {
+    try {
+      const result = await trackRequest(() => apiCreateBucket(resolvedGoalId, name, surface))
+      if (result) {
+        // Update local state with real ID
+        updateLocalSnapshot((snapshot) => {
+          const goalFound = findGoalInSnapshot(snapshot, goalId)
+          if (goalFound) {
+            const bucketIndex = goalFound.goal.buckets.findIndex(b => b.id === bucketId)
+            if (bucketIndex !== -1) {
+              goalFound.goal.buckets[bucketIndex].id = result.id
+            }
+          }
+          return snapshot
+        })
+        return result
+      }
+      return null
+    } catch {
+      queueOperation('createBucket', { goalId: resolvedGoalId, name, surface, bucketId }, bucketId)
+      return { id: bucketId, name, favorite: false, sort_index: 0 }
+    }
+  } else {
+    queueOperation('createBucket', { goalId: resolvedGoalId, name, surface, bucketId }, bucketId)
+    return { id: bucketId, name, favorite: false, sort_index: 0 }
+  }
+}
+
+/**
+ * Rename a bucket
+ */
+export async function renameBucket(bucketId: string, name: string): Promise<void> {
+  const resolvedBucketId = resolveId(bucketId)
+  
+  updateLocalSnapshot((snapshot) => {
+    const found = findBucketInSnapshot(snapshot, bucketId)
+    if (found) {
+      found.bucket.name = name
+    }
+    return snapshot
+  })
+  
+  if (isOnline() && !isTempId(resolvedBucketId)) {
+    try {
+      await trackRequest(() => apiRenameBucket(resolvedBucketId, name))
+    } catch {
+      queueOperation('updateBucket', { bucketId: resolvedBucketId, name })
+    }
+  } else {
+    queueOperation('updateBucket', { bucketId: resolvedBucketId, name })
+  }
+}
+
+/**
+ * Set bucket surface style
+ */
+export async function setBucketSurface(bucketId: string, surface: string | null): Promise<void> {
+  const resolvedBucketId = resolveId(bucketId)
+  
+  updateLocalSnapshot((snapshot) => {
+    const found = findBucketInSnapshot(snapshot, bucketId)
+    if (found) {
+      found.bucket.surfaceStyle = (surface ?? 'glass') as GoalBucketSnapshot['surfaceStyle']
+    }
+    return snapshot
+  })
+  
+  if (isOnline() && !isTempId(resolvedBucketId)) {
+    try {
+      await trackRequest(() => apiSetBucketSurface(resolvedBucketId, surface))
+    } catch {
+      queueOperation('updateBucketSurface', { bucketId: resolvedBucketId, surface })
+    }
+  } else {
+    queueOperation('updateBucketSurface', { bucketId: resolvedBucketId, surface })
+  }
+}
+
+/**
+ * Set bucket favorite
+ */
+export async function setBucketFavorite(bucketId: string, favorite: boolean): Promise<void> {
+  const resolvedBucketId = resolveId(bucketId)
+  
+  updateLocalSnapshot((snapshot) => {
+    const found = findBucketInSnapshot(snapshot, bucketId)
+    if (found) {
+      found.bucket.favorite = favorite
+    }
+    return snapshot
+  })
+  
+  if (isOnline() && !isTempId(resolvedBucketId)) {
+    try {
+      await trackRequest(() => apiSetBucketFavorite(resolvedBucketId, favorite))
+    } catch {
+      queueOperation('updateBucketFavorite', { bucketId: resolvedBucketId, favorite })
+    }
+  } else {
+    queueOperation('updateBucketFavorite', { bucketId: resolvedBucketId, favorite })
+  }
+}
+
+/**
+ * Set bucket archived
+ */
+export async function setBucketArchived(bucketId: string, archived: boolean): Promise<void> {
+  const resolvedBucketId = resolveId(bucketId)
+  
+  updateLocalSnapshot((snapshot) => {
+    const found = findBucketInSnapshot(snapshot, bucketId)
+    if (found) {
+      found.bucket.archived = archived
+    }
+    return snapshot
+  })
+  
+  if (isOnline() && !isTempId(resolvedBucketId)) {
+    try {
+      await trackRequest(() => apiSetBucketArchived(resolvedBucketId, archived))
+    } catch {
+      queueOperation('updateBucketArchived', { bucketId: resolvedBucketId, archived })
+    }
+  } else {
+    queueOperation('updateBucketArchived', { bucketId: resolvedBucketId, archived })
+  }
+}
+
+/**
+ * Delete a bucket
+ */
+export async function deleteBucketById(bucketId: string): Promise<void> {
+  const resolvedBucketId = resolveId(bucketId)
+  
+  updateLocalSnapshot((snapshot) => {
+    for (const goal of snapshot) {
+      const bucketIndex = goal.buckets.findIndex(b => b.id === bucketId)
+      if (bucketIndex !== -1) {
+        goal.buckets.splice(bucketIndex, 1)
+        break
+      }
+    }
+    return snapshot
+  })
+  
+  // Don't queue deletes for temp IDs
+  if (isTempId(bucketId)) {
+    return
+  }
+  
+  if (isOnline()) {
+    try {
+      await trackRequest(() => apiDeleteBucketById(resolvedBucketId))
+    } catch {
+      queueOperation('deleteBucket', { bucketId: resolvedBucketId })
+    }
+  } else {
+    queueOperation('deleteBucket', { bucketId: resolvedBucketId })
+  }
+}
+
+// ============================================================================
 // Register operation handlers for replay
 // ============================================================================
 
@@ -587,6 +1013,144 @@ registerOperationHandler('deleteSubtask', async (op: OfflineOperation) => {
   try {
     const { taskId, subtaskId } = op.payload as { taskId: string; subtaskId: string }
     await apiDeleteTaskSubtask(taskId, subtaskId)
+    return { success: true }
+  } catch (error) {
+    return { success: false, error: error instanceof Error ? error.message : String(error) }
+  }
+})
+
+// ============================================================================
+// Goal operation handlers
+// ============================================================================
+
+registerOperationHandler('createGoal', async (op: OfflineOperation) => {
+  try {
+    const { name, color, goalId: _goalId } = op.payload as { name: string; color: string; goalId: string }
+    const result = await apiCreateGoal(name, color)
+    return { success: true, resolvedId: result?.id }
+  } catch (error) {
+    return { success: false, error: error instanceof Error ? error.message : String(error) }
+  }
+})
+
+registerOperationHandler('updateGoal', async (op: OfflineOperation) => {
+  try {
+    const { goalId, name } = op.payload as { goalId: string; name: string }
+    await apiRenameGoal(goalId, name)
+    return { success: true }
+  } catch (error) {
+    return { success: false, error: error instanceof Error ? error.message : String(error) }
+  }
+})
+
+registerOperationHandler('updateGoalColor', async (op: OfflineOperation) => {
+  try {
+    const { goalId, color } = op.payload as { goalId: string; color: string }
+    await apiSetGoalColor(goalId, color)
+    return { success: true }
+  } catch (error) {
+    return { success: false, error: error instanceof Error ? error.message : String(error) }
+  }
+})
+
+registerOperationHandler('updateGoalSurface', async (op: OfflineOperation) => {
+  try {
+    const { goalId, surface } = op.payload as { goalId: string; surface: string | null }
+    await apiSetGoalSurface(goalId, surface)
+    return { success: true }
+  } catch (error) {
+    return { success: false, error: error instanceof Error ? error.message : String(error) }
+  }
+})
+
+registerOperationHandler('updateGoalStarred', async (op: OfflineOperation) => {
+  try {
+    const { goalId, starred } = op.payload as { goalId: string; starred: boolean }
+    await apiSetGoalStarred(goalId, starred)
+    return { success: true }
+  } catch (error) {
+    return { success: false, error: error instanceof Error ? error.message : String(error) }
+  }
+})
+
+registerOperationHandler('updateGoalArchived', async (op: OfflineOperation) => {
+  try {
+    const { goalId, archived } = op.payload as { goalId: string; archived: boolean }
+    await apiSetGoalArchived(goalId, archived)
+    return { success: true }
+  } catch (error) {
+    return { success: false, error: error instanceof Error ? error.message : String(error) }
+  }
+})
+
+registerOperationHandler('deleteGoal', async (op: OfflineOperation) => {
+  try {
+    const { goalId } = op.payload as { goalId: string }
+    await apiDeleteGoalById(goalId)
+    return { success: true }
+  } catch (error) {
+    return { success: false, error: error instanceof Error ? error.message : String(error) }
+  }
+})
+
+// ============================================================================
+// Bucket operation handlers
+// ============================================================================
+
+registerOperationHandler('createBucket', async (op: OfflineOperation) => {
+  try {
+    const { goalId, name, surface, bucketId: _bucketId } = op.payload as { goalId: string; name: string; surface: string; bucketId: string }
+    const result = await apiCreateBucket(goalId, name, surface)
+    return { success: true, resolvedId: result?.id }
+  } catch (error) {
+    return { success: false, error: error instanceof Error ? error.message : String(error) }
+  }
+})
+
+registerOperationHandler('updateBucket', async (op: OfflineOperation) => {
+  try {
+    const { bucketId, name } = op.payload as { bucketId: string; name: string }
+    await apiRenameBucket(bucketId, name)
+    return { success: true }
+  } catch (error) {
+    return { success: false, error: error instanceof Error ? error.message : String(error) }
+  }
+})
+
+registerOperationHandler('updateBucketSurface', async (op: OfflineOperation) => {
+  try {
+    const { bucketId, surface } = op.payload as { bucketId: string; surface: string | null }
+    await apiSetBucketSurface(bucketId, surface)
+    return { success: true }
+  } catch (error) {
+    return { success: false, error: error instanceof Error ? error.message : String(error) }
+  }
+})
+
+registerOperationHandler('updateBucketFavorite', async (op: OfflineOperation) => {
+  try {
+    const { bucketId, favorite } = op.payload as { bucketId: string; favorite: boolean }
+    await apiSetBucketFavorite(bucketId, favorite)
+    return { success: true }
+  } catch (error) {
+    return { success: false, error: error instanceof Error ? error.message : String(error) }
+  }
+})
+
+registerOperationHandler('updateBucketArchived', async (op: OfflineOperation) => {
+  try {
+    const { bucketId, archived } = op.payload as { bucketId: string; archived: boolean }
+    await apiSetBucketArchived(bucketId, archived)
+    return { success: true }
+  } catch (error) {
+    return { success: false, error: error instanceof Error ? error.message : String(error) }
+  }
+})
+
+registerOperationHandler('deleteBucket', async (op: OfflineOperation) => {
+  try {
+    const { bucketId } = op.payload as { bucketId: string }
+    await apiDeleteBucketById(bucketId)
     return { success: true }
   } catch (error) {
     return { success: false, error: error instanceof Error ? error.message : String(error) }

@@ -3,20 +3,6 @@ import { createPortal, flushSync } from 'react-dom'
 import './GoalsPage.css'
 import {
   fetchGoalsHierarchy,
-  createGoal as apiCreateGoal,
-  renameGoal as apiRenameGoal,
-  deleteGoalById as apiDeleteGoalById,
-  createBucket as apiCreateBucket,
-  renameBucket as apiRenameBucket,
-  setBucketFavorite as apiSetBucketFavorite,
-  setBucketSurface as apiSetBucketSurface,
-  setBucketArchived as apiSetBucketArchived,
-  setGoalColor as apiSetGoalColor,
-  setGoalSurface as apiSetGoalSurface,
-  setGoalStarred as apiSetGoalStarred,
-  setGoalArchived as apiSetGoalArchived,
-  deleteBucketById as apiDeleteBucketById,
-  deleteCompletedTasksInBucket as apiDeleteCompletedTasksInBucket,
   setTaskSortIndex as apiSetTaskSortIndex,
   setBucketSortIndex as apiSetBucketSortIndex,
   setGoalSortIndex as apiSetGoalSortIndex,
@@ -29,8 +15,9 @@ import {
   setGoalMilestonesShown as apiSetGoalMilestonesShown,
   sortBucketTasksByDate as apiSortBucketTasksByDate,
   sortBucketTasksByPriority as apiSortBucketTasksByPriority,
+  deleteCompletedTasksInBucket as apiDeleteCompletedTasksInBucket,
 } from '../lib/goalsApi'
-// Offline-aware task operations
+// Offline-aware operations (goals, buckets, and tasks)
 import {
   createTask as apiCreateTask,
   updateTaskText as apiUpdateTaskText,
@@ -42,6 +29,21 @@ import {
   moveTaskToBucket as apiMoveTaskToBucket,
   upsertTaskSubtask as apiUpsertTaskSubtask,
   deleteTaskSubtask as apiDeleteTaskSubtask,
+  // Goal operations
+  createGoal as apiCreateGoal,
+  renameGoal as apiRenameGoal,
+  setGoalColor as apiSetGoalColor,
+  setGoalSurface as apiSetGoalSurface,
+  setGoalStarred as apiSetGoalStarred,
+  setGoalArchived as apiSetGoalArchived,
+  deleteGoalById as apiDeleteGoalById,
+  // Bucket operations
+  createBucket as apiCreateBucket,
+  renameBucket as apiRenameBucket,
+  setBucketSurface as apiSetBucketSurface,
+  setBucketFavorite as apiSetBucketFavorite,
+  setBucketArchived as apiSetBucketArchived,
+  deleteBucketById as apiDeleteBucketById,
 } from '../lib/goalsApiOffline'
 import {
   DEFAULT_SURFACE_STYLE,
@@ -9206,7 +9208,8 @@ export default function GoalsPage(): ReactElement {
     apiCreateGoal(trimmed, gradientForGoal)
       .then((db) => {
         const id = db?.id ?? `g_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`
-        const surfaceStyle = normalizeSurfaceStyle((db?.card_surface as string | null | undefined) ?? 'glass')
+        const dbAny = db as { card_surface?: string | null } | null
+        const surfaceStyle = normalizeSurfaceStyle((dbAny?.card_surface as string | null | undefined) ?? 'glass')
         const newGoal: Goal = { id, name: trimmed, goalColour: gradientForGoal, surfaceStyle, starred: false, archived: false, buckets: [] }
         setGoals((current) => [newGoal, ...current])
         setExpanded((current) => ({ ...current, [id]: true }))

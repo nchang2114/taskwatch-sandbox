@@ -21,9 +21,16 @@ export type OfflineOperationType =
   | 'deleteSubtask'
   | 'createBucket'
   | 'updateBucket'
+  | 'updateBucketSurface'
+  | 'updateBucketFavorite'
+  | 'updateBucketArchived'
   | 'deleteBucket'
   | 'createGoal'
   | 'updateGoal'
+  | 'updateGoalColor'
+  | 'updateGoalSurface'
+  | 'updateGoalStarred'
+  | 'updateGoalArchived'
   | 'deleteGoal'
 
 export type OfflineOperation = {
@@ -221,6 +228,53 @@ const processOperation = async (operation: OfflineOperation): Promise<boolean> =
 }
 
 /**
+ * Get operation priority for dependency ordering
+ * Lower number = higher priority (process first)
+ */
+const getOperationPriority = (type: OfflineOperationType): number => {
+  // Goals must be created before buckets, buckets before tasks
+  switch (type) {
+    case 'createGoal':
+      return 0
+    case 'updateGoal':
+    case 'updateGoalColor':
+    case 'updateGoalSurface':
+    case 'updateGoalStarred':
+    case 'updateGoalArchived':
+      return 1
+    case 'createBucket':
+      return 2
+    case 'updateBucket':
+    case 'updateBucketSurface':
+    case 'updateBucketFavorite':
+    case 'updateBucketArchived':
+      return 3
+    case 'createTask':
+      return 4
+    case 'updateTaskText':
+    case 'updateTaskCompleted':
+    case 'updateTaskPriority':
+    case 'updateTaskDifficulty':
+    case 'updateTaskNotes':
+    case 'moveTask':
+      return 5
+    case 'createSubtask':
+    case 'updateSubtask':
+      return 6
+    case 'deleteSubtask':
+      return 7
+    case 'deleteTask':
+      return 8
+    case 'deleteBucket':
+      return 9
+    case 'deleteGoal':
+      return 10
+    default:
+      return 5
+  }
+}
+
+/**
  * Process all queued operations in order
  */
 export const processQueue = async (): Promise<void> => {
@@ -238,11 +292,17 @@ export const processQueue = async (): Promise<void> => {
   setSyncing(true)
   
   try {
-    // Process operations in order (FIFO)
-    // Make a copy since we'll be modifying the queue
-    const queueCopy = [...operationQueue]
+    // Sort operations by dependency order (goals first, then buckets, then tasks)
+    // Also maintain timestamp order within each priority level
+    const sortedQueue = [...operationQueue].sort((a, b) => {
+      const priorityDiff = getOperationPriority(a.type) - getOperationPriority(b.type)
+      if (priorityDiff !== 0) return priorityDiff
+      return a.timestamp - b.timestamp
+    })
     
-    for (const operation of queueCopy) {
+    console.log('[offlineQueue] Processing order:', sortedQueue.map(op => `${op.type}(${op.tempId || 'no-temp-id'})`))
+    
+    for (const operation of sortedQueue) {
       if (!isOnline()) {
         // Went offline during processing, stop
         console.log('[offlineQueue] Went offline during processing, stopping')
