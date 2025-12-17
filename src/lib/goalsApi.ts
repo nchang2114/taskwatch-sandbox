@@ -557,7 +557,11 @@ async function updateTaskWithGuard(
 }
 
 // ---------- Goals ----------
-export async function createGoal(name: string, color: string) {
+export async function createGoal(
+  name: string,
+  color: string,
+  options?: { id?: string }
+) {
   if (!supabase) return null
   const session = await ensureSingleUserSession()
   if (!session?.user?.id) {
@@ -566,6 +570,7 @@ export async function createGoal(name: string, color: string) {
   const sort_index = await nextSortIndex('goals')
   const safeColour = normalizeGoalColour(color, FALLBACK_GOAL_COLOR)
   const payload = {
+    ...(options?.id ? { id: options.id } : null),
     user_id: session.user.id,
     name,
     goal_colour: safeColour,
@@ -715,7 +720,12 @@ export async function setGoalSortIndex(goalId: string, toIndex: number) {
 }
 
 // ---------- Buckets ----------
-export async function createBucket(goalId: string, name: string, surface: string = 'glass') {
+export async function createBucket(
+  goalId: string,
+  name: string,
+  surface: string = 'glass',
+  options?: { id?: string }
+) {
   if (!supabase) return null
   const client = supabase
   const session = await ensureSingleUserSession()
@@ -725,6 +735,7 @@ export async function createBucket(goalId: string, name: string, surface: string
   const normalizedSurface = sanitizeBucketSurfaceStyle(surface) ?? DEFAULT_SURFACE_STYLE
   const sort_index = await nextSortIndex('buckets', { goal_id: goalId })
   const payload = {
+    ...(options?.id ? { id: options.id } : null),
     user_id: session.user.id,
     goal_id: goalId,
     name,

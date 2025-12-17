@@ -1,8 +1,8 @@
 /**
- * Offline Operation Queue
+ * Offline Operation Queue (Simplified)
  * 
- * Queues operations that failed due to being offline and replays them when back online.
- * Each operation is stored with enough context to replay it.
+ * Queues operations when offline and replays them when back online.
+ * Uses real UUIDs for all entities - no temp ID mapping needed.
  */
 
 import { isOnline, onBackOnline, setPendingCountForSource, setSyncing } from './syncStatus'
@@ -38,10 +38,6 @@ export type OfflineOperation = {
   type: OfflineOperationType
   timestamp: number
   payload: Record<string, unknown>
-  // For optimistic updates, we need to know the temp ID used locally
-  tempId?: string
-  // The actual ID after syncing (for mapping temp IDs to real IDs)
-  resolvedId?: string
   // Number of retry attempts
   retries: number
   // Last error message if failed
@@ -54,27 +50,8 @@ const MAX_RETRIES = 3
 // In-memory queue for faster access
 let operationQueue: OfflineOperation[] = []
 
-// Handlers registered by goalsApi to replay operations
-const operationHandlers: Map<OfflineOperationType, (op: OfflineOperation) => Promise<{ success: boolean; resolvedId?: string; error?: string }>> = new Map()
-
-/**
- * Generate a temporary ID for optimistic updates
- */
-export const generateTempId = (): string => {
-  return `temp-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
-}
-
-/**
- * Check if an ID is a temporary/local ID (not yet synced to server)
- * Supports multiple formats:
- * - `temp-` (queue generated)
- * - `temp_` (UI optimistic tasks)
- * - `g_` (UI optimistic goals)
- * - `b_` (UI optimistic buckets)
- */
-export const isTempId = (id: string): boolean => {
-  return id.startsWith('temp-') || id.startsWith('temp_') || id.startsWith('g_') || id.startsWith('b_')
-}
+// Handlers registered by goalsApiOffline to replay operations
+const operationHandlers: Map<OfflineOperationType, (op: OfflineOperation) => Promise<{ success: boolean; error?: string }>> = new Map()
 
 /**
  * Read queue from localStorage
@@ -115,7 +92,6 @@ export const initOfflineQueue = (): void => {
 export const clearOfflineQueue = (): void => {
   operationQueue = []
   writeQueue([])
-  tempIdMap.clear()
   updatePendingCount()
   console.log('[offlineQueue] Queue cleared')
 }
@@ -123,10 +99,9 @@ export const clearOfflineQueue = (): void => {
 /**
  * Get current queue state for debugging
  */
-export const getQueueState = (): { operations: OfflineOperation[]; tempIdMap: Record<string, string> } => {
+export const getQueueState = (): { operations: OfflineOperation[] } => {
   return {
     operations: [...operationQueue],
-    tempIdMap: Object.fromEntries(tempIdMap),
   }
 }
 
@@ -142,15 +117,13 @@ const updatePendingCount = (): void => {
  */
 export const queueOperation = (
   type: OfflineOperationType,
-  payload: Record<string, unknown>,
-  tempId?: string
+  payload: Record<string, unknown>
 ): OfflineOperation => {
   const operation: OfflineOperation = {
     id: `op-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
     type,
     timestamp: Date.now(),
     payload,
-    tempId,
     retries: 0,
   }
   
@@ -186,22 +159,9 @@ const updateOperation = (operationId: string, updates: Partial<OfflineOperation>
  */
 export const registerOperationHandler = (
   type: OfflineOperationType,
-  handler: (op: OfflineOperation) => Promise<{ success: boolean; resolvedId?: string; error?: string }>
+  handler: (op: OfflineOperation) => Promise<{ success: boolean; error?: string }>
 ): void => {
   operationHandlers.set(type, handler)
-}
-
-/**
- * Map of temp IDs to resolved IDs (populated during sync)
- */
-const tempIdMap: Map<string, string> = new Map()
-
-/**
- * Get resolved ID for a temp ID (or return original if not temp)
- */
-export const resolveId = (id: string): string => {
-  if (!isTempId(id)) return id
-  return tempIdMap.get(id) ?? id
 }
 
 /**
@@ -216,35 +176,9 @@ const processOperation = async (operation: OfflineOperation): Promise<boolean> =
   }
   
   try {
-    // Resolve any temp IDs in the payload before processing
-    const resolvedPayload = { ...operation.payload }
-    let hasUnresolvedTempIds = false
-    
-    for (const [key, value] of Object.entries(resolvedPayload)) {
-      if (typeof value === 'string' && isTempId(value)) {
-        const resolved = resolveId(value)
-        resolvedPayload[key] = resolved
-        // If it's still a temp ID after resolution, the parent hasn't synced yet
-        if (isTempId(resolved)) {
-          hasUnresolvedTempIds = true
-          console.log(`[offlineQueue] Operation ${operation.id} has unresolved temp ID for ${key}: ${value}`)
-        }
-      }
-    }
-    
-    // Skip this operation if it has unresolved temp IDs - parent needs to sync first
-    if (hasUnresolvedTempIds) {
-      console.log(`[offlineQueue] Skipping operation ${operation.id} - waiting for parent to sync`)
-      return false
-    }
-    
-    const result = await handler({ ...operation, payload: resolvedPayload })
+    const result = await handler(operation)
     
     if (result.success) {
-      // If we got a resolved ID, store the mapping
-      if (operation.tempId && result.resolvedId) {
-        tempIdMap.set(operation.tempId, result.resolvedId)
-      }
       removeOperation(operation.id)
       return true
     } else {
@@ -262,7 +196,12 @@ const processOperation = async (operation: OfflineOperation): Promise<boolean> =
   } catch (error) {
     const errorMsg = error instanceof Error ? error.message : String(error)
     console.error(`[offlineQueue] Error processing operation ${operation.id}:`, errorMsg)
-    updateOperation(operation.id, { retries: operation.retries + 1, lastError: errorMsg })
+    const newRetries = operation.retries + 1
+    if (newRetries >= MAX_RETRIES) {
+      removeOperation(operation.id)
+      return false
+    }
+    updateOperation(operation.id, { retries: newRetries, lastError: errorMsg })
     return false
   }
 }
@@ -270,9 +209,9 @@ const processOperation = async (operation: OfflineOperation): Promise<boolean> =
 /**
  * Get operation priority for dependency ordering
  * Lower number = higher priority (process first)
+ * Goals must exist before buckets, buckets before tasks (foreign key constraints)
  */
 const getOperationPriority = (type: OfflineOperationType): number => {
-  // Goals must be created before buckets, buckets before tasks
   switch (type) {
     case 'createGoal':
       return 0
@@ -340,18 +279,17 @@ export const processQueue = async (): Promise<void> => {
       return a.timestamp - b.timestamp
     })
     
-    console.log('[offlineQueue] Processing order:', sortedQueue.map(op => `${op.type}(${op.tempId || 'no-temp-id'})`))
+    console.log('[offlineQueue] Processing order:', sortedQueue.map(op => op.type))
     
     for (const operation of sortedQueue) {
       if (!isOnline()) {
-        // Went offline during processing, stop
         console.log('[offlineQueue] Went offline during processing, stopping')
         break
       }
       
-      console.log(`[offlineQueue] Processing operation: ${operation.type}`, operation.payload)
+      console.log(`[offlineQueue] Processing: ${operation.type}`, operation.payload)
       const success = await processOperation(operation)
-      console.log(`[offlineQueue] Operation ${operation.type} ${success ? 'succeeded' : 'failed'}`)
+      console.log(`[offlineQueue] ${operation.type} ${success ? 'succeeded' : 'failed'}`)
     }
   } finally {
     setSyncing(false)
@@ -380,7 +318,6 @@ export const getQueue = (): readonly OfflineOperation[] => {
 export const clearQueue = (): void => {
   operationQueue = []
   writeQueue([])
-  tempIdMap.clear()
   updatePendingCount()
 }
 

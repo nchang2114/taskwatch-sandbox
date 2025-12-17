@@ -1,25 +1,23 @@
 /**
- * Offline-aware Goals API
+ * Offline-aware Goals API (Simplified)
  * 
  * Wraps goalsApi functions to:
  * 1. Update local state immediately (optimistic updates)
  * 2. Queue operations when offline
  * 3. Sync to server when online
  * 
- * This module provides the same API surface as goalsApi but with offline support.
+ * Uses real UUIDs for all entities - no temp ID mapping needed.
  */
 
 import { isOnline, trackRequest } from './syncStatus'
 import {
   queueOperation,
   registerOperationHandler,
-  generateTempId,
-  isTempId,
-  resolveId,
   clearOfflineQueue,
   getQueueState,
   type OfflineOperation,
 } from './offlineQueue'
+import { generateUuid } from './quickListRemote'
 import {
   readStoredGoalsSnapshot,
   publishGoalsSnapshot,
@@ -146,7 +144,8 @@ export async function createTask(
   sort_index: number
   notes: string | null
 } | null> {
-  const taskId = options?.clientId ?? generateTempId()
+  // Use provided clientId or generate a real UUID (not temp ID)
+  const taskId = options?.clientId ?? generateUuid()
   const insertAtTop = options?.insertAtTop ?? false
   
   // Optimistically update local state
@@ -178,35 +177,21 @@ export async function createTask(
     return snapshot
   })
   
-  // Resolve bucket ID if it's a temp ID that has been synced
-  const resolvedBucketId = resolveId(bucketId)
+  console.log('[goalsApiOffline] createTask:', { bucketId, taskId, isOnline: isOnline() })
   
-  console.log('[goalsApiOffline] createTask:', { bucketId, resolvedBucketId, isTempId: isTempId(resolvedBucketId), isOnline: isOnline() })
-  
-  // If online AND bucket ID is not a temp ID, sync immediately
-  if (isOnline() && !isTempId(resolvedBucketId)) {
+  // If online, sync immediately with the same UUID
+  if (isOnline()) {
     try {
-      // Don't pass clientId to API - let Supabase generate UUID, we'll update local state with it
-      const result = await trackRequest(() => apiCreateTask(resolvedBucketId, text, { insertAtTop }))
-      if (result) {
-        // Update local snapshot with the real ID from Supabase
-        updateLocalSnapshot((snapshot) => {
-          const found = findTaskInSnapshot(snapshot, taskId)
-          if (found) {
-            found.task.id = result.id
-          }
-          return snapshot
-        })
-      }
+      const result = await trackRequest(() => apiCreateTask(bucketId, text, { clientId: taskId, insertAtTop }))
       return result
     } catch (error) {
-      // Queue for retry
-      queueOperation('createTask', { bucketId, text, taskId, insertAtTop }, taskId)
+      // Queue for retry with the same UUID
+      queueOperation('createTask', { bucketId, text, taskId, insertAtTop })
       return { id: taskId, text, completed: false, difficulty: 'none', priority: false, sort_index: 0, notes: null }
     }
   } else {
-    // Queue for later
-    queueOperation('createTask', { bucketId, text, taskId, insertAtTop }, taskId)
+    // Queue for later with the same UUID
+    queueOperation('createTask', { bucketId, text, taskId, insertAtTop })
     return { id: taskId, text, completed: false, difficulty: 'none', priority: false, sort_index: 0, notes: null }
   }
 }
@@ -215,8 +200,6 @@ export async function createTask(
  * Update task text
  */
 export async function updateTaskText(taskId: string, text: string): Promise<void> {
-  const resolvedTaskId = resolveId(taskId)
-  
   // Optimistically update local state
   updateLocalSnapshot((snapshot) => {
     const found = findTaskInSnapshot(snapshot, taskId)
@@ -226,14 +209,14 @@ export async function updateTaskText(taskId: string, text: string): Promise<void
     return snapshot
   })
   
-  if (isOnline() && !isTempId(resolvedTaskId)) {
+  if (isOnline()) {
     try {
-      await trackRequest(() => apiUpdateTaskText(resolvedTaskId, text))
+      await trackRequest(() => apiUpdateTaskText(taskId, text))
     } catch {
-      queueOperation('updateTaskText', { taskId: resolvedTaskId, text })
+      queueOperation('updateTaskText', { taskId, text })
     }
   } else {
-    queueOperation('updateTaskText', { taskId: resolvedTaskId, text })
+    queueOperation('updateTaskText', { taskId, text })
   }
 }
 
@@ -245,9 +228,6 @@ export async function setTaskCompletedAndResort(
   bucketId: string,
   completed: boolean
 ): Promise<DbTask | null> {
-  const resolvedTaskId = resolveId(taskId)
-  const resolvedBucketId = resolveId(bucketId)
-  
   // Optimistically update local state
   updateLocalSnapshot((snapshot) => {
     const found = findTaskInSnapshot(snapshot, taskId)
@@ -274,15 +254,15 @@ export async function setTaskCompletedAndResort(
     return snapshot
   })
   
-  if (isOnline() && !isTempId(resolvedTaskId) && !isTempId(resolvedBucketId)) {
+  if (isOnline()) {
     try {
-      return await trackRequest(() => apiSetTaskCompletedAndResort(resolvedTaskId, resolvedBucketId, completed))
+      return await trackRequest(() => apiSetTaskCompletedAndResort(taskId, bucketId, completed))
     } catch {
-      queueOperation('updateTaskCompleted', { taskId: resolvedTaskId, bucketId: resolvedBucketId, completed })
+      queueOperation('updateTaskCompleted', { taskId, bucketId, completed })
       return null
     }
   } else {
-    queueOperation('updateTaskCompleted', { taskId: resolvedTaskId, bucketId: resolvedBucketId, completed })
+    queueOperation('updateTaskCompleted', { taskId, bucketId, completed })
     return null
   }
 }
@@ -296,9 +276,6 @@ export async function setTaskPriorityAndResort(
   completed: boolean,
   priority: boolean
 ): Promise<void> {
-  const resolvedTaskId = resolveId(taskId)
-  const resolvedBucketId = resolveId(bucketId)
-  
   // Optimistically update local state
   updateLocalSnapshot((snapshot) => {
     const found = findTaskInSnapshot(snapshot, taskId)
@@ -308,14 +285,14 @@ export async function setTaskPriorityAndResort(
     return snapshot
   })
   
-  if (isOnline() && !isTempId(resolvedTaskId) && !isTempId(resolvedBucketId)) {
+  if (isOnline()) {
     try {
-      await trackRequest(() => apiSetTaskPriorityAndResort(resolvedTaskId, resolvedBucketId, completed, priority))
+      await trackRequest(() => apiSetTaskPriorityAndResort(taskId, bucketId, completed, priority))
     } catch {
-      queueOperation('updateTaskPriority', { taskId: resolvedTaskId, bucketId: resolvedBucketId, completed, priority })
+      queueOperation('updateTaskPriority', { taskId, bucketId, completed, priority })
     }
   } else {
-    queueOperation('updateTaskPriority', { taskId: resolvedTaskId, bucketId: resolvedBucketId, completed, priority })
+    queueOperation('updateTaskPriority', { taskId, bucketId, completed, priority })
   }
 }
 
@@ -326,8 +303,6 @@ export async function setTaskDifficulty(
   taskId: string,
   difficulty: 'none' | 'green' | 'yellow' | 'red'
 ): Promise<void> {
-  const resolvedTaskId = resolveId(taskId)
-  
   // Optimistically update local state
   updateLocalSnapshot((snapshot) => {
     const found = findTaskInSnapshot(snapshot, taskId)
@@ -337,14 +312,14 @@ export async function setTaskDifficulty(
     return snapshot
   })
   
-  if (isOnline() && !isTempId(resolvedTaskId)) {
+  if (isOnline()) {
     try {
-      await trackRequest(() => apiSetTaskDifficulty(resolvedTaskId, difficulty))
+      await trackRequest(() => apiSetTaskDifficulty(taskId, difficulty))
     } catch {
-      queueOperation('updateTaskDifficulty', { taskId: resolvedTaskId, difficulty })
+      queueOperation('updateTaskDifficulty', { taskId, difficulty })
     }
   } else {
-    queueOperation('updateTaskDifficulty', { taskId: resolvedTaskId, difficulty })
+    queueOperation('updateTaskDifficulty', { taskId, difficulty })
   }
 }
 
@@ -352,8 +327,6 @@ export async function setTaskDifficulty(
  * Update task notes
  */
 export async function updateTaskNotes(taskId: string, notes: string): Promise<void> {
-  const resolvedTaskId = resolveId(taskId)
-  
   // Optimistically update local state
   updateLocalSnapshot((snapshot) => {
     const found = findTaskInSnapshot(snapshot, taskId)
@@ -363,14 +336,14 @@ export async function updateTaskNotes(taskId: string, notes: string): Promise<vo
     return snapshot
   })
   
-  if (isOnline() && !isTempId(resolvedTaskId)) {
+  if (isOnline()) {
     try {
-      await trackRequest(() => apiUpdateTaskNotes(resolvedTaskId, notes))
+      await trackRequest(() => apiUpdateTaskNotes(taskId, notes))
     } catch {
-      queueOperation('updateTaskNotes', { taskId: resolvedTaskId, notes })
+      queueOperation('updateTaskNotes', { taskId, notes })
     }
   } else {
-    queueOperation('updateTaskNotes', { taskId: resolvedTaskId, notes })
+    queueOperation('updateTaskNotes', { taskId, notes })
   }
 }
 
@@ -378,9 +351,6 @@ export async function updateTaskNotes(taskId: string, notes: string): Promise<vo
  * Delete a task
  */
 export async function deleteTask(taskId: string, bucketId: string): Promise<void> {
-  const resolvedTaskId = resolveId(taskId)
-  const resolvedBucketId = resolveId(bucketId)
-  
   // Optimistically update local state
   updateLocalSnapshot((snapshot) => {
     const found = findTaskInSnapshot(snapshot, taskId)
@@ -390,19 +360,14 @@ export async function deleteTask(taskId: string, bucketId: string): Promise<void
     return snapshot
   })
   
-  // Don't queue deletes for temp IDs - they were never synced
-  if (isTempId(taskId)) {
-    return
-  }
-  
-  if (isOnline() && !isTempId(resolvedBucketId)) {
+  if (isOnline()) {
     try {
-      await trackRequest(() => apiDeleteTask(resolvedTaskId, resolvedBucketId))
+      await trackRequest(() => apiDeleteTask(taskId, bucketId))
     } catch {
-      queueOperation('deleteTask', { taskId: resolvedTaskId, bucketId: resolvedBucketId })
+      queueOperation('deleteTask', { taskId, bucketId })
     }
   } else {
-    queueOperation('deleteTask', { taskId: resolvedTaskId, bucketId: resolvedBucketId })
+    queueOperation('deleteTask', { taskId, bucketId })
   }
 }
 
@@ -415,10 +380,6 @@ export async function moveTaskToBucket(
   toBucketId: string,
   toIndex?: number
 ): Promise<void> {
-  const resolvedTaskId = resolveId(taskId)
-  const resolvedFromBucketId = resolveId(fromBucketId)
-  const resolvedToBucketId = resolveId(toBucketId)
-  
   // Optimistically update local state
   updateLocalSnapshot((snapshot) => {
     const fromFound = findTaskInSnapshot(snapshot, taskId)
@@ -437,14 +398,14 @@ export async function moveTaskToBucket(
     return snapshot
   })
   
-  if (isOnline() && !isTempId(resolvedTaskId) && !isTempId(resolvedFromBucketId) && !isTempId(resolvedToBucketId)) {
+  if (isOnline()) {
     try {
-      await trackRequest(() => apiMoveTaskToBucket(resolvedTaskId, resolvedFromBucketId, resolvedToBucketId, toIndex))
+      await trackRequest(() => apiMoveTaskToBucket(taskId, fromBucketId, toBucketId, toIndex))
     } catch {
-      queueOperation('moveTask', { taskId: resolvedTaskId, fromBucketId: resolvedFromBucketId, toBucketId: resolvedToBucketId, toIndex })
+      queueOperation('moveTask', { taskId, fromBucketId, toBucketId, toIndex })
     }
   } else {
-    queueOperation('moveTask', { taskId: resolvedTaskId, fromBucketId: resolvedFromBucketId, toBucketId: resolvedToBucketId, toIndex })
+    queueOperation('moveTask', { taskId, fromBucketId, toBucketId, toIndex })
   }
 }
 
@@ -455,17 +416,13 @@ export async function upsertTaskSubtask(
   taskId: string,
   subtask: { id: string; text: string; completed: boolean; sort_index: number; updated_at?: string }
 ): Promise<void> {
-  const resolvedTaskId = resolveId(taskId)
-  const isNewSubtask = isTempId(subtask.id)
-  const resolvedSubtaskId = isNewSubtask ? subtask.id : resolveId(subtask.id)
-  
   // Optimistically update local state
   updateLocalSnapshot((snapshot) => {
     const found = findTaskInSnapshot(snapshot, taskId)
     if (found) {
       const existingIndex = found.task.subtasks.findIndex(s => s.id === subtask.id)
       const subtaskSnapshot: GoalTaskSubtaskSnapshot = {
-        id: resolvedSubtaskId,
+        id: subtask.id,
         text: subtask.text,
         completed: subtask.completed,
         sortIndex: subtask.sort_index,
@@ -481,26 +438,26 @@ export async function upsertTaskSubtask(
     return snapshot
   })
   
-  if (isOnline() && !isTempId(resolvedTaskId)) {
+  if (isOnline()) {
     try {
-      await trackRequest(() => apiUpsertTaskSubtask(resolvedTaskId, subtask))
+      await trackRequest(() => apiUpsertTaskSubtask(taskId, subtask))
     } catch {
       queueOperation('createSubtask', { 
-        taskId: resolvedTaskId, 
-        subtaskId: resolvedSubtaskId, 
+        taskId, 
+        subtaskId: subtask.id, 
         text: subtask.text, 
         completed: subtask.completed, 
         sortIndex: subtask.sort_index 
-      }, isNewSubtask ? subtask.id : undefined)
+      })
     }
   } else {
     queueOperation('createSubtask', { 
-      taskId: resolvedTaskId, 
-      subtaskId: resolvedSubtaskId, 
+      taskId, 
+      subtaskId: subtask.id, 
       text: subtask.text, 
       completed: subtask.completed, 
       sortIndex: subtask.sort_index 
-    }, isNewSubtask ? subtask.id : undefined)
+    })
   }
 }
 
@@ -508,9 +465,6 @@ export async function upsertTaskSubtask(
  * Delete a subtask
  */
 export async function deleteTaskSubtask(taskId: string, subtaskId: string): Promise<void> {
-  const resolvedTaskId = resolveId(taskId)
-  const resolvedSubtaskId = resolveId(subtaskId)
-  
   // Optimistically update local state
   updateLocalSnapshot((snapshot) => {
     const found = findTaskInSnapshot(snapshot, taskId)
@@ -520,19 +474,14 @@ export async function deleteTaskSubtask(taskId: string, subtaskId: string): Prom
     return snapshot
   })
   
-  // Don't queue deletes for temp IDs
-  if (isTempId(subtaskId)) {
-    return
-  }
-  
-  if (isOnline() && !isTempId(resolvedTaskId)) {
+  if (isOnline()) {
     try {
-      await trackRequest(() => apiDeleteTaskSubtask(resolvedTaskId, resolvedSubtaskId))
+      await trackRequest(() => apiDeleteTaskSubtask(taskId, subtaskId))
     } catch {
-      queueOperation('deleteSubtask', { taskId: resolvedTaskId, subtaskId: resolvedSubtaskId })
+      queueOperation('deleteSubtask', { taskId, subtaskId })
     }
   } else {
-    queueOperation('deleteSubtask', { taskId: resolvedTaskId, subtaskId: resolvedSubtaskId })
+    queueOperation('deleteSubtask', { taskId, subtaskId })
   }
 }
 
@@ -547,7 +496,8 @@ export async function createGoal(
   name: string,
   color: string
 ): Promise<{ id: string; name: string; goal_colour: string; sort_index: number; card_surface?: string | null; starred: boolean; goal_archive?: boolean; milestones_shown?: boolean } | null> {
-  const goalId = generateTempId()
+  // Generate real UUID (not temp ID)
+  const goalId = generateUuid()
   
   // Optimistically update local state
   updateLocalSnapshot((snapshot) => {
@@ -566,25 +516,15 @@ export async function createGoal(
   
   if (isOnline()) {
     try {
-      const result = await trackRequest(() => apiCreateGoal(name, color))
-      if (result) {
-        // Update local state with real ID
-        updateLocalSnapshot((snapshot) => {
-          const found = findGoalInSnapshot(snapshot, goalId)
-          if (found) {
-            found.goal.id = result.id
-          }
-          return snapshot
-        })
-        return result
-      }
-      return null
+      // Pass the UUID we generated so server uses same ID
+      const result = await trackRequest(() => apiCreateGoal(name, color, { id: goalId }))
+      return result
     } catch {
-      queueOperation('createGoal', { name, color, goalId }, goalId)
+      queueOperation('createGoal', { name, color, goalId })
       return { id: goalId, name, goal_colour: color, sort_index: 0, starred: false, goal_archive: false }
     }
   } else {
-    queueOperation('createGoal', { name, color, goalId }, goalId)
+    queueOperation('createGoal', { name, color, goalId })
     return { id: goalId, name, goal_colour: color, sort_index: 0, starred: false, goal_archive: false }
   }
 }
@@ -593,8 +533,6 @@ export async function createGoal(
  * Rename a goal
  */
 export async function renameGoal(goalId: string, name: string): Promise<void> {
-  const resolvedGoalId = resolveId(goalId)
-  
   updateLocalSnapshot((snapshot) => {
     const found = findGoalInSnapshot(snapshot, goalId)
     if (found) {
@@ -603,14 +541,14 @@ export async function renameGoal(goalId: string, name: string): Promise<void> {
     return snapshot
   })
   
-  if (isOnline() && !isTempId(resolvedGoalId)) {
+  if (isOnline()) {
     try {
-      await trackRequest(() => apiRenameGoal(resolvedGoalId, name))
+      await trackRequest(() => apiRenameGoal(goalId, name))
     } catch {
-      queueOperation('updateGoal', { goalId: resolvedGoalId, name })
+      queueOperation('updateGoal', { goalId, name })
     }
   } else {
-    queueOperation('updateGoal', { goalId: resolvedGoalId, name })
+    queueOperation('updateGoal', { goalId, name })
   }
 }
 
@@ -618,8 +556,6 @@ export async function renameGoal(goalId: string, name: string): Promise<void> {
  * Set goal color
  */
 export async function setGoalColor(goalId: string, color: string): Promise<void> {
-  const resolvedGoalId = resolveId(goalId)
-  
   updateLocalSnapshot((snapshot) => {
     const found = findGoalInSnapshot(snapshot, goalId)
     if (found) {
@@ -628,14 +564,14 @@ export async function setGoalColor(goalId: string, color: string): Promise<void>
     return snapshot
   })
   
-  if (isOnline() && !isTempId(resolvedGoalId)) {
+  if (isOnline()) {
     try {
-      await trackRequest(() => apiSetGoalColor(resolvedGoalId, color))
+      await trackRequest(() => apiSetGoalColor(goalId, color))
     } catch {
-      queueOperation('updateGoalColor', { goalId: resolvedGoalId, color })
+      queueOperation('updateGoalColor', { goalId, color })
     }
   } else {
-    queueOperation('updateGoalColor', { goalId: resolvedGoalId, color })
+    queueOperation('updateGoalColor', { goalId, color })
   }
 }
 
@@ -643,8 +579,6 @@ export async function setGoalColor(goalId: string, color: string): Promise<void>
  * Set goal surface
  */
 export async function setGoalSurface(goalId: string, surface: string | null): Promise<void> {
-  const resolvedGoalId = resolveId(goalId)
-  
   updateLocalSnapshot((snapshot) => {
     const found = findGoalInSnapshot(snapshot, goalId)
     if (found) {
@@ -653,14 +587,14 @@ export async function setGoalSurface(goalId: string, surface: string | null): Pr
     return snapshot
   })
   
-  if (isOnline() && !isTempId(resolvedGoalId)) {
+  if (isOnline()) {
     try {
-      await trackRequest(() => apiSetGoalSurface(resolvedGoalId, surface))
+      await trackRequest(() => apiSetGoalSurface(goalId, surface))
     } catch {
-      queueOperation('updateGoalSurface', { goalId: resolvedGoalId, surface })
+      queueOperation('updateGoalSurface', { goalId, surface })
     }
   } else {
-    queueOperation('updateGoalSurface', { goalId: resolvedGoalId, surface })
+    queueOperation('updateGoalSurface', { goalId, surface })
   }
 }
 
@@ -668,8 +602,6 @@ export async function setGoalSurface(goalId: string, surface: string | null): Pr
  * Set goal starred
  */
 export async function setGoalStarred(goalId: string, starred: boolean): Promise<void> {
-  const resolvedGoalId = resolveId(goalId)
-  
   updateLocalSnapshot((snapshot) => {
     const found = findGoalInSnapshot(snapshot, goalId)
     if (found) {
@@ -678,14 +610,14 @@ export async function setGoalStarred(goalId: string, starred: boolean): Promise<
     return snapshot
   })
   
-  if (isOnline() && !isTempId(resolvedGoalId)) {
+  if (isOnline()) {
     try {
-      await trackRequest(() => apiSetGoalStarred(resolvedGoalId, starred))
+      await trackRequest(() => apiSetGoalStarred(goalId, starred))
     } catch {
-      queueOperation('updateGoalStarred', { goalId: resolvedGoalId, starred })
+      queueOperation('updateGoalStarred', { goalId, starred })
     }
   } else {
-    queueOperation('updateGoalStarred', { goalId: resolvedGoalId, starred })
+    queueOperation('updateGoalStarred', { goalId, starred })
   }
 }
 
@@ -693,8 +625,6 @@ export async function setGoalStarred(goalId: string, starred: boolean): Promise<
  * Set goal archived
  */
 export async function setGoalArchived(goalId: string, archived: boolean): Promise<void> {
-  const resolvedGoalId = resolveId(goalId)
-  
   updateLocalSnapshot((snapshot) => {
     const found = findGoalInSnapshot(snapshot, goalId)
     if (found) {
@@ -703,14 +633,14 @@ export async function setGoalArchived(goalId: string, archived: boolean): Promis
     return snapshot
   })
   
-  if (isOnline() && !isTempId(resolvedGoalId)) {
+  if (isOnline()) {
     try {
-      await trackRequest(() => apiSetGoalArchived(resolvedGoalId, archived))
+      await trackRequest(() => apiSetGoalArchived(goalId, archived))
     } catch {
-      queueOperation('updateGoalArchived', { goalId: resolvedGoalId, archived })
+      queueOperation('updateGoalArchived', { goalId, archived })
     }
   } else {
-    queueOperation('updateGoalArchived', { goalId: resolvedGoalId, archived })
+    queueOperation('updateGoalArchived', { goalId, archived })
   }
 }
 
@@ -718,25 +648,18 @@ export async function setGoalArchived(goalId: string, archived: boolean): Promis
  * Delete a goal
  */
 export async function deleteGoalById(goalId: string): Promise<void> {
-  const resolvedGoalId = resolveId(goalId)
-  
   updateLocalSnapshot((snapshot) => {
     return snapshot.filter(g => g.id !== goalId)
   })
   
-  // Don't queue deletes for temp IDs - they were never synced
-  if (isTempId(goalId)) {
-    return
-  }
-  
   if (isOnline()) {
     try {
-      await trackRequest(() => apiDeleteGoalById(resolvedGoalId))
+      await trackRequest(() => apiDeleteGoalById(goalId))
     } catch {
-      queueOperation('deleteGoal', { goalId: resolvedGoalId })
+      queueOperation('deleteGoal', { goalId })
     }
   } else {
-    queueOperation('deleteGoal', { goalId: resolvedGoalId })
+    queueOperation('deleteGoal', { goalId })
   }
 }
 
@@ -752,8 +675,8 @@ export async function createBucket(
   name: string,
   surface: string = 'glass'
 ): Promise<{ id: string; name: string; favorite: boolean; bucket_archive?: boolean; sort_index: number } | null> {
-  const resolvedGoalId = resolveId(goalId)
-  const bucketId = generateTempId()
+  // Generate real UUID (not temp ID)
+  const bucketId = generateUuid()
   
   // Optimistically update local state
   updateLocalSnapshot((snapshot) => {
@@ -772,30 +695,17 @@ export async function createBucket(
     return snapshot
   })
   
-  if (isOnline() && !isTempId(resolvedGoalId)) {
+  if (isOnline()) {
     try {
-      const result = await trackRequest(() => apiCreateBucket(resolvedGoalId, name, surface))
-      if (result) {
-        // Update local state with real ID
-        updateLocalSnapshot((snapshot) => {
-          const goalFound = findGoalInSnapshot(snapshot, goalId)
-          if (goalFound) {
-            const bucketIndex = goalFound.goal.buckets.findIndex(b => b.id === bucketId)
-            if (bucketIndex !== -1) {
-              goalFound.goal.buckets[bucketIndex].id = result.id
-            }
-          }
-          return snapshot
-        })
-        return result
-      }
-      return null
+      // Pass the UUID we generated so server uses same ID
+      const result = await trackRequest(() => apiCreateBucket(goalId, name, surface, { id: bucketId }))
+      return result
     } catch {
-      queueOperation('createBucket', { goalId: resolvedGoalId, name, surface, bucketId }, bucketId)
+      queueOperation('createBucket', { goalId, name, surface, bucketId })
       return { id: bucketId, name, favorite: false, sort_index: 0 }
     }
   } else {
-    queueOperation('createBucket', { goalId: resolvedGoalId, name, surface, bucketId }, bucketId)
+    queueOperation('createBucket', { goalId, name, surface, bucketId })
     return { id: bucketId, name, favorite: false, sort_index: 0 }
   }
 }
@@ -804,8 +714,6 @@ export async function createBucket(
  * Rename a bucket
  */
 export async function renameBucket(bucketId: string, name: string): Promise<void> {
-  const resolvedBucketId = resolveId(bucketId)
-  
   updateLocalSnapshot((snapshot) => {
     const found = findBucketInSnapshot(snapshot, bucketId)
     if (found) {
@@ -814,14 +722,14 @@ export async function renameBucket(bucketId: string, name: string): Promise<void
     return snapshot
   })
   
-  if (isOnline() && !isTempId(resolvedBucketId)) {
+  if (isOnline()) {
     try {
-      await trackRequest(() => apiRenameBucket(resolvedBucketId, name))
+      await trackRequest(() => apiRenameBucket(bucketId, name))
     } catch {
-      queueOperation('updateBucket', { bucketId: resolvedBucketId, name })
+      queueOperation('updateBucket', { bucketId, name })
     }
   } else {
-    queueOperation('updateBucket', { bucketId: resolvedBucketId, name })
+    queueOperation('updateBucket', { bucketId, name })
   }
 }
 
@@ -829,8 +737,6 @@ export async function renameBucket(bucketId: string, name: string): Promise<void
  * Set bucket surface style
  */
 export async function setBucketSurface(bucketId: string, surface: string | null): Promise<void> {
-  const resolvedBucketId = resolveId(bucketId)
-  
   updateLocalSnapshot((snapshot) => {
     const found = findBucketInSnapshot(snapshot, bucketId)
     if (found) {
@@ -839,14 +745,14 @@ export async function setBucketSurface(bucketId: string, surface: string | null)
     return snapshot
   })
   
-  if (isOnline() && !isTempId(resolvedBucketId)) {
+  if (isOnline()) {
     try {
-      await trackRequest(() => apiSetBucketSurface(resolvedBucketId, surface))
+      await trackRequest(() => apiSetBucketSurface(bucketId, surface))
     } catch {
-      queueOperation('updateBucketSurface', { bucketId: resolvedBucketId, surface })
+      queueOperation('updateBucketSurface', { bucketId, surface })
     }
   } else {
-    queueOperation('updateBucketSurface', { bucketId: resolvedBucketId, surface })
+    queueOperation('updateBucketSurface', { bucketId, surface })
   }
 }
 
@@ -854,8 +760,6 @@ export async function setBucketSurface(bucketId: string, surface: string | null)
  * Set bucket favorite
  */
 export async function setBucketFavorite(bucketId: string, favorite: boolean): Promise<void> {
-  const resolvedBucketId = resolveId(bucketId)
-  
   updateLocalSnapshot((snapshot) => {
     const found = findBucketInSnapshot(snapshot, bucketId)
     if (found) {
@@ -864,14 +768,14 @@ export async function setBucketFavorite(bucketId: string, favorite: boolean): Pr
     return snapshot
   })
   
-  if (isOnline() && !isTempId(resolvedBucketId)) {
+  if (isOnline()) {
     try {
-      await trackRequest(() => apiSetBucketFavorite(resolvedBucketId, favorite))
+      await trackRequest(() => apiSetBucketFavorite(bucketId, favorite))
     } catch {
-      queueOperation('updateBucketFavorite', { bucketId: resolvedBucketId, favorite })
+      queueOperation('updateBucketFavorite', { bucketId, favorite })
     }
   } else {
-    queueOperation('updateBucketFavorite', { bucketId: resolvedBucketId, favorite })
+    queueOperation('updateBucketFavorite', { bucketId, favorite })
   }
 }
 
@@ -879,8 +783,6 @@ export async function setBucketFavorite(bucketId: string, favorite: boolean): Pr
  * Set bucket archived
  */
 export async function setBucketArchived(bucketId: string, archived: boolean): Promise<void> {
-  const resolvedBucketId = resolveId(bucketId)
-  
   updateLocalSnapshot((snapshot) => {
     const found = findBucketInSnapshot(snapshot, bucketId)
     if (found) {
@@ -889,14 +791,14 @@ export async function setBucketArchived(bucketId: string, archived: boolean): Pr
     return snapshot
   })
   
-  if (isOnline() && !isTempId(resolvedBucketId)) {
+  if (isOnline()) {
     try {
-      await trackRequest(() => apiSetBucketArchived(resolvedBucketId, archived))
+      await trackRequest(() => apiSetBucketArchived(bucketId, archived))
     } catch {
-      queueOperation('updateBucketArchived', { bucketId: resolvedBucketId, archived })
+      queueOperation('updateBucketArchived', { bucketId, archived })
     }
   } else {
-    queueOperation('updateBucketArchived', { bucketId: resolvedBucketId, archived })
+    queueOperation('updateBucketArchived', { bucketId, archived })
   }
 }
 
@@ -904,8 +806,6 @@ export async function setBucketArchived(bucketId: string, archived: boolean): Pr
  * Delete a bucket
  */
 export async function deleteBucketById(bucketId: string): Promise<void> {
-  const resolvedBucketId = resolveId(bucketId)
-  
   updateLocalSnapshot((snapshot) => {
     for (const goal of snapshot) {
       const bucketIndex = goal.buckets.findIndex(b => b.id === bucketId)
@@ -917,19 +817,14 @@ export async function deleteBucketById(bucketId: string): Promise<void> {
     return snapshot
   })
   
-  // Don't queue deletes for temp IDs
-  if (isTempId(bucketId)) {
-    return
-  }
-  
   if (isOnline()) {
     try {
-      await trackRequest(() => apiDeleteBucketById(resolvedBucketId))
+      await trackRequest(() => apiDeleteBucketById(bucketId))
     } catch {
-      queueOperation('deleteBucket', { bucketId: resolvedBucketId })
+      queueOperation('deleteBucket', { bucketId })
     }
   } else {
-    queueOperation('deleteBucket', { bucketId: resolvedBucketId })
+    queueOperation('deleteBucket', { bucketId })
   }
 }
 
@@ -939,10 +834,10 @@ export async function deleteBucketById(bucketId: string): Promise<void> {
 
 registerOperationHandler('createTask', async (op: OfflineOperation) => {
   try {
-    const { bucketId, text, taskId: _taskId, insertAtTop } = op.payload as { bucketId: string; text: string; taskId: string; insertAtTop: boolean }
-    // Don't pass clientId - let Supabase generate UUID
-    const result = await apiCreateTask(bucketId, text, { insertAtTop })
-    return { success: true, resolvedId: result?.id }
+    const { bucketId, text, taskId, insertAtTop } = op.payload as { bucketId: string; text: string; taskId: string; insertAtTop: boolean }
+    // Pass the UUID we generated so server uses same ID
+    await apiCreateTask(bucketId, text, { clientId: taskId, insertAtTop })
+    return { success: true }
   } catch (error) {
     return { success: false, error: error instanceof Error ? error.message : String(error) }
   }
@@ -1022,7 +917,7 @@ registerOperationHandler('createSubtask', async (op: OfflineOperation) => {
   try {
     const { taskId, subtaskId, text, completed, sortIndex } = op.payload as { taskId: string; subtaskId: string; text: string; completed: boolean; sortIndex: number }
     await apiUpsertTaskSubtask(taskId, { id: subtaskId, text, completed, sort_index: sortIndex })
-    return { success: true, resolvedId: subtaskId }
+    return { success: true }
   } catch (error) {
     return { success: false, error: error instanceof Error ? error.message : String(error) }
   }
@@ -1044,9 +939,10 @@ registerOperationHandler('deleteSubtask', async (op: OfflineOperation) => {
 
 registerOperationHandler('createGoal', async (op: OfflineOperation) => {
   try {
-    const { name, color, goalId: _goalId } = op.payload as { name: string; color: string; goalId: string }
-    const result = await apiCreateGoal(name, color)
-    return { success: true, resolvedId: result?.id }
+    const { name, color, goalId } = op.payload as { name: string; color: string; goalId: string }
+    // Pass the UUID we generated so server uses same ID
+    await apiCreateGoal(name, color, { id: goalId })
+    return { success: true }
   } catch (error) {
     return { success: false, error: error instanceof Error ? error.message : String(error) }
   }
@@ -1118,9 +1014,10 @@ registerOperationHandler('deleteGoal', async (op: OfflineOperation) => {
 
 registerOperationHandler('createBucket', async (op: OfflineOperation) => {
   try {
-    const { goalId, name, surface, bucketId: _bucketId } = op.payload as { goalId: string; name: string; surface: string; bucketId: string }
-    const result = await apiCreateBucket(goalId, name, surface)
-    return { success: true, resolvedId: result?.id }
+    const { goalId, name, surface, bucketId } = op.payload as { goalId: string; name: string; surface: string; bucketId: string }
+    // Pass the UUID we generated so server uses same ID
+    await apiCreateBucket(goalId, name, surface, { id: bucketId })
+    return { success: true }
   } catch (error) {
     return { success: false, error: error instanceof Error ? error.message : String(error) }
   }
