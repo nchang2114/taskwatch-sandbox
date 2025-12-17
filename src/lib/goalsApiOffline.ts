@@ -281,6 +281,30 @@ export async function setTaskPriorityAndResort(
     const found = findTaskInSnapshot(snapshot, taskId)
     if (found) {
       found.task.priority = priority
+      
+      // Move task to appropriate position based on priority
+      const bucket = found.bucket
+      const task = bucket.tasks.splice(found.taskIndex, 1)[0]
+      
+      if (priority && !completed) {
+        // Priority tasks go to the very top (before other priority tasks)
+        bucket.tasks.unshift(task)
+      } else if (!completed) {
+        // Non-priority active tasks go after priority tasks but before completed
+        const firstNonPriorityIndex = bucket.tasks.findIndex(t => !t.priority && !t.completed)
+        const firstCompletedIndex = bucket.tasks.findIndex(t => t.completed)
+        
+        if (firstNonPriorityIndex !== -1) {
+          bucket.tasks.splice(firstNonPriorityIndex, 0, task)
+        } else if (firstCompletedIndex !== -1) {
+          bucket.tasks.splice(firstCompletedIndex, 0, task)
+        } else {
+          bucket.tasks.push(task)
+        }
+      } else {
+        // Completed tasks go to the end
+        bucket.tasks.push(task)
+      }
     }
     return snapshot
   })
@@ -840,7 +864,13 @@ registerOperationHandler('createTask', async (op: OfflineOperation) => {
     await apiCreateTask(bucketId, text, { clientId: taskId, insertAtTop })
     return { success: true }
   } catch (error) {
-    return { success: false, error: error instanceof Error ? error.message : String(error) }
+    // 409 Conflict means task already exists - treat as success
+    const errorMsg = error instanceof Error ? error.message : String(error)
+    if (errorMsg.includes('409') || errorMsg.includes('conflict') || errorMsg.includes('duplicate')) {
+      console.log('[offlineQueue] createTask: task already exists, treating as success')
+      return { success: true }
+    }
+    return { success: false, error: errorMsg }
   }
 })
 
@@ -945,7 +975,13 @@ registerOperationHandler('createGoal', async (op: OfflineOperation) => {
     await apiCreateGoal(name, color, { id: goalId })
     return { success: true }
   } catch (error) {
-    return { success: false, error: error instanceof Error ? error.message : String(error) }
+    // 409 Conflict means goal already exists - treat as success
+    const errorMsg = error instanceof Error ? error.message : String(error)
+    if (errorMsg.includes('409') || errorMsg.includes('conflict') || errorMsg.includes('duplicate')) {
+      console.log('[offlineQueue] createGoal: goal already exists, treating as success')
+      return { success: true }
+    }
+    return { success: false, error: errorMsg }
   }
 })
 
@@ -1020,7 +1056,13 @@ registerOperationHandler('createBucket', async (op: OfflineOperation) => {
     await apiCreateBucket(goalId, name, surface, { id: bucketId })
     return { success: true }
   } catch (error) {
-    return { success: false, error: error instanceof Error ? error.message : String(error) }
+    // 409 Conflict means bucket already exists - treat as success
+    const errorMsg = error instanceof Error ? error.message : String(error)
+    if (errorMsg.includes('409') || errorMsg.includes('conflict') || errorMsg.includes('duplicate')) {
+      console.log('[offlineQueue] createBucket: bucket already exists, treating as success')
+      return { success: true }
+    }
+    return { success: false, error: errorMsg }
   }
 })
 
