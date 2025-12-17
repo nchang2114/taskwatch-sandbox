@@ -690,7 +690,8 @@ export async function createBucket(
         surfaceStyle: surface as GoalBucketSnapshot['surfaceStyle'],
         tasks: [],
       }
-      found.goal.buckets.push(newBucket)
+      // Insert at the beginning (new buckets appear at top)
+      found.goal.buckets.unshift(newBucket)
     }
     return snapshot
   })

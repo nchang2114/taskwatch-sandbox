@@ -27,6 +27,7 @@ import {
   moveTaskToBucket as apiMoveTaskToBucket,
   deleteTask as apiDeleteTaskById,
 } from '../lib/goalsApiOffline'
+import { hasPendingOperations, processQueue } from '../lib/offlineQueue'
 // Direct API functions (read-only or not yet offline-enabled)
 import {
   fetchGoalsHierarchy,
@@ -7348,16 +7349,25 @@ export default function GoalsPage(): ReactElement {
     if (typeof window === 'undefined' || typeof document === 'undefined') {
       return
     }
-    const handleFocus = () => {
+    const handleFocus = async () => {
       if (!document.hidden) {
+        // Process any pending offline operations before refreshing from server
+        // This ensures local changes are pushed before we overwrite with server data
+        if (hasPendingOperations()) {
+          await processQueue()
+        }
         refreshGoalsFromSupabase('window-focus')
         if (!shouldSkipQuickListRemote()) {
           refreshQuickListFromSupabase('window-focus')
         }
       }
     }
-    const handleVisibility = () => {
+    const handleVisibility = async () => {
       if (!document.hidden) {
+        // Process any pending offline operations before refreshing from server
+        if (hasPendingOperations()) {
+          await processQueue()
+        }
         refreshGoalsFromSupabase('document-visible')
         if (!shouldSkipQuickListRemote()) {
           refreshQuickListFromSupabase('document-visible')
@@ -8102,13 +8112,21 @@ export default function GoalsPage(): ReactElement {
     if (typeof window === 'undefined' || typeof document === 'undefined') {
       return
     }
-    const handleFocus = () => {
+    const handleFocus = async () => {
       if (!document.hidden) {
+        // Process any pending offline operations before refreshing from server
+        if (hasPendingOperations()) {
+          await processQueue()
+        }
         refreshGoalsFromSupabase('window-focus')
       }
     }
-    const handleVisibility = () => {
+    const handleVisibility = async () => {
       if (!document.hidden) {
+        // Process any pending offline operations before refreshing from server
+        if (hasPendingOperations()) {
+          await processQueue()
+        }
         refreshGoalsFromSupabase('document-visible')
       }
     }
@@ -9070,36 +9088,20 @@ export default function GoalsPage(): ReactElement {
       return
     }
 
+    // The offline API handles optimistic updates via snapshot subscription
+    // No need to manually setGoals here - it would cause duplicates
     apiCreateBucket(goalId, trimmed)
       .then((db) => {
-        const newBucketId = db?.id ?? `b_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`
-        const surface = normalizeBucketSurfaceStyle((db as any)?.buckets_card_style ?? 'glass')
-        const newBucket: Bucket = { id: newBucketId, name: trimmed, favorite: false, archived: false, surfaceStyle: surface, tasks: [] }
-        setGoals((gs) =>
-          gs.map((g) =>
-            g.id === goalId
-              ? {
-                  ...g,
-                  buckets: [newBucket, ...g.buckets],
-                }
-              : g,
-          ),
-        )
-        // Persist top insertion to align with optimistic UI
-        if (db?.id) {
-          apiSetBucketSortIndex(goalId, db.id, 0).catch(() => {})
+        const newBucketId = db?.id
+        if (newBucketId) {
+          // Persist top insertion to align with optimistic UI
+          apiSetBucketSortIndex(goalId, newBucketId, 0).catch(() => {})
+          setBucketExpanded((current) => ({ ...current, [newBucketId]: false }))
+          setCompletedCollapsed((current) => ({ ...current, [newBucketId]: true }))
         }
-        setBucketExpanded((current) => ({ ...current, [newBucketId]: false }))
-        setCompletedCollapsed((current) => ({ ...current, [newBucketId]: true }))
       })
       .catch(() => {
-        const newBucketId = `b_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`
-        const newBucket: Bucket = { id: newBucketId, name: trimmed, favorite: false, archived: false, surfaceStyle: 'glass', tasks: [] }
-        setGoals((gs) =>
-          gs.map((g) => (g.id === goalId ? { ...g, buckets: [newBucket, ...g.buckets] } : g)),
-        )
-        setBucketExpanded((current) => ({ ...current, [newBucketId]: false }))
-        setCompletedCollapsed((current) => ({ ...current, [newBucketId]: true }))
+        // Error already logged by offline API
       })
 
     if (options?.keepDraft) {
@@ -10817,74 +10819,12 @@ const normalizedSearch = searchTerm.trim().toLowerCase()
       return
     }
 
-    const temporaryId = `temp_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`
-    const optimisticTask: TaskItem = { id: temporaryId, text: trimmed, completed: false, difficulty: 'none', createdAt: new Date().toISOString() }
-
-    setGoals((gs) =>
-      gs.map((g) =>
-        g.id === goalId
-          ? {
-              ...g,
-              buckets: g.buckets.map((bucket) => {
-                if (bucket.id !== bucketId) return bucket
-                const active = bucket.tasks.filter((t) => !t.completed)
-                const completed = bucket.tasks.filter((t) => t.completed)
-                return { ...bucket, tasks: [optimisticTask, ...active, ...completed] }
-              }),
-            }
-          : g,
-      ),
-    )
-
+    // The offline API handles optimistic updates via snapshot subscription
+    // No need to manually setGoals here - it would cause duplicates
     apiCreateTask(bucketId, trimmed)
-      .then((db) => {
-        if (!db) {
-          return
-        }
-        setGoals((current) =>
-          current.map((g) =>
-            g.id === goalId
-              ? {
-                  ...g,
-                  buckets: g.buckets.map((bucket) => {
-                    if (bucket.id !== bucketId) return bucket
-                    return {
-                      ...bucket,
-                      tasks: bucket.tasks.map((task) =>
-                        task.id === temporaryId
-                          ? {
-                              ...task,
-                              id: db.id,
-                              text: db.text,
-                              completed: db.completed,
-                              difficulty: db.difficulty ?? 'none',
-                              priority: db.priority ?? false,
-                            }
-                          : task,
-                      ),
-                    }
-                  }),
-                }
-              : g,
-          ),
-        )
-      })
       .catch((error) => {
         logWarn('[GoalsPage] Failed to persist new task:', error)
-        setGoals((current) =>
-          current.map((g) =>
-            g.id === goalId
-              ? {
-                  ...g,
-                  buckets: g.buckets.map((bucket) =>
-                    bucket.id === bucketId
-                      ? { ...bucket, tasks: bucket.tasks.filter((task) => task.id !== temporaryId) }
-                      : bucket,
-                  ),
-                }
-              : g,
-          ),
-        )
+        // Restore draft on error so user can retry
         if (!options?.keepDraft) {
           setTaskDrafts((drafts) => ({ ...drafts, [bucketId]: trimmed }))
         }
