@@ -1,8 +1,8 @@
 import React, { useState, useRef, useEffect, useMemo, useCallback, useLayoutEffect, type ReactElement } from 'react'
 import { createPortal, flushSync } from 'react-dom'
 import './GoalsPage.css'
+// Offline-aware API functions (optimistic updates + queue when offline)
 import {
-  fetchGoalsHierarchy,
   createGoal as apiCreateGoal,
   renameGoal as apiRenameGoal,
   deleteGoalById as apiDeleteGoalById,
@@ -16,19 +16,24 @@ import {
   setGoalStarred as apiSetGoalStarred,
   setGoalArchived as apiSetGoalArchived,
   deleteBucketById as apiDeleteBucketById,
-  deleteCompletedTasksInBucket as apiDeleteCompletedTasksInBucket,
-  deleteTaskById as apiDeleteTaskById,
   createTask as apiCreateTask,
   updateTaskText as apiUpdateTaskText,
   updateTaskNotes as apiUpdateTaskNotes,
   setTaskDifficulty as apiSetTaskDifficulty,
   setTaskCompletedAndResort as apiSetTaskCompletedAndResort,
-  setTaskSortIndex as apiSetTaskSortIndex,
-  setBucketSortIndex as apiSetBucketSortIndex,
-  setGoalSortIndex as apiSetGoalSortIndex,
   setTaskPriorityAndResort as apiSetTaskPriorityAndResort,
   upsertTaskSubtask as apiUpsertTaskSubtask,
   deleteTaskSubtask as apiDeleteTaskSubtask,
+  moveTaskToBucket as apiMoveTaskToBucket,
+  deleteTask as apiDeleteTaskById,
+} from '../lib/goalsApiOffline'
+// Direct API functions (read-only or not yet offline-enabled)
+import {
+  fetchGoalsHierarchy,
+  deleteCompletedTasksInBucket as apiDeleteCompletedTasksInBucket,
+  setTaskSortIndex as apiSetTaskSortIndex,
+  setBucketSortIndex as apiSetBucketSortIndex,
+  setGoalSortIndex as apiSetGoalSortIndex,
   replaceTaskSubtasks as apiReplaceTaskSubtasks,
   fetchTaskNotes as apiFetchTaskNotes,
   fetchGoalMilestones as apiFetchGoalMilestones,
@@ -38,7 +43,6 @@ import {
   setGoalMilestonesShown as apiSetGoalMilestonesShown,
   sortBucketTasksByDate as apiSortBucketTasksByDate,
   sortBucketTasksByPriority as apiSortBucketTasksByPriority,
-  moveTaskToBucket as apiMoveTaskToBucket,
 } from '../lib/goalsApi'
 import {
   DEFAULT_SURFACE_STYLE,
