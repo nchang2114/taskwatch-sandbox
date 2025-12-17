@@ -186,7 +186,18 @@ export async function createTask(
   // If online AND bucket ID is not a temp ID, sync immediately
   if (isOnline() && !isTempId(resolvedBucketId)) {
     try {
-      const result = await trackRequest(() => apiCreateTask(resolvedBucketId, text, { clientId: taskId, insertAtTop }))
+      // Don't pass clientId to API - let Supabase generate UUID, we'll update local state with it
+      const result = await trackRequest(() => apiCreateTask(resolvedBucketId, text, { insertAtTop }))
+      if (result) {
+        // Update local snapshot with the real ID from Supabase
+        updateLocalSnapshot((snapshot) => {
+          const found = findTaskInSnapshot(snapshot, taskId)
+          if (found) {
+            found.task.id = result.id
+          }
+          return snapshot
+        })
+      }
       return result
     } catch (error) {
       // Queue for retry
@@ -928,8 +939,9 @@ export async function deleteBucketById(bucketId: string): Promise<void> {
 
 registerOperationHandler('createTask', async (op: OfflineOperation) => {
   try {
-    const { bucketId, text, taskId, insertAtTop } = op.payload as { bucketId: string; text: string; taskId: string; insertAtTop: boolean }
-    const result = await apiCreateTask(bucketId, text, { clientId: taskId, insertAtTop })
+    const { bucketId, text, taskId: _taskId, insertAtTop } = op.payload as { bucketId: string; text: string; taskId: string; insertAtTop: boolean }
+    // Don't pass clientId - let Supabase generate UUID
+    const result = await apiCreateTask(bucketId, text, { insertAtTop })
     return { success: true, resolvedId: result?.id }
   } catch (error) {
     return { success: false, error: error instanceof Error ? error.message : String(error) }
