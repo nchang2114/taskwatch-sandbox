@@ -176,10 +176,13 @@ export async function createTask(
     return snapshot
   })
   
-  // If online, sync immediately
-  if (isOnline()) {
+  // Resolve bucket ID if it's a temp ID that has been synced
+  const resolvedBucketId = resolveId(bucketId)
+  
+  // If online AND bucket ID is not a temp ID, sync immediately
+  if (isOnline() && !isTempId(resolvedBucketId)) {
     try {
-      const result = await trackRequest(() => apiCreateTask(bucketId, text, { clientId: taskId, insertAtTop }))
+      const result = await trackRequest(() => apiCreateTask(resolvedBucketId, text, { clientId: taskId, insertAtTop }))
       return result
     } catch (error) {
       // Queue for retry
@@ -256,7 +259,7 @@ export async function setTaskCompletedAndResort(
     return snapshot
   })
   
-  if (isOnline() && !isTempId(resolvedTaskId)) {
+  if (isOnline() && !isTempId(resolvedTaskId) && !isTempId(resolvedBucketId)) {
     try {
       return await trackRequest(() => apiSetTaskCompletedAndResort(resolvedTaskId, resolvedBucketId, completed))
     } catch {
@@ -290,7 +293,7 @@ export async function setTaskPriorityAndResort(
     return snapshot
   })
   
-  if (isOnline() && !isTempId(resolvedTaskId)) {
+  if (isOnline() && !isTempId(resolvedTaskId) && !isTempId(resolvedBucketId)) {
     try {
       await trackRequest(() => apiSetTaskPriorityAndResort(resolvedTaskId, resolvedBucketId, completed, priority))
     } catch {
@@ -377,7 +380,7 @@ export async function deleteTask(taskId: string, bucketId: string): Promise<void
     return
   }
   
-  if (isOnline()) {
+  if (isOnline() && !isTempId(resolvedBucketId)) {
     try {
       await trackRequest(() => apiDeleteTask(resolvedTaskId, resolvedBucketId))
     } catch {
@@ -419,7 +422,7 @@ export async function moveTaskToBucket(
     return snapshot
   })
   
-  if (isOnline() && !isTempId(resolvedTaskId)) {
+  if (isOnline() && !isTempId(resolvedTaskId) && !isTempId(resolvedFromBucketId) && !isTempId(resolvedToBucketId)) {
     try {
       await trackRequest(() => apiMoveTaskToBucket(resolvedTaskId, resolvedFromBucketId, resolvedToBucketId, toIndex))
     } catch {
