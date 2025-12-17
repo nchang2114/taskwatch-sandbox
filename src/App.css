@@ -1174,15 +1174,6 @@ html[data-theme='light'] .profile-menu__link-status--synced {
   color: #45adff;
 }
 
-.profile-menu__link-status--syncing .profile-menu__link-status-icon {
-  animation: sync-spin 1s linear infinite;
-}
-
-@keyframes sync-spin {
-  from { transform: rotate(0deg); }
-  to { transform: rotate(360deg); }
-}
-
 html[data-theme='light'] .profile-menu__link-status--syncing {
   color: #2563eb;
 }
@@ -1201,35 +1192,6 @@ html[data-theme='light'] .profile-menu__link-status--offline {
 
 html[data-theme='light'] .profile-menu__link-status--pending {
   color: #ca8a04;
-}
-
-/* Clickable sync status (retry button) */
-button.profile-menu__link-status--clickable {
-  background: transparent;
-  border: none;
-  cursor: pointer;
-  width: 100%;
-  justify-content: flex-start;
-  border-radius: 0.4rem;
-  transition: background 160ms ease;
-}
-
-button.profile-menu__link-status--clickable:hover {
-  background: rgba(255, 255, 255, 0.08);
-}
-
-html[data-theme='light'] button.profile-menu__link-status--clickable:hover {
-  background: rgba(0, 0, 0, 0.05);
-}
-
-.profile-menu__link-status-retry {
-  margin-left: auto;
-  opacity: 0.5;
-  font-size: 1rem;
-}
-
-button.profile-menu__link-status--clickable:hover .profile-menu__link-status-retry {
-  opacity: 1;
 }
 
 .profile-menu__actions {

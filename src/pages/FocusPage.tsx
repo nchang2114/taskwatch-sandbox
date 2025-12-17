@@ -15,16 +15,13 @@ import './FocusPage.css'
 import './GoalsPage.css'
 import {
   fetchGoalsHierarchy,
-} from '../lib/goalsApi'
-// Offline-aware task operations
-import {
   setTaskCompletedAndResort,
   setTaskDifficulty,
   setTaskPriorityAndResort,
   updateTaskNotes as apiUpdateTaskNotes,
   upsertTaskSubtask as apiUpsertTaskSubtask,
   deleteTaskSubtask as apiDeleteTaskSubtask,
-} from '../lib/goalsApiOffline'
+} from '../lib/goalsApi'
 // Repeating rules fetch not needed for selector coloring; omit imports to avoid unused warnings
 // import { readRepeatingExceptions } from '../lib/repeatingExceptions'
 import { FOCUS_EVENT_TYPE, PAUSE_FOCUS_EVENT_TYPE, type FocusBroadcastDetail, type FocusBroadcastEvent } from '../lib/focusChannel'
