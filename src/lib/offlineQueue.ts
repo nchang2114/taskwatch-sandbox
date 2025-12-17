@@ -66,9 +66,10 @@ export const generateTempId = (): string => {
 
 /**
  * Check if an ID is a temporary offline ID
+ * Supports both `temp-` (queue generated) and `temp_` (UI optimistic) formats
  */
 export const isTempId = (id: string): boolean => {
-  return id.startsWith('temp-')
+  return id.startsWith('temp-') || id.startsWith('temp_')
 }
 
 /**
