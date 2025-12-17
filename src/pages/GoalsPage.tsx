@@ -10800,7 +10800,7 @@ const normalizedSearch = searchTerm.trim().toLowerCase()
     })
   }
 
-  const handleTaskDraftSubmit = (goalId: string, bucketId: string, options?: { keepDraft?: boolean }) => {
+  const handleTaskDraftSubmit = (_goalId: string, bucketId: string, options?: { keepDraft?: boolean }) => {
     if (submittingDrafts.current.has(bucketId)) {
       return
     }
