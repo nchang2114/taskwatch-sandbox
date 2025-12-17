@@ -65,11 +65,15 @@ export const generateTempId = (): string => {
 }
 
 /**
- * Check if an ID is a temporary offline ID
- * Supports both `temp-` (queue generated) and `temp_` (UI optimistic) formats
+ * Check if an ID is a temporary/local ID (not yet synced to server)
+ * Supports multiple formats:
+ * - `temp-` (queue generated)
+ * - `temp_` (UI optimistic tasks)
+ * - `g_` (UI optimistic goals)
+ * - `b_` (UI optimistic buckets)
  */
 export const isTempId = (id: string): boolean => {
-  return id.startsWith('temp-') || id.startsWith('temp_')
+  return id.startsWith('temp-') || id.startsWith('temp_') || id.startsWith('g_') || id.startsWith('b_')
 }
 
 /**
@@ -103,6 +107,27 @@ const writeQueue = (queue: OfflineOperation[]): void => {
 export const initOfflineQueue = (): void => {
   operationQueue = readQueue()
   updatePendingCount()
+}
+
+/**
+ * Clear all operations from the queue (for debugging/recovery)
+ */
+export const clearOfflineQueue = (): void => {
+  operationQueue = []
+  writeQueue([])
+  tempIdMap.clear()
+  updatePendingCount()
+  console.log('[offlineQueue] Queue cleared')
+}
+
+/**
+ * Get current queue state for debugging
+ */
+export const getQueueState = (): { operations: OfflineOperation[]; tempIdMap: Record<string, string> } => {
+  return {
+    operations: [...operationQueue],
+    tempIdMap: Object.fromEntries(tempIdMap),
+  }
 }
 
 /**
@@ -193,10 +218,24 @@ const processOperation = async (operation: OfflineOperation): Promise<boolean> =
   try {
     // Resolve any temp IDs in the payload before processing
     const resolvedPayload = { ...operation.payload }
+    let hasUnresolvedTempIds = false
+    
     for (const [key, value] of Object.entries(resolvedPayload)) {
       if (typeof value === 'string' && isTempId(value)) {
-        resolvedPayload[key] = resolveId(value)
+        const resolved = resolveId(value)
+        resolvedPayload[key] = resolved
+        // If it's still a temp ID after resolution, the parent hasn't synced yet
+        if (isTempId(resolved)) {
+          hasUnresolvedTempIds = true
+          console.log(`[offlineQueue] Operation ${operation.id} has unresolved temp ID for ${key}: ${value}`)
+        }
       }
+    }
+    
+    // Skip this operation if it has unresolved temp IDs - parent needs to sync first
+    if (hasUnresolvedTempIds) {
+      console.log(`[offlineQueue] Skipping operation ${operation.id} - waiting for parent to sync`)
+      return false
     }
     
     const result = await handler({ ...operation, payload: resolvedPayload })

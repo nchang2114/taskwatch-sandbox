@@ -16,6 +16,8 @@ import {
   generateTempId,
   isTempId,
   resolveId,
+  clearOfflineQueue,
+  getQueueState,
   type OfflineOperation,
 } from './offlineQueue'
 import {
@@ -178,6 +180,8 @@ export async function createTask(
   
   // Resolve bucket ID if it's a temp ID that has been synced
   const resolvedBucketId = resolveId(bucketId)
+  
+  console.log('[goalsApiOffline] createTask:', { bucketId, resolvedBucketId, isTempId: isTempId(resolvedBucketId), isOnline: isOnline() })
   
   // If online AND bucket ID is not a temp ID, sync immediately
   if (isOnline() && !isTempId(resolvedBucketId)) {
@@ -1159,3 +1163,11 @@ registerOperationHandler('deleteBucket', async (op: OfflineOperation) => {
     return { success: false, error: error instanceof Error ? error.message : String(error) }
   }
 })
+
+// Expose debug functions on window for troubleshooting
+if (typeof window !== 'undefined') {
+  (window as unknown as Record<string, unknown>).__offlineQueue = {
+    clear: clearOfflineQueue,
+    getState: getQueueState,
+  }
+}
