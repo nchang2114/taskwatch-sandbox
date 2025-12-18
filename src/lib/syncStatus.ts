@@ -215,3 +215,8 @@ export const subscribeSyncStatus = (
     window.removeEventListener(SYNC_STATUS_CHANGE_EVENT, handler)
   }
 }
+
+// Auto-initialize listeners when module loads
+if (typeof window !== 'undefined') {
+  initSyncStatusListeners()
+}

@@ -570,7 +570,7 @@ export async function createGoal(
   const sort_index = await nextSortIndex('goals')
   const safeColour = normalizeGoalColour(color, FALLBACK_GOAL_COLOR)
   const payload = {
-    ...(options?.id ? { id: options.id } : null),
+    ...(options?.id ? { id: options.id } : {}),
     user_id: session.user.id,
     name,
     goal_colour: safeColour,
@@ -580,9 +580,10 @@ export async function createGoal(
   }
   let created: any | null = null
   {
+    // Use upsert for offline-first: if goal exists, update it; if not, insert it
     const { data, error } = await supabase
       .from('goals')
-      .insert([payload])
+      .upsert(payload, { onConflict: 'id' })
       .select('id, name, goal_colour, sort_index, starred, goal_archive')
       .single()
     if (!error) {
@@ -735,7 +736,7 @@ export async function createBucket(
   const normalizedSurface = sanitizeBucketSurfaceStyle(surface) ?? DEFAULT_SURFACE_STYLE
   const sort_index = await nextSortIndex('buckets', { goal_id: goalId })
   const payload = {
-    ...(options?.id ? { id: options.id } : null),
+    ...(options?.id ? { id: options.id } : {}),
     user_id: session.user.id,
     goal_id: goalId,
     name,
@@ -744,17 +745,18 @@ export async function createBucket(
     sort_index,
     buckets_card_style: normalizedSurface,
   }
-  const attemptInsert = async (style: string | null) => {
+  // Use upsert for offline-first: if bucket exists, update it; if not, insert it
+  const attemptUpsert = async (style: string | null) => {
     const base = { ...payload, buckets_card_style: style }
     return client
       .from('buckets')
-      .insert([base])
+      .upsert(base, { onConflict: 'id' })
       .select('id, name, favorite, bucket_archive, sort_index, buckets_card_style')
       .single()
   }
-  let { data, error } = await attemptInsert(normalizedSurface)
+  let { data, error } = await attemptUpsert(normalizedSurface)
   if (error && String((error as any)?.code || '') === '23514') {
-    const retry = await attemptInsert(null)
+    const retry = await attemptUpsert(null)
     data = retry.data
     error = retry.error
   }
@@ -885,11 +887,13 @@ export async function createTask(
   const sort_index = insertAtTop
     ? await prependSortIndexForTasks(bucketId, false)
     : await nextSortIndex('tasks', { bucket_id: bucketId, completed: false })
+  // Use upsert to handle offline-first: if task exists (created while online), update it
+  // If it doesn't exist (created offline), insert it
   const { data, error } = await supabase
     .from('tasks')
-    .insert([
+    .upsert(
       {
-        ...(options?.clientId ? { id: options.clientId } : null),
+        ...(options?.clientId ? { id: options.clientId } : {}),
         user_id: session.user.id,
         bucket_id: bucketId,
         text,
@@ -899,7 +903,8 @@ export async function createTask(
         sort_index,
         notes: '',
       },
-    ])
+      { onConflict: 'id' }
+    )
     .select('id, text, completed, difficulty, priority, sort_index, notes')
     .single()
   if (error || !data) {
