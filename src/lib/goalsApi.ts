@@ -557,11 +557,7 @@ async function updateTaskWithGuard(
 }
 
 // ---------- Goals ----------
-export async function createGoal(
-  name: string,
-  color: string,
-  options?: { id?: string }
-) {
+export async function createGoal(name: string, color: string) {
   if (!supabase) return null
   const session = await ensureSingleUserSession()
   if (!session?.user?.id) {
@@ -570,7 +566,6 @@ export async function createGoal(
   const sort_index = await nextSortIndex('goals')
   const safeColour = normalizeGoalColour(color, FALLBACK_GOAL_COLOR)
   const payload = {
-    ...(options?.id ? { id: options.id } : {}),
     user_id: session.user.id,
     name,
     goal_colour: safeColour,
@@ -580,10 +575,9 @@ export async function createGoal(
   }
   let created: any | null = null
   {
-    // Use upsert for offline-first: if goal exists, update it; if not, insert it
     const { data, error } = await supabase
       .from('goals')
-      .upsert(payload, { onConflict: 'id' })
+      .insert([payload])
       .select('id, name, goal_colour, sort_index, starred, goal_archive')
       .single()
     if (!error) {
@@ -721,12 +715,7 @@ export async function setGoalSortIndex(goalId: string, toIndex: number) {
 }
 
 // ---------- Buckets ----------
-export async function createBucket(
-  goalId: string,
-  name: string,
-  surface: string = 'glass',
-  options?: { id?: string }
-) {
+export async function createBucket(goalId: string, name: string, surface: string = 'glass') {
   if (!supabase) return null
   const client = supabase
   const session = await ensureSingleUserSession()
@@ -736,7 +725,6 @@ export async function createBucket(
   const normalizedSurface = sanitizeBucketSurfaceStyle(surface) ?? DEFAULT_SURFACE_STYLE
   const sort_index = await nextSortIndex('buckets', { goal_id: goalId })
   const payload = {
-    ...(options?.id ? { id: options.id } : {}),
     user_id: session.user.id,
     goal_id: goalId,
     name,
@@ -745,18 +733,17 @@ export async function createBucket(
     sort_index,
     buckets_card_style: normalizedSurface,
   }
-  // Use upsert for offline-first: if bucket exists, update it; if not, insert it
-  const attemptUpsert = async (style: string | null) => {
+  const attemptInsert = async (style: string | null) => {
     const base = { ...payload, buckets_card_style: style }
     return client
       .from('buckets')
-      .upsert(base, { onConflict: 'id' })
+      .insert([base])
       .select('id, name, favorite, bucket_archive, sort_index, buckets_card_style')
       .single()
   }
-  let { data, error } = await attemptUpsert(normalizedSurface)
+  let { data, error } = await attemptInsert(normalizedSurface)
   if (error && String((error as any)?.code || '') === '23514') {
-    const retry = await attemptUpsert(null)
+    const retry = await attemptInsert(null)
     data = retry.data
     error = retry.error
   }
@@ -887,13 +874,11 @@ export async function createTask(
   const sort_index = insertAtTop
     ? await prependSortIndexForTasks(bucketId, false)
     : await nextSortIndex('tasks', { bucket_id: bucketId, completed: false })
-  // Use upsert to handle offline-first: if task exists (created while online), update it
-  // If it doesn't exist (created offline), insert it
   const { data, error } = await supabase
     .from('tasks')
-    .upsert(
+    .insert([
       {
-        ...(options?.clientId ? { id: options.clientId } : {}),
+        ...(options?.clientId ? { id: options.clientId } : null),
         user_id: session.user.id,
         bucket_id: bucketId,
         text,
@@ -903,8 +888,7 @@ export async function createTask(
         sort_index,
         notes: '',
       },
-      { onConflict: 'id' }
-    )
+    ])
     .select('id, text, completed, difficulty, priority, sort_index, notes')
     .single()
   if (error || !data) {
@@ -1251,6 +1235,63 @@ export async function sortBucketTasksByPriority(bucketId: string): Promise<{ id:
     // Same priority+difficulty: keep original order (already sorted by sort_index)
     return 0
   })
+  
+  // Build batch updates with new sort_index values
+  const updates = sorted.map((task, index) => ({
+    id: task.id,
+    sort_index: (index + 1) * STEP,
+  }))
+  
+  // Update each task's sort_index
+  await Promise.all(
+    updates.map(({ id, sort_index }) =>
+      supabase!
+        .from('tasks')
+        .update({ sort_index })
+        .eq('id', id)
+        .eq('user_id', userId)
+    )
+  )
+  
+  return updates
+}
+
+/** Sort all tasks in a bucket alphabetically by name (case-insensitive).
+ * Priority tasks are sorted separately and remain at the top.
+ * Returns the updated task IDs with their new sort_index values, or null on failure. */
+export async function sortBucketTasksByName(bucketId: string, direction: 'asc' | 'desc' = 'asc'): Promise<{ id: string; sort_index: number }[] | null> {
+  if (!supabase) return null
+  const userId = await getActiveUserId()
+  if (!userId) return null
+  
+  const STEP = 1024
+  
+  // Fetch all tasks in the bucket with their text and priority
+  const { data: tasks, error } = await supabase
+    .from('tasks')
+    .select('id, text, priority')
+    .eq('bucket_id', bucketId)
+    .eq('user_id', userId)
+  
+  if (error || !tasks || tasks.length === 0) return null
+  
+  // Separate priority and non-priority tasks
+  const priorityTasks = tasks.filter(t => t.priority)
+  const nonPriorityTasks = tasks.filter(t => !t.priority)
+  
+  // Sort each group alphabetically by text (case-insensitive)
+  const sortByName = (a: typeof tasks[0], b: typeof tasks[0]) => {
+    const textA = (a.text || '').toLowerCase()
+    const textB = (b.text || '').toLowerCase()
+    const result = textA.localeCompare(textB)
+    return direction === 'asc' ? result : -result
+  }
+  
+  priorityTasks.sort(sortByName)
+  nonPriorityTasks.sort(sortByName)
+  
+  // Combine: priority tasks first, then non-priority
+  const sorted = [...priorityTasks, ...nonPriorityTasks]
   
   // Build batch updates with new sort_index values
   const updates = sorted.map((task, index) => ({

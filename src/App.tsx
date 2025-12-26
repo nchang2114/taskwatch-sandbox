@@ -17,7 +17,6 @@ import { ensureHistoryUser } from './lib/sessionHistory'
 import { ensureRepeatingRulesUser } from './lib/repeatingSessions'
 import { bootstrapGuestDataIfNeeded, clearAllLocalStorage, clearLastFullSyncTimestamp } from './lib/bootstrap'
 import { ensureGoalsUser } from './lib/goalsSync'
-import { subscribeSyncStatus, getSyncStatus, getPendingCount, type SyncStatusState } from './lib/syncStatus'
 
 type Theme = 'light' | 'dark'
 type TabKey = 'goals' | 'focus' | 'reflection'
@@ -27,7 +26,7 @@ type UserProfile = {
   avatarUrl?: string
   appTimezone?: string | null
 }
-type SyncStatus = SyncStatusState // Alias for the imported type
+type SyncStatus = 'synced' | 'syncing' | 'offline' | 'pending'
 
 const THEME_STORAGE_KEY = 'nc-taskwatch-theme'
 const QUICK_LIST_EXPANDED_STORAGE_KEY = 'nc-taskwatch-quick-list-expanded-v1'
@@ -248,10 +247,10 @@ const deriveProfileFromSupabaseUser = (user: User | null | undefined, appTimezon
 }
 
 const SYNC_STATUS_COPY: Record<SyncStatus, { icon: string; label: string }> = {
-  synced: { icon: '✓', label: 'Synced' },
+  synced: { icon: '✓', label: 'Synced just now' },
   syncing: { icon: '⟳', label: 'Syncing…' },
   offline: { icon: '⚠', label: 'Offline — changes saved locally' },
-  pending: { icon: '⛁', label: 'Pending sync' },
+  pending: { icon: '⛁', label: 'Local changes pending upload (3)' },
 }
 
 const createHelpIcon = (children: ReactNode): ReactNode => (
@@ -480,8 +479,7 @@ function MainApp() {
   const [isNavCollapsed, setIsNavCollapsed] = useState(false)
   const [isNavOpen, setIsNavOpen] = useState(false)
   const [userProfile, setUserProfile] = useState<UserProfile | null>(() => readStoredProfile())
-  const [syncStatus, setSyncStatus] = useState<SyncStatus>(() => getSyncStatus())
-  const [pendingCount, setPendingCount] = useState<number>(() => getPendingCount())
+  const [syncStatus] = useState<SyncStatus>('synced')
   const [profileMenuOpen, setProfileMenuOpen] = useState(false)
   const [profileHelpMenuOpen, setProfileHelpMenuOpen] = useState(false)
   const [authModalOpen, setAuthModalOpen] = useState(false)
@@ -548,13 +546,7 @@ function MainApp() {
     const initials = tokens.join('')
     return initials || 'U'
   }, [userProfile])
-  const syncStatusCopy = useMemo(() => {
-    const base = SYNC_STATUS_COPY[syncStatus]
-    if (syncStatus === 'pending' && pendingCount > 0) {
-      return { ...base, label: `${pendingCount} change${pendingCount === 1 ? '' : 's'} pending` }
-    }
-    return base
-  }, [syncStatus, pendingCount])
+  const syncStatusCopy = SYNC_STATUS_COPY[syncStatus]
   const profileButtonClassName = useMemo(
     () =>
       ['profile-button', isSignedIn ? 'profile-button--signed-in' : 'profile-button--guest', profileMenuOpen ? 'profile-button--open' : '']
@@ -599,15 +591,6 @@ function MainApp() {
     }
     previousProfileRef.current = userProfile ?? null
   }, [userProfile])
-
-  // Subscribe to sync status changes (offline/syncing/pending/synced)
-  useEffect(() => {
-    const unsubscribe = subscribeSyncStatus((status, count) => {
-      setSyncStatus(status)
-      setPendingCount(count)
-    })
-    return unsubscribe
-  }, [])
 
   const featureModalOpenRef = useRef(false)
   
