@@ -2097,12 +2097,11 @@ const nextThemeLabel = theme === 'dark' ? 'light' : 'dark'
                 {theme === 'dark' ? '☾ Dark' : '☀ Light'}
               </button>
             </div>
-            <div className="settings-panel__row">
+            <div className="settings-panel__row settings-panel__row--disabled">
               <div>
                 <p className="settings-panel__row-title">Accent color</p>
                 <p className="settings-panel__row-subtitle">Pick the highlight tone for panels.</p>
               </div>
-              <button type="button" className="settings-panel__chip">Blue ▾</button>
             </div>
             <div className="settings-panel__row">
               <div>
@@ -2194,12 +2193,11 @@ const nextThemeLabel = theme === 'dark' ? 'light' : 'dark'
               </div>
               <button type="button" className="settings-panel__chip">Focus ▾</button>
             </div>
-            <div className="settings-panel__row">
+            <div className="settings-panel__row settings-panel__row--disabled">
               <div>
                 <p className="settings-panel__row-title">Language</p>
                 <p className="settings-panel__row-subtitle">Display language for the app.</p>
               </div>
-              <button type="button" className="settings-panel__chip">Auto-detect ▾</button>
             </div>
           </div>
         </>
@@ -2307,26 +2305,23 @@ const nextThemeLabel = theme === 'dark' ? 'light' : 'dark'
             </div>
           </header>
           <div className="settings-panel__group">
-            <div className="settings-panel__row">
+            <div className="settings-panel__row settings-panel__row--disabled">
               <div>
                 <p className="settings-panel__row-title">Session reminders</p>
                 <p className="settings-panel__row-subtitle">Get notified before scheduled sessions.</p>
               </div>
-              <button type="button" className="settings-panel__text-toggle">Off</button>
             </div>
-            <div className="settings-panel__row">
+            <div className="settings-panel__row settings-panel__row--disabled">
               <div>
                 <p className="settings-panel__row-title">Daily reflection reminder</p>
                 <p className="settings-panel__row-subtitle">Reminder to review your day.</p>
               </div>
-              <button type="button" className="settings-panel__text-toggle">Off</button>
             </div>
-            <div className="settings-panel__row">
+            <div className="settings-panel__row settings-panel__row--disabled">
               <div>
                 <p className="settings-panel__row-title">Return to focus reminder</p>
                 <p className="settings-panel__row-subtitle">Nudge to get back on track after breaks.</p>
               </div>
-              <button type="button" className="settings-panel__text-toggle">Off</button>
             </div>
           </div>
         </>
@@ -2348,13 +2343,6 @@ const nextThemeLabel = theme === 'dark' ? 'light' : 'dark'
                 <p className="settings-panel__row-subtitle">Restore from a backup file.</p>
               </div>
               <button type="button" className="settings-panel__chip">Import</button>
-            </div>
-            <div className="settings-panel__row">
-              <div>
-                <p className="settings-panel__row-title">Export data</p>
-                <p className="settings-panel__row-subtitle">Download all your data as a file.</p>
-              </div>
-              <button type="button" className="settings-panel__chip">Export</button>
             </div>
             <div className="settings-panel__row">
               <div>
@@ -2411,13 +2399,6 @@ const nextThemeLabel = theme === 'dark' ? 'light' : 'dark'
                 <p className="settings-panel__row-subtitle">Connected sign-in methods.</p>
               </div>
               <button type="button" className="settings-panel__chip">Manage</button>
-            </div>
-            <div className="settings-panel__row">
-              <div>
-                <p className="settings-panel__row-title">Restore purchases</p>
-                <p className="settings-panel__row-subtitle">Recover previous subscriptions.</p>
-              </div>
-              <button type="button" className="settings-panel__chip">Restore</button>
             </div>
             <div className="settings-panel__row">
               <div>

@@ -471,7 +471,41 @@ export async function deleteGoalMilestone(goalId: string, milestoneId: string) {
 
 // ---------- Helpers: sort index utilities ----------
 const STEP = 1024
+const MIN_GAP = 2 // Minimum gap before rebalancing is needed
 const mid = (a: number, b: number) => Math.floor((a + b) / 2)
+
+/**
+ * Rebalance all goal sort_index values for a user to create even spacing.
+ * This is called when sort_index space is exhausted (e.g., after many insertions at the beginning).
+ */
+async function rebalanceGoalSortIndices(userId: string): Promise<Map<string, number>> {
+  const result = new Map<string, number>()
+  if (!supabase) return result
+
+  // Fetch all goals ordered by current sort_index
+  const { data: goals, error } = await supabase
+    .from('goals')
+    .select('id, sort_index')
+    .eq('user_id', userId)
+    .order('sort_index', { ascending: true })
+
+  if (error || !goals || goals.length === 0) return result
+
+  // Reassign sort_index values with even STEP spacing
+  const client = supabase
+  for (let index = 0; index < goals.length; index++) {
+    const goal = goals[index] as any
+    const newSort = (index + 1) * STEP
+    result.set(goal.id, newSort)
+    await client
+      .from('goals')
+      .update({ sort_index: newSort })
+      .eq('id', goal.id)
+      .eq('user_id', userId)
+  }
+
+  return result
+}
 
 async function nextSortIndex(table: 'goals' | 'buckets' | 'tasks', filters?: Record<string, any>) {
   if (!supabase) return STEP
@@ -680,37 +714,93 @@ export async function deleteGoalById(goalId: string) {
   await supabase.from('goals').delete().eq('id', goalId).eq('user_id', userId)
 }
 
-export async function setGoalSortIndex(goalId: string, toIndex: number) {
+export async function setGoalSortIndex(
+  goalId: string,
+  prevGoalId: string | null,
+  nextGoalId: string | null
+) {
   if (!supabase) return
   const userId = await getActiveUserId()
   if (!userId) return
-  // Load ordered goals
-  const { data: rows } = await supabase
-    .from('goals')
-    .select('id, sort_index')
-    .eq('user_id', userId)
-    .order('sort_index', { ascending: true })
-  if (!rows || rows.length === 0) return
-  const ids = rows.map((r: any) => r.id as string)
-  const prevId = toIndex <= 0 ? null : ids[toIndex - 1] ?? null
-  const nextId = toIndex >= ids.length ? null : ids[toIndex] ?? null
-  let newSort: number
-  if (!prevId && nextId) {
-    const next = rows.find((r: any) => r.id === nextId) as any
-    newSort = Math.floor((next.sort_index || STEP) / 2) || STEP
-  } else if (prevId && !nextId) {
-    const prev = rows.find((r: any) => r.id === prevId) as any
-    newSort = (prev.sort_index || 0) + STEP
-  } else if (prevId && nextId) {
-    const prev = rows.find((r: any) => r.id === prevId) as any
-    const next = rows.find((r: any) => r.id === nextId) as any
-    newSort = mid(prev.sort_index || 0, next.sort_index || STEP)
-    if (newSort === prev.sort_index || newSort === next.sort_index) {
-      newSort = (prev.sort_index || 0) + Math.ceil(STEP / 2)
+
+  let newSort: number = STEP
+  let needsRebalance = false
+
+  // Fetch sort_index values for the neighbor goals (if provided)
+  if (prevGoalId && nextGoalId) {
+    // Inserting between two goals - calculate midpoint
+    const { data: neighbors } = await supabase
+      .from('goals')
+      .select('id, sort_index')
+      .eq('user_id', userId)
+      .in('id', [prevGoalId, nextGoalId])
+    const prev = neighbors?.find((r: any) => r.id === prevGoalId) as any
+    const next = neighbors?.find((r: any) => r.id === nextGoalId) as any
+    const prevSort = prev?.sort_index ?? 0
+    const nextSort = next?.sort_index ?? STEP
+    const gap = nextSort - prevSort
+    if (gap < MIN_GAP) {
+      // Not enough space between neighbors - need to rebalance
+      needsRebalance = true
+    } else {
+      newSort = mid(prevSort, nextSort)
+      // Handle collision (when midpoint equals one of the neighbors)
+      if (newSort === prevSort || newSort === nextSort) {
+        needsRebalance = true
+      }
+    }
+  } else if (prevGoalId && !nextGoalId) {
+    // Inserting at the end (after prevGoalId)
+    const { data: prev } = await supabase
+      .from('goals')
+      .select('sort_index')
+      .eq('user_id', userId)
+      .eq('id', prevGoalId)
+      .single()
+    newSort = ((prev as any)?.sort_index ?? 0) + STEP
+  } else if (!prevGoalId && nextGoalId) {
+    // Inserting at the beginning (before nextGoalId)
+    const { data: next } = await supabase
+      .from('goals')
+      .select('sort_index')
+      .eq('user_id', userId)
+      .eq('id', nextGoalId)
+      .single()
+    const nextSort = (next as any)?.sort_index ?? STEP
+    if (nextSort < MIN_GAP) {
+      // Not enough space before the first goal - need to rebalance
+      needsRebalance = true
+    } else {
+      newSort = Math.floor(nextSort / 2)
+      if (newSort < 1) {
+        needsRebalance = true
+      }
     }
   } else {
+    // No neighbors - first/only goal
     newSort = STEP
   }
+
+  if (needsRebalance) {
+    // Rebalance all goals first, then place the goal in its correct position
+    const rebalanced = await rebalanceGoalSortIndices(userId)
+    
+    // After rebalancing, recalculate newSort based on updated neighbor values
+    if (prevGoalId && nextGoalId) {
+      const prevSort = rebalanced.get(prevGoalId) ?? STEP
+      const nextSort = rebalanced.get(nextGoalId) ?? STEP * 2
+      newSort = mid(prevSort, nextSort)
+    } else if (prevGoalId && !nextGoalId) {
+      const prevSort = rebalanced.get(prevGoalId) ?? 0
+      newSort = prevSort + STEP
+    } else if (!prevGoalId && nextGoalId) {
+      const nextSort = rebalanced.get(nextGoalId) ?? STEP
+      newSort = Math.floor(nextSort / 2)
+    } else {
+      newSort = STEP
+    }
+  }
+
   await supabase.from('goals').update({ sort_index: newSort }).eq('id', goalId).eq('user_id', userId)
 }
 
@@ -1235,6 +1325,63 @@ export async function sortBucketTasksByPriority(bucketId: string): Promise<{ id:
     // Same priority+difficulty: keep original order (already sorted by sort_index)
     return 0
   })
+  
+  // Build batch updates with new sort_index values
+  const updates = sorted.map((task, index) => ({
+    id: task.id,
+    sort_index: (index + 1) * STEP,
+  }))
+  
+  // Update each task's sort_index
+  await Promise.all(
+    updates.map(({ id, sort_index }) =>
+      supabase!
+        .from('tasks')
+        .update({ sort_index })
+        .eq('id', id)
+        .eq('user_id', userId)
+    )
+  )
+  
+  return updates
+}
+
+/** Sort all tasks in a bucket alphabetically by name (case-insensitive).
+ * Priority tasks are sorted separately and remain at the top.
+ * Returns the updated task IDs with their new sort_index values, or null on failure. */
+export async function sortBucketTasksByName(bucketId: string, direction: 'asc' | 'desc' = 'asc'): Promise<{ id: string; sort_index: number }[] | null> {
+  if (!supabase) return null
+  const userId = await getActiveUserId()
+  if (!userId) return null
+  
+  const STEP = 1024
+  
+  // Fetch all tasks in the bucket with their text and priority
+  const { data: tasks, error } = await supabase
+    .from('tasks')
+    .select('id, text, priority')
+    .eq('bucket_id', bucketId)
+    .eq('user_id', userId)
+  
+  if (error || !tasks || tasks.length === 0) return null
+  
+  // Separate priority and non-priority tasks
+  const priorityTasks = tasks.filter(t => t.priority)
+  const nonPriorityTasks = tasks.filter(t => !t.priority)
+  
+  // Sort each group alphabetically by text (case-insensitive)
+  const sortByName = (a: typeof tasks[0], b: typeof tasks[0]) => {
+    const textA = (a.text || '').toLowerCase()
+    const textB = (b.text || '').toLowerCase()
+    const result = textA.localeCompare(textB)
+    return direction === 'asc' ? result : -result
+  }
+  
+  priorityTasks.sort(sortByName)
+  nonPriorityTasks.sort(sortByName)
+  
+  // Combine: priority tasks first, then non-priority
+  const sorted = [...priorityTasks, ...nonPriorityTasks]
   
   // Build batch updates with new sort_index values
   const updates = sorted.map((task, index) => ({

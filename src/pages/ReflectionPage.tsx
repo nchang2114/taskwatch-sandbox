@@ -54,6 +54,9 @@ import {
   readStoredHistory as readPersistedHistory,
   persistHistorySnapshot,
   syncHistoryWithSupabase,
+  fetchHistoryForDateRange,
+  isMonthFetched,
+  HISTORY_REMOTE_WINDOW_DAYS,
   gradientFromSurface,
   type HistoryEntry,
   type HistorySubtask,
@@ -425,6 +428,91 @@ const CalendarActionsKebab = ({ onDuplicate, previewRef }: CalendarActionsKebabP
           <button
             type="button"
             className="calendar-popover__menu-item"
+            onPointerDown={(ev) => {
+              ev.preventDefault()
+              ev.stopPropagation()
+              try {
+                onDuplicate()
+              } finally {
+                setOpen(false)
+              }
+            }}
+          >
+            Duplicate entry
+          </button>
+        </div>
+      ) : null}
+    </div>
+  )
+}
+
+type MonthCellActionsKebabProps = {
+  onDuplicate: () => void
+  containerRef: RefObject<HTMLDivElement | null>
+}
+
+const MonthCellActionsKebab = ({ onDuplicate, containerRef }: MonthCellActionsKebabProps) => {
+  const [open, setOpen] = useState(false)
+  const [menuPosition, setMenuPosition] = useState<{ top: number; left: number } | null>(null)
+  const btnRef = useRef<HTMLButtonElement | null>(null)
+
+  useEffect(() => {
+    if (!open) return
+    const onDocDown = (e: Event) => {
+      const target = e.target as HTMLElement | null
+      if (!target) return
+      const host = containerRef.current
+      if (host && host.contains(target)) {
+        const menu = host.querySelector('.month-cell-overview__menu') as HTMLElement | null
+        if (menu && menu.contains(target)) return
+        if (btnRef.current && btnRef.current.contains(target)) return
+      }
+      setOpen(false)
+    }
+    window.addEventListener('pointerdown', onDocDown as EventListener, true)
+    return () => window.removeEventListener('pointerdown', onDocDown as EventListener, true)
+  }, [open, containerRef])
+
+  const handleToggle = (ev: React.PointerEvent<HTMLButtonElement>) => {
+    ev.preventDefault()
+    ev.stopPropagation()
+    if (!open && btnRef.current) {
+      const rect = btnRef.current.getBoundingClientRect()
+      // Position menu below and to the right of button, but keep it within viewport
+      const menuWidth = 160
+      let left = rect.right - menuWidth
+      if (left < 8) left = 8
+      if (left + menuWidth > window.innerWidth - 8) left = window.innerWidth - menuWidth - 8
+      setMenuPosition({ top: rect.bottom + 6, left })
+    }
+    setOpen((v) => !v)
+  }
+
+  return (
+    <div className="month-cell-overview__kebab-wrap">
+      <button
+        ref={btnRef}
+        type="button"
+        className="month-cell-overview__action"
+        aria-label="More actions"
+        onPointerDown={handleToggle}
+        onClick={(ev) => {
+          ev.preventDefault()
+          ev.stopPropagation()
+        }}
+      >
+        <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="5" r="1.75"/><circle cx="12" cy="12" r="1.75"/><circle cx="12" cy="19" r="1.75"/></svg>
+      </button>
+      {open && menuPosition ? (
+        <div
+          className="month-cell-overview__menu"
+          role="menu"
+          style={{ top: menuPosition.top, left: menuPosition.left }}
+          onClick={(e) => e.stopPropagation()}
+        >
+          <button
+            type="button"
+            className="month-cell-overview__menu-item"
             onPointerDown={(ev) => {
               ev.preventDefault()
               ev.stopPropagation()
@@ -2137,6 +2225,63 @@ const isEntryAllDay = (entry: { isAllDay?: boolean; startedAt: number; endedAt: 
   return isAllDayRangeTs(entry.startedAt, entry.endedAt)
 }
 
+// All-day entries store timestamps as UTC midnight.
+// The date picker operates in local time. These helpers convert between them.
+
+// Convert a UTC midnight timestamp to a local midnight timestamp for the SAME calendar date.
+// E.g., Jan 25 00:00 UTC → Jan 25 00:00 local (regardless of timezone offset)
+const utcMidnightToLocalMidnight = (utcMs: number): number => {
+  const d = new Date(utcMs)
+  // Extract UTC date components
+  const year = d.getUTCFullYear()
+  const month = d.getUTCMonth()
+  const day = d.getUTCDate()
+  // Create local midnight for the same calendar date
+  return new Date(year, month, day).getTime()
+}
+
+// Convert a local midnight timestamp to a UTC midnight timestamp for the SAME calendar date.
+// E.g., Jan 25 00:00 local → Jan 25 00:00 UTC (regardless of timezone offset)
+const localMidnightToUtcMidnight = (localMs: number): number => {
+  const d = new Date(localMs)
+  // Extract local date components
+  const year = d.getFullYear()
+  const month = d.getMonth()
+  const day = d.getDate()
+  // Create UTC midnight for the same calendar date
+  return Date.UTC(year, month, day)
+}
+
+// All-day entries store endedAt as exclusive (midnight of the day AFTER the last visible day).
+// For display/editing, convert to inclusive end date (the last day the event appears on).
+// E.g., if endedAt is Jan 27 00:00 UTC, the event displays through Jan 26, so show Jan 26.
+// Returns LOCAL midnight for use with date picker.
+const allDayExclusiveToInclusiveEnd = (exclusiveEndMs: number): number => {
+  // Subtract 1 day to get the inclusive end date (still in UTC)
+  const inclusiveUtc = exclusiveEndMs - DAY_DURATION_MS
+  // Convert to local midnight for the date picker
+  return utcMidnightToLocalMidnight(inclusiveUtc)
+}
+
+// Convert an inclusive end date (picked by user in local time) back to exclusive storage format.
+// E.g., if user picks Jan 26 as end date (local midnight), store Jan 27 00:00 UTC.
+const allDayInclusiveToExclusiveEnd = (inclusiveLocalMs: number): number => {
+  // Convert local midnight to UTC midnight for the same calendar date
+  const inclusiveUtc = localMidnightToUtcMidnight(inclusiveLocalMs)
+  // Add 1 day to get the exclusive end date
+  return inclusiveUtc + DAY_DURATION_MS
+}
+
+// Convert all-day start date for display (UTC storage → local picker)
+const allDayStartToDisplay = (utcMs: number): number => {
+  return utcMidnightToLocalMidnight(utcMs)
+}
+
+// Convert all-day start date from picker to storage (local picker → UTC storage)
+const allDayStartFromDisplay = (localMs: number): number => {
+  return localMidnightToUtcMidnight(localMs)
+}
+
 // Check if an entry is a skipped session (zero-elapsed entry created when skipping a repeating guide)
 // These should not be displayed in the calendar as visible events
 const isSkippedSession = (entry: { elapsed: number; repeatingSessionId?: string | null }): boolean => {
@@ -3697,11 +3842,7 @@ const computeRangeOverview = (
   >()
 
   // Filter out all-day blocks before splitting (they distort time-of-day breakdown)
-  const filteredHistory = history.filter((entry) => {
-    const start = Math.min(entry.startedAt, entry.endedAt)
-    const end = Math.max(entry.startedAt, entry.endedAt)
-    return !isAllDayRangeTs(start, end)
-  })
+  const filteredHistory = history.filter((entry) => !isEntryAllDay(entry))
 
   // Split concurrent events - shorter events take priority during overlaps
   const slices = splitConcurrentEvents(filteredHistory, windowStart, now)
@@ -3787,11 +3928,23 @@ type ReflectionPageProps = {
   snapToInterval?: 0 | 5 | 10 | 15 // 0 = none, or minutes
 }
 
+const REFLECTION_UNLOCK_STORAGE_KEY = 'taskwatch-reflection-unlocked'
+const REFLECTION_BYPASS_PASSWORD = (import.meta.env.VITE_REFLECTION_BYPASS_PASSWORD ?? '123').trim()
+
 export default function ReflectionPage({ use24HourTime = false, weekStartDay = 0, defaultCalendarView = 6, snapToInterval = 0 }: ReflectionPageProps) {
   // App timezone override - allows user to switch timezones without changing system settings
   const [appTimezone, setAppTimezone] = useState<string | null>(() => readStoredAppTimezone())
   // Deferred timezone for heavy computations (calendar/timeline) - avoids blocking UI
   const deferredAppTimezone = useDeferredValue(appTimezone)
+  const [reflectionUnlocked, setReflectionUnlocked] = useState(() => {
+    if (typeof window === 'undefined') return false
+    return window.localStorage.getItem(REFLECTION_UNLOCK_STORAGE_KEY) === 'true'
+  })
+  const [isReflectionActive, setIsReflectionActive] = useState(true)
+  const [reflectionUnlockInput, setReflectionUnlockInput] = useState('')
+  const [reflectionUnlockError, setReflectionUnlockError] = useState<string | null>(null)
+  const reflectionUnlockInputId = useId()
+  const reflectionRootRef = useRef<HTMLElement | null>(null)
   
   // Handler to update app timezone and persist to localStorage + DB
   // Wrapped in startTransition to avoid blocking UI during heavy calendar re-renders
@@ -3816,6 +3969,34 @@ export default function ReflectionPage({ use24HourTime = false, weekStartDay = 0
       })()
     }
   }, [appTimezone])
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    const panel = reflectionRootRef.current?.closest('.tab-panel') as HTMLElement | null
+    if (!panel) return
+    const updateVisibility = () => {
+      setIsReflectionActive(!panel.hasAttribute('hidden'))
+    }
+    updateVisibility()
+    const observer = new MutationObserver(updateVisibility)
+    observer.observe(panel, { attributes: true, attributeFilter: ['hidden'] })
+    return () => observer.disconnect()
+  }, [])
+
+  useEffect(() => {
+    if (typeof document === 'undefined') return
+    const body = document.body
+    if (!reflectionUnlocked && isReflectionActive) {
+      const previousOverflow = body.style.overflow
+      body.style.overflow = 'hidden'
+      body.dataset.reflectionLocked = 'true'
+      return () => {
+        body.style.overflow = previousOverflow
+        delete body.dataset.reflectionLocked
+      }
+    }
+    delete body.dataset.reflectionLocked
+  }, [reflectionUnlocked, isReflectionActive])
   
   // Listen for timezone being cleared (e.g., on sign-out) and reset in-memory state
   useEffect(() => {
@@ -6001,12 +6182,17 @@ const [showInlineExtras, setShowInlineExtras] = useState(false)
               base = { ...base, startedAt: startTs, endedAt: endTs }
             }
           }
-          // For Life Routines: clear task name when bucket changes, then auto-fill with bucket name
+          // For Life Routines: auto-fill task name with bucket name only if task name is empty
+          // or was previously auto-filled (not manually typed by the user)
           const effectiveGoal = base.goalName.trim()
           const isLifeRoutine = effectiveGoal.toLowerCase() === LIFE_ROUTINES_NAME.toLowerCase()
           if (isLifeRoutine && nextBucket.length > 0) {
-            taskNameAutofilledRef.current = true
-            return { ...base, taskName: nextBucket }
+            const currentTaskName = base.taskName.trim()
+            const shouldAutofill = currentTaskName.length === 0 || taskNameAutofilledRef.current
+            if (shouldAutofill) {
+              taskNameAutofilledRef.current = true
+              return { ...base, taskName: nextBucket }
+            }
           }
         }
         return base
@@ -6018,6 +6204,10 @@ const [showInlineExtras, setShowInlineExtras] = useState(false)
   const handleHistoryFieldChange = useCallback(
     (field: 'taskName' | 'goalName' | 'bucketName') => (event: ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
       const { value } = event.target
+      // When user manually changes task name, mark it as no longer auto-filled
+      if (field === 'taskName') {
+        taskNameAutofilledRef.current = false
+      }
       updateHistoryDraftField(field, value)
     },
     [updateHistoryDraftField],
@@ -8281,6 +8471,49 @@ useEffect(() => {
   const dayEnd = dayStart + DAY_DURATION_MS
   const anchorDate = useMemo(() => new Date(dayStart), [dayStart])
   
+  // On-demand fetch: when navigating to dates outside the initial sync window, fetch from DB
+  useEffect(() => {
+    const ownerId = readHistoryOwnerId()
+    // Skip for guests or if already fetched this month
+    if (!ownerId || ownerId === HISTORY_GUEST_USER_ID) return
+    if (isMonthFetched(dayStart)) return
+    
+    // Check if dayStart is outside the initial sync window (older than 30 days)
+    const now = Date.now()
+    const syncWindowStart = now - HISTORY_REMOTE_WINDOW_DAYS * 24 * 60 * 60 * 1000
+    if (dayStart >= syncWindowStart) return // Within initial window, already synced
+    
+    // Fetch the month containing dayStart
+    const monthStart = new Date(dayStart)
+    monthStart.setDate(1)
+    monthStart.setHours(0, 0, 0, 0)
+    const monthEnd = new Date(monthStart)
+    monthEnd.setMonth(monthEnd.getMonth() + 1)
+    
+    let cancelled = false
+    void (async () => {
+      const fetched = await fetchHistoryForDateRange(monthStart.getTime(), monthEnd.getTime())
+      if (cancelled || !fetched) return
+      setHistory((current) => {
+        // Merge: keep all current entries plus any new ones from fetch
+        const currentById = new Map(current.map((e) => [e.id, e]))
+        let changed = false
+        fetched.forEach((entry) => {
+          if (!currentById.has(entry.id)) {
+            currentById.set(entry.id, entry)
+            changed = true
+          }
+        })
+        if (!changed) return current
+        return Array.from(currentById.values()).sort((a, b) => b.endedAt - a.endedAt)
+      })
+    })()
+    
+    return () => {
+      cancelled = true
+    }
+  }, [dayStart])
+  
   // Current time indicator position (0-100%)
   const currentTimePercent = useMemo(() => {
     // Check if current time is on the selected day in display timezone
@@ -8457,27 +8690,54 @@ useEffect(() => {
   }, [])
 
   // --- Month cell overview panel ---
+  // type: 'allday' = week view all-day overflow (editable, only all-day entries)
+  // type: 'month' = month cell overview (read-only, all entries for the day)
   const [monthCellOverview, setMonthCellOverview] = useState<{
+    type: 'allday' | 'month'
     dateKey: string
     dateLabel: string
     entries: HistoryEntry[]
   } | null>(null)
   const monthCellOverviewRef = useRef<HTMLDivElement | null>(null)
 
+  // --- Fixed month cell max events ---
+  const monthCellMaxEvents = 2
+  const monthCellMoreFontSize = '0.6rem'
+
   // Add data attribute to body when modal is open to block pointer events via CSS
-  // Also lock body scroll when modal is open
+  // Also lock body scroll when modal is open (with scrollbar compensation to prevent layout shift)
   useEffect(() => {
     if (monthCellOverview) {
+      // Calculate scrollbar width to prevent layout shift when hiding scrollbar
+      const scrollbarWidth = window.innerWidth - document.documentElement.clientWidth
       document.body.setAttribute('data-month-cell-overview-open', 'true')
       document.body.style.overflow = 'hidden'
+      if (scrollbarWidth > 0) {
+        document.body.style.paddingRight = `${scrollbarWidth}px`
+      }
     } else {
       document.body.removeAttribute('data-month-cell-overview-open')
       document.body.style.overflow = ''
+      document.body.style.paddingRight = ''
     }
     return () => {
       document.body.removeAttribute('data-month-cell-overview-open')
       document.body.style.overflow = ''
+      document.body.style.paddingRight = ''
     }
+  }, [monthCellOverview])
+
+  // Close month cell overview on Escape key
+  useEffect(() => {
+    if (!monthCellOverview) return
+    const handleKeyDown = (e: globalThis.KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        e.preventDefault()
+        setMonthCellOverview(null)
+      }
+    }
+    document.addEventListener('keydown', handleKeyDown as EventListener)
+    return () => document.removeEventListener('keydown', handleKeyDown as EventListener)
   }, [monthCellOverview])
 
   // --- Calendar event preview (popover) ---
@@ -9738,19 +9998,6 @@ useEffect(() => {
       })
     }
 
-    // Format time for month cell display (e.g., "9:30a" or "2p")
-    const formatMonthCellTime = (timestamp: number) => {
-      const date = new Date(timestamp)
-      const hours = date.getHours()
-      const minutes = date.getMinutes()
-      const ampm = hours >= 12 ? 'p' : 'a'
-      const displayHour = hours % 12 || 12
-      if (minutes === 0) {
-        return `${displayHour}${ampm}`
-      }
-      return `${displayHour}:${String(minutes).padStart(2, '0')}${ampm}`
-    }
-
     // (removed unused legacy swipe handler for month/year grids)
 
     const jumpToDateAndShowWeek = (targetMidnightMs: number) => {
@@ -9782,7 +10029,7 @@ useEffect(() => {
       const cellEntries = getAllEntriesForDate(cellDateKey)
       const isToday = cellDateKey === todayDateKeyInDisplayTz
       const dateLabel = start.toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' })
-      const maxVisibleEvents = 4
+      const maxVisibleEvents = monthCellMaxEvents
       return (
         <div
           key={`cell-${start.toISOString()}`}
@@ -9811,12 +10058,12 @@ useEffect(() => {
               tabIndex={0}
               onClick={(e) => {
                 e.stopPropagation()
-                setMonthCellOverview({ dateKey: cellDateKey, dateLabel, entries: cellEntries })
+                setMonthCellOverview({ type: 'month', dateKey: cellDateKey, dateLabel, entries: cellEntries })
               }}
               onKeyDown={(e) => {
                 if (e.key === 'Enter' || e.key === ' ') {
                   e.preventDefault()
-                  setMonthCellOverview({ dateKey: cellDateKey, dateLabel, entries: cellEntries })
+                  setMonthCellOverview({ type: 'month', dateKey: cellDateKey, dateLabel, entries: cellEntries })
                 }
               }}
             >
@@ -9827,10 +10074,9 @@ useEffect(() => {
                 const isPlanned = !!entry.futureSession
                 const baseColor = meta.colorInfo?.solidColor ?? meta.colorInfo?.gradient?.start ?? getPaletteColorForLabel(label)
                 const entryIsAllDay = isEntryAllDay(entry)
-                const timeStr = entryIsAllDay ? null : formatMonthCellTime(entry.startedAt)
                 
                 // All-day events render as full-width colored bars (original style)
-                // Timed events render with marker + title + time
+                // Timed events render with marker + title
                 if (entryIsAllDay) {
                   return (
                     <div
@@ -9852,15 +10098,14 @@ useEffect(() => {
                   >
                     <span
                       className="calendar-cell__event-marker"
-                      style={isPlanned ? { borderColor: baseColor, background: 'transparent' } : { background: baseColor }}
+                      style={{ background: baseColor }}
                     />
                     <span className="calendar-cell__event-title">{label}</span>
-                    {timeStr && <span className="calendar-cell__event-time">{timeStr}</span>}
                   </div>
                 )
               })}
               {cellEntries.length > maxVisibleEvents && (
-                <div className="calendar-cell__more">+{cellEntries.length - maxVisibleEvents} more</div>
+                <div className="calendar-cell__more" style={{ fontSize: monthCellMoreFontSize }}>+{cellEntries.length - maxVisibleEvents} more</div>
               )}
             </div>
           )}
@@ -11705,12 +11950,12 @@ useEffect(() => {
                     tabIndex={0}
                     onClick={(e) => {
                       e.stopPropagation()
-                      setMonthCellOverview({ dateKey: dayDateKey, dateLabel, entries: entriesForDay })
+                      setMonthCellOverview({ type: 'allday', dateKey: dayDateKey, dateLabel, entries: entriesForDay })
                     }}
                     onKeyDown={(e) => {
                       if (e.key === 'Enter' || e.key === ' ') {
                         e.preventDefault()
-                        setMonthCellOverview({ dateKey: dayDateKey, dateLabel, entries: entriesForDay })
+                        setMonthCellOverview({ type: 'allday', dateKey: dayDateKey, dateLabel, entries: entriesForDay })
                       }
                     }}
                   >
@@ -13016,21 +13261,30 @@ useEffect(() => {
     const dateLabel = (() => {
       if (isEntryAllDay(entry)) {
         // All‑day rendering: same‑day => "Mon, Oct 14 · All day"; multi‑day => "Oct 14 – Oct 16"
+        // All-day entries store UTC midnight timestamps, so we use UTC functions
         const startD = new Date(entry.startedAt)
-        const endD = new Date(entry.endedAt)
+        // Convert exclusive end to inclusive (subtract 1 day)
+        const inclusiveEndMs = entry.endedAt - DAY_DURATION_MS
+        const endD = new Date(inclusiveEndMs)
+        
+        // Check same-day using UTC dates (since all-day entries are stored as UTC midnight)
         const sameDay =
-          startD.getFullYear() === endD.getFullYear() &&
-          startD.getMonth() === endD.getMonth() &&
-          startD.getDate() === endD.getDate()
+          startD.getUTCFullYear() === endD.getUTCFullYear() &&
+          startD.getUTCMonth() === endD.getUTCMonth() &&
+          startD.getUTCDate() === endD.getUTCDate()
+        
+        // Format using local Date objects with the correct calendar date
+        // This ensures the displayed date matches the intended UTC date
+        const startLocal = new Date(startD.getUTCFullYear(), startD.getUTCMonth(), startD.getUTCDate())
+        const endLocal = new Date(endD.getUTCFullYear(), endD.getUTCMonth(), endD.getUTCDate())
+        
         if (sameDay) {
-          const dateFmt = startD.toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' })
+          const dateFmt = startLocal.toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' })
           return `${dateFmt} · All day`
         }
-        // Show end as the day before (since end is exclusive midnight)
-        const endMinus = new Date(endD.getTime() - 1)
-        const includeYears = startD.getFullYear() !== endMinus.getFullYear()
-        const startFmt = startD.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: includeYears ? 'numeric' : undefined })
-        const endFmt = endMinus.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: includeYears ? 'numeric' : undefined })
+        const includeYears = startLocal.getFullYear() !== endLocal.getFullYear()
+        const startFmt = startLocal.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: includeYears ? 'numeric' : undefined })
+        const endFmt = endLocal.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: includeYears ? 'numeric' : undefined })
         return `${startFmt} – ${endFmt}`
       }
       const startD = new Date(entry.startedAt)
@@ -13825,9 +14079,89 @@ useEffect(() => {
     repeatingRules,
   ])
 
+  // Helper to get entries for a given date key (used by month cell overview)
+  // If onlyAllDay is true, returns only all-day entries (for week view all-day overflow)
+  const getEntriesForDateKey = useCallback((dateKey: string, onlyAllDay = false): HistoryEntry[] => {
+    const [year, month, day] = dateKey.split('-').map(Number)
+    const dayStart = new Date(year, month - 1, day, 0, 0, 0, 0).getTime()
+    const dayEnd = dayStart + DAY_DURATION_MS
+    
+    return effectiveHistory.filter((e) => {
+      if (isSkippedSession(e)) return false
+      
+      // If onlyAllDay is true, filter to only all-day entries
+      if (onlyAllDay && !isEntryAllDay(e)) return false
+      
+      if (e.isAllDay) {
+        // For entries with isAllDay flag, use UTC date key matching
+        const startDateKey = getUtcDateKey(e.startedAt)
+        const endDateKey = getUtcDateKey(e.endedAt)
+        return dateKey >= startDateKey && dateKey < endDateKey
+      } else {
+        // Check if entry overlaps with this day
+        return Math.min(e.endedAt, dayEnd) > Math.max(e.startedAt, dayStart)
+      }
+    }).sort((a, b) => {
+      // Sort all-day entries first, then by start time
+      const aIsAllDay = isEntryAllDay(a)
+      const bIsAllDay = isEntryAllDay(b)
+      if (aIsAllDay && !bIsAllDay) return -1
+      if (!aIsAllDay && bIsAllDay) return 1
+      return a.startedAt - b.startedAt
+    })
+  }, [effectiveHistory])
+
   // Month cell overview panel
-  const monthCellOverviewPanel = useMemo(() => {
+  const renderMonthCellOverviewPanel = useCallback(() => {
     if (!monthCellOverview) return null
+
+    // Determine if this is an editable view (all-day overflow) or read-only (month view)
+    const isEditable = monthCellOverview.type === 'allday'
+
+    // Get fresh entries from current history
+    // For all-day overflow, only show all-day entries
+    const currentEntries = getEntriesForDateKey(monthCellOverview.dateKey, monthCellOverview.type === 'allday')
+
+    // Icon components for actions (same as calendar popover)
+    const IconEdit = () => (
+      <svg viewBox="0 0 24 24" aria-hidden="true">
+        <path d="M12 20h9"/>
+        <path d="M16.5 3.5a2.12 2.12 0 1 1 3 3L7 19l-4 1 1-4Z"/>
+      </svg>
+    )
+    const IconTrash = () => (
+      <svg viewBox="0 0 24 24" aria-hidden="true">
+        <path d="M3 6h18"/>
+        <path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>
+        <path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/>
+        <path d="M10 11v6M14 11v6"/>
+      </svg>
+    )
+    const IconClose = () => (
+      <svg viewBox="0 0 24 24" aria-hidden="true">
+        <path d="M18 6L6 18M6 6l12 12"/>
+      </svg>
+    )
+
+    // Duplicate entry handler (same logic as calendar popover) - only used for editable views
+    const duplicateEntry = (source: HistoryEntry): HistoryEntry => {
+      const newEntry: HistoryEntry = {
+        ...source,
+        id: makeHistoryId(),
+        notes: source.notes,
+        subtasks: source.subtasks.map((subtask) => ({ ...subtask })),
+        futureSession: true,
+        repeatingSessionId: null,
+        originalTime: null,
+      }
+      updateHistory((current) => {
+        const next = [...current, newEntry]
+        next.sort((a, b) => a.startedAt - b.startedAt)
+        return next
+      })
+      return newEntry
+    }
+
     return createPortal(
       <div
         className="month-cell-overview__backdrop"
@@ -13857,7 +14191,7 @@ useEffect(() => {
             </button>
           </div>
           <div className="month-cell-overview__events">
-            {monthCellOverview.entries.map((entry) => {
+            {currentEntries.map((entry) => {
               const meta = resolveGoalMetadata(entry, enhancedGoalLookup, goalColorLookup, lifeRoutineSurfaceLookup)
               const label = deriveEntryTaskName(entry)
               const colorCss = meta.colorInfo?.gradient?.css ?? meta.colorInfo?.solidColor ?? getPaletteColorForLabel(label)
@@ -13866,7 +14200,7 @@ useEffect(() => {
               const goalLabel = entry.goalName || 'No goal'
               const entryIsAllDay = isEntryAllDay(entry)
               // Format time range for timed entries
-              const formatTime = (ts: number) => {
+              const formatTimeLocal = (ts: number) => {
                 const d = new Date(ts)
                 const h = d.getHours()
                 const m = d.getMinutes()
@@ -13874,7 +14208,7 @@ useEffect(() => {
                 const displayH = h % 12 || 12
                 return m === 0 ? `${displayH}${ampm}` : `${displayH}:${String(m).padStart(2, '0')}${ampm}`
               }
-              const timeRange = entryIsAllDay ? 'All day' : `${formatTime(entry.startedAt)} – ${formatTime(entry.endedAt)}`
+              const timeRange = entryIsAllDay ? 'All day' : `${formatTimeLocal(entry.startedAt)} – ${formatTimeLocal(entry.endedAt)}`
               return (
                 <div
                   key={entry.id}
@@ -13892,6 +14226,48 @@ useEffect(() => {
                       <span className="month-cell-overview__event-goal">{goalLabel}</span>
                     </div>
                   </div>
+                  {isEditable && (
+                    <div className="month-cell-overview__event-actions">
+                      <button
+                        type="button"
+                        className="month-cell-overview__action"
+                        aria-label="Edit session"
+                        onClick={(ev) => {
+                          ev.preventDefault()
+                          ev.stopPropagation()
+                          // Keep month cell overview open - the editor will appear on top
+                          setSelectedHistoryId(entry.id)
+                          setHoveredHistoryId(entry.id)
+                          setEditingHistoryId(entry.id)
+                          taskNameAutofilledRef.current = false
+                          setHistoryDraft(createHistoryDraftFromEntry(entry))
+                          openCalendarInspector(entry)
+                        }}
+                      >
+                        <IconEdit />
+                      </button>
+                      <MonthCellActionsKebab
+                        containerRef={monthCellOverviewRef}
+                        onDuplicate={() => {
+                          // Just duplicate the entry - the month cell overview will auto-update
+                          // since currentEntries is computed from history
+                          duplicateEntry(entry)
+                        }}
+                      />
+                      <button
+                        type="button"
+                        className="month-cell-overview__action month-cell-overview__action--danger"
+                        aria-label="Delete session"
+                        onClick={(ev) => {
+                          ev.preventDefault()
+                          ev.stopPropagation()
+                          handleDeleteHistoryEntry(entry.id)(ev as any)
+                        }}
+                      >
+                        <IconTrash />
+                      </button>
+                    </div>
+                  )}
                 </div>
               )
             })}
@@ -13900,7 +14276,17 @@ useEffect(() => {
       </div>,
       document.body,
     )
-  }, [monthCellOverview, enhancedGoalLookup, goalColorLookup, lifeRoutineSurfaceLookup])
+  }, [
+    monthCellOverview,
+    enhancedGoalLookup,
+    goalColorLookup,
+    lifeRoutineSurfaceLookup,
+    openCalendarInspector,
+    handleDeleteHistoryEntry,
+    updateHistory,
+    getEntriesForDateKey,
+  ])
+  const monthCellOverviewPanel = renderMonthCellOverviewPanel()
 
   // Calendar editor modal
   useEffect(() => {
@@ -13967,21 +14353,23 @@ useEffect(() => {
     const endBase = adjustForDisplay(entry.endedAt)
     const resolvedStart = resolveTimestamp(historyDraft.startedAt, startBase)
     const resolvedEnd = resolveTimestamp(historyDraft.endedAt, endBase)
+    // Use the entry's isAllDay flag (not timestamp detection) - all-day entries can't be converted to timed and vice versa
+    const isDraftAllDay = entry.isAllDay === true
     const shiftStartAndPreserveDuration = (nextStart: number) => {
       setHistoryDraft((draft) => {
         // For timezone markers, keep start and end synchronized
         if (editorIsTimezoneChangeMarker) {
           return { ...draft, startedAt: nextStart, endedAt: nextStart }
         }
-        return { ...draft, startedAt: nextStart }
+        // For all-day entries, convert local midnight back to UTC midnight
+        const storageStart = isDraftAllDay ? allDayStartFromDisplay(nextStart) : nextStart
+        return { ...draft, startedAt: storageStart }
       })
     }
     const startMinutesOfDay = (() => {
       const d = new Date(resolvedStart)
       return d.getHours() * 60 + d.getMinutes()
     })()
-    // Use the entry's isAllDay flag (not timestamp detection) - all-day entries can't be converted to timed and vice versa
-    const isDraftAllDay = entry.isAllDay === true
   // Using inspector pickers for date/time in the editor panel; input-formatted strings no longer needed here
 
     return createPortal(
@@ -14079,7 +14467,7 @@ useEffect(() => {
                 }}
               >
                 <InspectorDateInput
-                  value={resolvedStart}
+                  value={isDraftAllDay ? allDayStartToDisplay(resolvedStart) : resolvedStart}
                   onChange={shiftStartAndPreserveDuration}
                   ariaLabel="Select start date"
                 />
@@ -14107,9 +14495,11 @@ useEffect(() => {
                 }}
               >
                 <InspectorDateInput
-                  value={resolvedEnd}
+                  value={isDraftAllDay ? allDayExclusiveToInclusiveEnd(resolvedEnd) : resolvedEnd}
                   onChange={(timestamp) => {
-                    setHistoryDraft((draft) => ({ ...draft, endedAt: timestamp }))
+                    // For all-day entries, user picks inclusive end date - convert to exclusive for storage
+                    const storageEnd = isDraftAllDay ? allDayInclusiveToExclusiveEnd(timestamp) : timestamp
+                    setHistoryDraft((draft) => ({ ...draft, endedAt: storageEnd }))
                   }}
                   ariaLabel="Select end date"
                 />
@@ -14657,7 +15047,9 @@ useEffect(() => {
           if (inspectorIsTimezoneChangeMarker) {
             return { ...draft, startedAt: nextStart, endedAt: nextStart }
           }
-          return { ...draft, startedAt: nextStart }
+          // For all-day entries, convert local midnight back to UTC midnight
+          const storageStart = entryIsAllDay ? allDayStartFromDisplay(nextStart) : nextStart
+          return { ...draft, startedAt: storageStart }
         })
       }
       const startMinutesOfDay = (() => {
@@ -14679,6 +15071,9 @@ useEffect(() => {
       })()
       const inspectorDurationLabel = formatDuration(Math.max(resolvedEnd - resolvedStart, 0))
 
+      // Check if this entry is all-day (defined before inspectorRepeatControl for reuse in date inputs)
+      const entryIsAllDay = isEntryAllDay(inspectorEntry)
+
       const inspectorRepeatControl = (() => {
         // Use display timezone for wall-clock time extraction
         const minutes = getMinutesFromMidnightInTimezone(inspectorEntry.startedAt, displayTimezone)
@@ -14690,8 +15085,6 @@ useEffect(() => {
         const dow = inspDowDate.getUTCDay()
         const inspTimeParts = getTimePartsInTimezone(inspectorEntry.startedAt, displayTimezone)
         const monthDay = `${String(inspTimeParts.month).padStart(2, '0')}-${String(inspTimeParts.day).padStart(2, '0')}`
-        // Check if this entry is all-day
-        const entryIsAllDay = isEntryAllDay(inspectorEntry)
         
         // Check if entry has been moved from its original scheduled time
         // If so, it's a rescheduled instance and should not show the repeat rule
@@ -14932,7 +15325,7 @@ useEffect(() => {
                     }}
                   >
                     <InspectorDateInput
-                      value={resolvedStart}
+                      value={entryIsAllDay ? allDayStartToDisplay(resolvedStart) : resolvedStart}
                       onChange={shiftStartAndPreserveDuration}
                       ariaLabel="Select start date"
                     />
@@ -14958,9 +15351,11 @@ useEffect(() => {
                       }}
                     >
                       <InspectorDateInput
-                        value={resolvedEnd}
+                        value={entryIsAllDay ? allDayExclusiveToInclusiveEnd(resolvedEnd) : resolvedEnd}
                         onChange={(timestamp) => {
-                          setHistoryDraft((draft) => ({ ...draft, endedAt: timestamp }))
+                          // For all-day entries, user picks inclusive end date - convert to exclusive for storage
+                          const storageEnd = entryIsAllDay ? allDayInclusiveToExclusiveEnd(timestamp) : timestamp
+                          setHistoryDraft((draft) => ({ ...draft, endedAt: storageEnd }))
                         }}
                             ariaLabel="Select end date"
                           />
@@ -15140,7 +15535,7 @@ useEffect(() => {
                     <span className="calendar-inspector__schedule-heading">Start</span>
                     <div className="calendar-inspector__schedule-inputs">
                       <InspectorDateInput
-                        value={resolvedStart}
+                        value={entryIsAllDay ? allDayStartToDisplay(resolvedStart) : resolvedStart}
                         onChange={shiftStartAndPreserveDuration}
                         ariaLabel="Select start date"
                       />
@@ -15166,9 +15561,11 @@ useEffect(() => {
                       }}
                     >
                       <InspectorDateInput
-                        value={resolvedEnd}
+                        value={entryIsAllDay ? allDayExclusiveToInclusiveEnd(resolvedEnd) : resolvedEnd}
                         onChange={(timestamp) => {
-                          setHistoryDraft((draft) => ({ ...draft, endedAt: timestamp }))
+                          // For all-day entries, user picks inclusive end date - convert to exclusive for storage
+                          const storageEnd = entryIsAllDay ? allDayInclusiveToExclusiveEnd(timestamp) : timestamp
+                          setHistoryDraft((draft) => ({ ...draft, endedAt: storageEnd }))
                         }}
                         ariaLabel="Select end date"
                       />
@@ -15671,9 +16068,57 @@ useEffect(() => {
       )
       : null
 
+  const handleReflectionUnlock = (event: FormEvent) => {
+    event.preventDefault()
+    const trimmedPassword = reflectionUnlockInput.trim()
+    if (!REFLECTION_BYPASS_PASSWORD) {
+      setReflectionUnlockError('Set VITE_REFLECTION_BYPASS_PASSWORD to unlock this page.')
+      return
+    }
+    if (trimmedPassword && trimmedPassword === REFLECTION_BYPASS_PASSWORD) {
+      setReflectionUnlocked(true)
+      setReflectionUnlockError(null)
+      setReflectionUnlockInput('')
+      window.localStorage.setItem(REFLECTION_UNLOCK_STORAGE_KEY, 'true')
+    } else {
+      setReflectionUnlockError('Incorrect password.')
+    }
+  }
+
   return (
     <>
-      <section className="site-main__inner reflection-page" aria-label="Reflection">
+      <section className="site-main__inner reflection-page" aria-label="Reflection" ref={reflectionRootRef}>
+      {!reflectionUnlocked && (
+        <div className="reflection-lock-overlay" role="dialog" aria-modal="true" aria-labelledby="reflection-lock-title">
+          <div className="reflection-lock">
+            <p className="reflection-lock__eyebrow">Maintenance Mode</p>
+            <h2 className="reflection-lock__title" id="reflection-lock-title">
+              <span className="reflection-lock__title-line">Sorry, this page is currently</span>
+              <span className="reflection-lock__title-line">being reworked.</span>
+              <span className="reflection-lock__title-line">Please check back later :D</span>
+            </h2>
+            <form className="reflection-lock__form" onSubmit={handleReflectionUnlock}>
+              <label className="reflection-lock__label" htmlFor={reflectionUnlockInputId}>Developer password</label>
+              <div className="reflection-lock__controls">
+                <input
+                  id={reflectionUnlockInputId}
+                  className="reflection-lock__input"
+                  type="password"
+                  placeholder="Enter password"
+                  value={reflectionUnlockInput}
+                  onChange={(event) => {
+                    setReflectionUnlockInput(event.target.value)
+                    if (reflectionUnlockError) setReflectionUnlockError(null)
+                  }}
+                  autoComplete="current-password"
+                />
+                <button type="submit" className="reflection-lock__button">Unlock</button>
+              </div>
+              {reflectionUnlockError && <p className="reflection-lock__error" role="alert">{reflectionUnlockError}</p>}
+            </form>
+          </div>
+        </div>
+      )}
       <div className="reflection-intro">
         <h1 className="reflection-title">Reflection</h1>
         {/* Subtitle removed for cleaner header */}

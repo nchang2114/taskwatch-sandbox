@@ -1070,6 +1070,151 @@ html[data-theme='light'] {
   overflow-x: hidden; /* avoid any horizontal scroll on mobile */
 }
 
+.reflection-lock-overlay {
+  position: fixed;
+  inset: 0;
+  background: linear-gradient(160deg, rgba(6, 10, 32, 0.86) 0%, rgba(4, 10, 24, 0.9) 100%);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: clamp(1.5rem, 4vw, 2.5rem);
+  z-index: 3000000;
+  backdrop-filter: blur(6px);
+}
+
+html[data-theme='light'] .reflection-lock-overlay {
+  background: rgba(80, 98, 168, 0.3);
+}
+
+.reflection-lock {
+  width: min(460px, 92vw);
+  background: var(--profile-menu-bg);
+  border: 1px solid rgba(148, 164, 255, 0.35);
+  border-radius: clamp(1.1rem, 3vw, 1.6rem);
+  padding: clamp(1.75rem, 4vw, 2.5rem);
+  box-shadow: 0 30px 60px rgba(6, 10, 40, 0.5);
+  display: grid;
+  gap: 1rem;
+  text-align: center;
+  color: var(--text-primary);
+}
+
+html[data-theme='light'] .reflection-lock {
+  border-color: rgba(106, 130, 224, 0.32);
+  box-shadow: 0 30px 60px rgba(80, 98, 168, 0.2);
+}
+
+.reflection-lock__eyebrow {
+  margin: 0;
+  font-size: 0.75rem;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--text-secondary);
+}
+
+.reflection-lock__title {
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: clamp(1.1rem, 2.6vw, 1.35rem);
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.reflection-lock__title-line {
+  display: block;
+}
+
+.reflection-lock__text {
+  margin: 0;
+  font-size: 0.95rem;
+  color: var(--text-secondary);
+}
+
+.reflection-lock__form {
+  display: grid;
+  gap: 0.65rem;
+  text-align: left;
+}
+
+.reflection-lock__label {
+  font-size: 0.75rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-secondary);
+}
+
+.reflection-lock__controls {
+  display: grid;
+  gap: 0.6rem;
+}
+
+.reflection-lock__input {
+  width: 100%;
+  padding: 0.7rem 0.9rem;
+  border-radius: 0.85rem;
+  border: 1px solid var(--control-border);
+  background: var(--control-surface);
+  color: var(--text-primary);
+  font-size: 0.95rem;
+}
+
+.reflection-lock__input::placeholder {
+  color: var(--text-secondary);
+}
+
+.reflection-lock__input:focus-visible {
+  outline: none;
+  border-color: var(--control-hover);
+  box-shadow: 0 0 0 3px rgba(115, 122, 255, 0.24);
+}
+
+.reflection-lock__button {
+  padding: 0.65rem 1rem;
+  border-radius: 0.85rem;
+  border: none;
+  cursor: pointer;
+  font-family: var(--font-display);
+  font-size: 0.9rem;
+  font-weight: 600;
+  background: linear-gradient(135deg, #8b84ff 0%, #35d4ff 100%);
+  color: #060a1d;
+  transition: transform 180ms ease, box-shadow 180ms ease, background 180ms ease;
+  box-shadow: 0 14px 30px -18px rgba(74, 90, 230, 0.5);
+}
+
+.reflection-lock__button:hover,
+.reflection-lock__button:focus-visible {
+  background: linear-gradient(135deg, #9d96ff 0%, #3fe0ff 100%);
+  transform: translateY(-1px);
+  box-shadow: 0 18px 36px -18px rgba(74, 90, 230, 0.55);
+}
+
+.reflection-lock__button:active {
+  transform: translateY(0);
+}
+
+html[data-theme='light'] .reflection-lock__button {
+  background: linear-gradient(135deg, #5c5bff 0%, #1fc8ff 100%);
+  color: #ffffff;
+  box-shadow: 0 12px 28px rgba(94, 112, 180, 0.28);
+}
+
+html[data-theme='light'] .reflection-lock__button:hover,
+html[data-theme='light'] .reflection-lock__button:focus-visible {
+  background: linear-gradient(135deg, #6866ff 0%, #27d0ff 100%);
+  box-shadow: 0 16px 34px rgba(94, 112, 180, 0.32);
+}
+
+.reflection-lock__error {
+  margin: 0;
+  font-size: 0.85rem;
+  color: #ff6b6b;
+}
+
+body[data-reflection-locked='true'] .navbar {
+  z-index: 4000000;
+}
+
 /* Tighten spacing between the main title and the calendar heading */
 .reflection-page > .history-block {
   margin-top: calc(-1 * clamp(2.5rem, 5vw, 3.5rem));
@@ -2626,11 +2771,6 @@ html[data-theme='light'] .calendar-cell--today .calendar-day-number::after {
   flex-shrink: 0;
 }
 
-.calendar-cell__event--planned .calendar-cell__event-marker {
-  border: 1.5px dashed;
-  background: transparent !important;
-}
-
 .calendar-cell__event-title {
   white-space: nowrap;
   overflow: hidden;
@@ -2648,9 +2788,14 @@ html[data-theme='light'] .calendar-cell--today .calendar-day-number::after {
 }
 
 .calendar-cell__more {
-  font-size: 0.6rem;
+  font-size: 0.55rem;
   color: var(--text-secondary);
   padding: 1px 4px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+  flex-shrink: 0;
 }
 
 html[data-theme='light'] .calendar-cell__event {
@@ -2708,7 +2853,6 @@ body[data-month-cell-overview-open='true'] .month-cell-overview {
   max-height: 80vh;
   display: flex;
   flex-direction: column;
-  overflow: hidden;
 }
 
 .month-cell-overview__header {
@@ -2822,6 +2966,121 @@ body[data-month-cell-overview-open='true'] .month-cell-overview {
 .month-cell-overview__event-goal::before {
   content: '·';
   margin-right: 0.5rem;
+}
+
+/* Month cell overview event actions */
+.month-cell-overview__event-actions {
+  display: flex;
+  gap: 0.25rem;
+  align-items: flex-start;
+  flex-shrink: 0;
+  margin-left: auto;
+}
+
+.month-cell-overview__action {
+  border: none;
+  background: transparent;
+  color: var(--text-secondary);
+  width: 24px;
+  height: 24px;
+  border-radius: 6px;
+  cursor: pointer;
+  touch-action: manipulation;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.month-cell-overview__action:hover,
+.month-cell-overview__action:focus-visible {
+  background: rgba(86, 104, 198, 0.32);
+  color: #fff;
+}
+
+.month-cell-overview__action svg {
+  display: block;
+  width: 16px;
+  height: 16px;
+  stroke: currentColor;
+  fill: none;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+/* Kebab (3-dot) icon fill style */
+.month-cell-overview__action svg circle {
+  fill: currentColor;
+  stroke: none;
+}
+
+.month-cell-overview__action--danger:hover,
+.month-cell-overview__action--danger:focus-visible {
+  background: rgba(220, 38, 38, 0.2);
+  color: #fecaca;
+}
+
+/* Kebab menu wrapper and dropdown */
+.month-cell-overview__kebab-wrap {
+  position: relative;
+}
+
+.month-cell-overview__menu {
+  position: fixed;
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  min-width: 160px;
+  padding: 0.35rem;
+  border-radius: 0.5rem;
+  border: 1px solid rgba(148, 160, 255, 0.45);
+  background: rgba(18, 24, 58, 0.98);
+  color: var(--text-primary);
+  box-shadow: 0 12px 24px rgba(8, 12, 36, 0.4);
+  z-index: 4100;
+}
+
+.month-cell-overview__menu-item {
+  border: none;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+  padding: 0.4rem 0.5rem;
+  border-radius: 0.4rem;
+  cursor: pointer;
+  touch-action: manipulation;
+}
+
+.month-cell-overview__menu-item:hover,
+.month-cell-overview__menu-item:focus-visible {
+  background: rgba(86, 104, 198, 0.32);
+  color: #fff;
+  outline: none;
+}
+
+/* Light theme overrides for month cell overview actions */
+html[data-theme='light'] .month-cell-overview__action:hover,
+html[data-theme='light'] .month-cell-overview__action:focus-visible {
+  background: rgba(180, 192, 252, 0.65);
+  color: rgba(26, 34, 82, 0.92);
+}
+
+html[data-theme='light'] .month-cell-overview__action--danger:hover,
+html[data-theme='light'] .month-cell-overview__action--danger:focus-visible {
+  background: rgba(220, 38, 38, 0.15);
+  color: #b91c1c;
+}
+
+html[data-theme='light'] .month-cell-overview__menu {
+  border-color: rgba(160, 172, 236, 0.45);
+  background: rgba(245, 248, 255, 0.98);
+  box-shadow: 0 12px 24px rgba(118, 130, 206, 0.28);
+}
+
+html[data-theme='light'] .month-cell-overview__menu-item:hover,
+html[data-theme='light'] .month-cell-overview__menu-item:focus-visible {
+  background: rgba(180, 192, 252, 0.65);
+  color: rgba(26, 34, 82, 0.92);
 }
 
 html[data-theme='light'] .month-cell-overview__backdrop {
@@ -3140,12 +3399,17 @@ html[data-theme='light'] .calendar-day-header.is-today::after {
   display: flex;
   align-items: center;
   justify-content: flex-start;
-  font-size: 0.7rem;
+  font-size: clamp(0.5rem, 1.5vw, 0.6rem);
+  font-weight: 600;
   color: var(--text-secondary);
   cursor: pointer;
-  padding: 0 0.25rem;
+  padding: 0 0.25rem 0 0.5rem;
   border-radius: 3px;
   transition: background 0.15s, color 0.15s;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
 }
 .calendar-allday-more:hover {
   background: rgba(124, 138, 220, 0.15);

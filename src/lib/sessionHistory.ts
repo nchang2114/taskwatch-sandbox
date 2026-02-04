@@ -1569,6 +1569,163 @@ export const syncHistoryWithSupabase = async (): Promise<HistoryEntry[] | null> 
   }
 }
 
+// Track which date ranges have been fetched to avoid duplicate fetches
+// Key is "YYYY-MM" format, value is true if fetched
+const fetchedMonthsCache = new Map<string, boolean>()
+
+// Get month key from timestamp
+const getMonthKey = (ms: number): string => {
+  const d = new Date(ms)
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
+}
+
+// Check if a month has been fetched
+export const isMonthFetched = (dateMs: number): boolean => {
+  const key = getMonthKey(dateMs)
+  return fetchedMonthsCache.has(key)
+}
+
+// Clear the fetched months cache (e.g., on user switch)
+export const clearFetchedMonthsCache = (): void => {
+  fetchedMonthsCache.clear()
+}
+
+// Active fetch promise to prevent concurrent fetches for the same range
+let activeDateRangeFetchPromise: Promise<HistoryEntry[] | null> | null = null
+
+/**
+ * Fetch history entries for a specific date range from Supabase.
+ * This is used for on-demand loading when navigating to dates outside
+ * the initial 30-day sync window.
+ * 
+ * @param startMs - Start of date range (UTC milliseconds)
+ * @param endMs - End of date range (UTC milliseconds)
+ * @returns Updated history entries or null if fetch failed
+ */
+export const fetchHistoryForDateRange = async (
+  startMs: number,
+  endMs: number,
+): Promise<HistoryEntry[] | null> => {
+  if (activeDateRangeFetchPromise) {
+    return activeDateRangeFetchPromise
+  }
+  if (!supabase) {
+    return null
+  }
+
+  activeDateRangeFetchPromise = (async () => {
+    const session = await ensureSingleUserSession()
+    if (!session) {
+      return null
+    }
+
+    const userId = session.user.id
+    const storedUserId = getStoredHistoryUserId()
+    if (storedUserId && storedUserId !== userId) {
+      return null
+    }
+
+    // Mark the months in this range as fetched
+    const startMonth = getMonthKey(startMs)
+    const endMonth = getMonthKey(endMs)
+    
+    // Check if already fetched
+    if (fetchedMonthsCache.has(startMonth) && fetchedMonthsCache.has(endMonth)) {
+      return readStoredHistory()
+    }
+
+    const startIso = new Date(startMs).toISOString()
+    const endIso = new Date(endMs).toISOString()
+
+    let remoteRows: any[] | null = null
+    let fetchError: any = null
+    let attempts = 0
+
+    do {
+      const selectColumns = buildHistorySelectColumns()
+      const response = await supabase
+        .from('session_history')
+        .select((selectColumns as unknown) as any)
+        .eq('user_id', userId)
+        .gte('started_at', startIso)
+        .lte('started_at', endIso)
+        .order('started_at', { ascending: false })
+      remoteRows = response.data as any
+      fetchError = response.error as any
+      if (!fetchError || !isColumnMissingError(fetchError)) {
+        break
+      }
+      const missingRepeat =
+        errorMentionsColumn(fetchError, 'repeating_session_id') || errorMentionsColumn(fetchError, 'original_time')
+      const missingNotes = errorMentionsColumn(fetchError, 'notes')
+      let changed = false
+      if (missingRepeat && isRepeatOriginalEnabled()) {
+        disableRepeatOriginal()
+        changed = true
+      }
+      if (missingNotes && isHistoryNotesEnabled()) {
+        disableHistoryNotes()
+        changed = true
+      }
+      if (!changed) {
+        break
+      }
+      attempts += 1
+    } while (attempts < 5)
+
+    if (fetchError) {
+      return null
+    }
+
+    // Mark months as fetched
+    fetchedMonthsCache.set(startMonth, true)
+    if (startMonth !== endMonth) {
+      fetchedMonthsCache.set(endMonth, true)
+    }
+
+    // Merge with existing records
+    const localRecords = readHistoryRecords()
+    const recordsById = new Map<string, HistoryRecord>()
+    localRecords.forEach((record) => {
+      recordsById.set(record.id, record)
+    })
+
+    ;((remoteRows as any[]) ?? []).forEach((row) => {
+      const record = mapDbRowToRecord((row as unknown) as Record<string, unknown>)
+      if (!record) {
+        return
+      }
+      const local = recordsById.get(record.id)
+      if (!local) {
+        // New record from remote
+        recordsById.set(record.id, record)
+        return
+      }
+      // Update if remote is newer
+      const remoteTimestamp = record.updatedAt
+      const localTimestamp = local.updatedAt
+      if (remoteTimestamp > localTimestamp || (!local.pendingAction && remoteTimestamp === localTimestamp)) {
+        const repeatingSessionId = (record as any).repeatingSessionId ?? (local as any).repeatingSessionId ?? null
+        const originalTime = Number.isFinite((record as any).originalTime)
+          ? (record as any).originalTime
+          : ((local as any).originalTime ?? null)
+        recordsById.set(record.id, { ...record, repeatingSessionId, originalTime, pendingAction: null })
+      }
+    })
+
+    const recordList = Array.from(recordsById.values())
+    const { records: enrichedRecords } = applyLifeRoutineSurfaces(recordList)
+    const persisted = persistRecords(enrichedRecords)
+    return persisted
+  })()
+
+  try {
+    return await activeDateRangeFetchPromise
+  } finally {
+    activeDateRangeFetchPromise = null
+  }
+}
+
 export const pushPendingHistoryToSupabase = async (): Promise<void> => {
   if (!supabase) {
     return

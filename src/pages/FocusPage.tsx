@@ -1224,8 +1224,8 @@ useEffect(() => {
 }, [refreshGoalsSnapshotFromSupabase, shouldSkipGoalsRemote])
 useEffect(() => {
   if (typeof window !== 'undefined') {
-    const quickUser = window.localStorage.getItem('nc-taskwatch-quick-list-user')
-    if (!quickUser || quickUser === '__guest__') {
+    const quickUser = window.localStorage.getItem(QUICK_LIST_USER_STORAGE_KEY)
+    if (!quickUser || quickUser === QUICK_LIST_GUEST_USER_ID) {
       return
     }
   }
@@ -1551,8 +1551,8 @@ useEffect(() => {
     const handleFocus = () => {
       if (!document.hidden) {
         refreshGoalsSnapshotFromSupabase('window-focus')
-        const quickUser = typeof window !== 'undefined' ? window.localStorage.getItem('nc-taskwatch-quick-list-user') : null
-        if (quickUser && quickUser !== '__guest__') {
+        const quickUser = typeof window !== 'undefined' ? window.localStorage.getItem(QUICK_LIST_USER_STORAGE_KEY) : null
+        if (quickUser && quickUser !== QUICK_LIST_GUEST_USER_ID) {
           refreshQuickListFromSupabase('window-focus')
         }
       }
@@ -1560,8 +1560,8 @@ useEffect(() => {
     const handleVisibility = () => {
       if (!document.hidden) {
         refreshGoalsSnapshotFromSupabase('document-visible')
-        const quickUser = typeof window !== 'undefined' ? window.localStorage.getItem('nc-taskwatch-quick-list-user') : null
-        if (quickUser && quickUser !== '__guest__') {
+        const quickUser = typeof window !== 'undefined' ? window.localStorage.getItem(QUICK_LIST_USER_STORAGE_KEY) : null
+        if (quickUser && quickUser !== QUICK_LIST_GUEST_USER_ID) {
           refreshQuickListFromSupabase('document-visible')
         }
       }
@@ -2972,8 +2972,9 @@ useEffect(() => {
         }
         const next = [...current]
         next[index] = updated
-        writeStoredQuickList(next)
-        return next
+        // Return the normalized result from writeStoredQuickList to ensure
+        // state matches what's in localStorage and what's dispatched via the event
+        return writeStoredQuickList(next)
       })
     },
     [],
@@ -5103,14 +5104,16 @@ useEffect(() => {
     resetStopwatchDisplay()
 
     if (isQuickListFocusTarget) {
-      const updated = quickListItems.map((item) =>
-        item.id === taskId ? { ...item, completed: true, updatedAt: new Date().toISOString() } : item,
-      )
-      const active = updated.filter((item) => !item.completed)
-      const completedItems = updated.filter((item) => item.completed)
-      const normalized = [...active, ...completedItems].map((item, index) => ({ ...item, sortIndex: index }))
-      const stored = writeStoredQuickList(normalized)
-      setQuickListItems(stored)
+      setQuickListItems((current) => {
+        const updated = current.map((item) =>
+          item.id === taskId ? { ...item, completed: true, updatedAt: new Date().toISOString() } : item,
+        )
+        const active = updated.filter((item) => !item.completed)
+        const completedItems = updated.filter((item) => item.completed)
+        const normalized = [...active, ...completedItems].map((item, index) => ({ ...item, sortIndex: index }))
+        const stored = writeStoredQuickList(normalized)
+        return stored
+      })
     } else if (!isLifeRoutineFocus) {
       setGoalsSnapshot((current) => {
         let mutated = false
