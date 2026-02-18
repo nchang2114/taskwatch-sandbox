@@ -215,6 +215,11 @@ const NEUTRAL_SURFACE: SurfaceStyle = DEFAULT_SURFACE_STYLE
 const NEUTRAL_ENTRY_GRADIENT = 'linear-gradient(135deg, #FFF8BF 0%, #FFF8BF 100%)'
 // Placeholder duration for new session entries (1 minute) - updated when session ends
 const SESSION_PLACEHOLDER_DURATION_MS = 60_000
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
+const isUuid = (value: string | undefined | null): value is string => {
+  if (typeof value !== 'string') return false
+  return UUID_PATTERN.test(value)
+}
 const formatLocalYmd = (ms: number): string => {
   const d = new Date(ms)
   const y = d.getFullYear()
@@ -5150,14 +5155,22 @@ useEffect(() => {
     }
 
     if (!isLifeRoutineFocus) {
-      try {
-        await setTaskCompletedAndResort(taskId, bucketId, true)
-      } catch (error) {
-        logWarn('Failed to mark task complete from Focus', error)
-      } finally {
-        if (isQuickListFocusTarget) {
-          refreshQuickListFromSupabase('focus-complete')
+      // For quick list tasks, only call remote API if we have valid UUIDs
+      // (the placeholder bucket ID won't exist in Supabase)
+      const shouldCallRemote = !isQuickListFocusTarget || (isUuid(taskId) && isUuid(bucketId))
+      if (shouldCallRemote) {
+        try {
+          await setTaskCompletedAndResort(taskId, bucketId, true)
+        } catch (error) {
+          logWarn('Failed to mark task complete from Focus', error)
+        } finally {
+          if (isQuickListFocusTarget) {
+            refreshQuickListFromSupabase('focus-complete')
+          }
         }
+      } else if (isQuickListFocusTarget) {
+        // Still refresh from Supabase to sync any remote changes
+        refreshQuickListFromSupabase('focus-complete')
       }
     }
 
