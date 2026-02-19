@@ -9,8 +9,9 @@ import FocusPage from './pages/FocusPage'
 import { FOCUS_EVENT_TYPE } from './lib/focusChannel'
 import { SCHEDULE_EVENT_TYPE } from './lib/scheduleChannel'
 import { supabase, ensureSingleUserSession } from './lib/supabaseClient'
-import { AUTH_SESSION_STORAGE_KEY, MIGRATION_LOCK_STORAGE_KEY, setMigrationLock, clearMigrationLock, isLockedByAnotherTab, markMigrationComplete, clearMigrationLockIfOwned, isMigrationComplete } from './lib/authStorage'
+import { MIGRATION_LOCK_STORAGE_KEY, setMigrationLock, clearMigrationLock, isLockedByAnotherTab, markMigrationComplete, clearMigrationLockIfOwned, isMigrationComplete } from './lib/authStorage'
 import { readCachedSessionTokens } from './lib/authStorage'
+import { storage, STORAGE_KEYS } from './lib/storage'
 import { ensureQuickListUser } from './lib/quickList'
 import { ensureLifeRoutineUser } from './lib/lifeRoutines'
 import { ensureHistoryUser } from './lib/sessionHistory'
@@ -28,14 +29,12 @@ type UserProfile = {
 }
 type SyncStatus = 'synced' | 'syncing' | 'offline' | 'pending'
 
-const THEME_STORAGE_KEY = 'nc-taskwatch-theme'
-const QUICK_LIST_EXPANDED_STORAGE_KEY = 'nc-taskwatch-quick-list-expanded-v1'
 const getInitialTheme = (): Theme => {
   if (typeof window === 'undefined') {
     return 'dark'
   }
 
-  const stored = window.localStorage.getItem(THEME_STORAGE_KEY)
+  const stored = storage.preferences.theme.get()
   if (stored === 'light' || stored === 'dark') {
     return stored
   }
@@ -59,13 +58,9 @@ const ENABLE_TAB_SWIPE = false
 
 const SWIPE_SEQUENCE: TabKey[] = ['reflection', 'focus', 'goals']
 
-const AUTH_PROFILE_STORAGE_KEY = 'nc-taskwatch-auth-profile'
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
 const TERMS_URL = 'https://genzero.vercel.app/taskwatch/terms'
 const PRIVACY_URL = 'https://genzero.vercel.app/taskwatch/privacy'
-
-// Timezone settings
-const APP_TIMEZONE_STORAGE_KEY = 'taskwatch_app_timezone'
 
 // Get current system timezone
 const getCurrentSystemTimezone = (): string => {
@@ -78,23 +73,17 @@ const getCurrentSystemTimezone = (): string => {
 
 // Read app timezone override from localStorage
 const readStoredAppTimezone = (): string | null => {
-  if (typeof localStorage === 'undefined') return null
-  try {
-    return localStorage.getItem(APP_TIMEZONE_STORAGE_KEY)
-  } catch {
-    return null
-  }
+  return storage.preferences.timezone.get()
 }
 
 // Save app timezone override to localStorage
 const storeAppTimezone = (timezone: string | null): void => {
-  if (typeof localStorage === 'undefined') return
+  if (timezone) {
+    storage.preferences.timezone.set(timezone)
+  } else {
+    storage.preferences.timezone.remove()
+  }
   try {
-    if (timezone) {
-      localStorage.setItem(APP_TIMEZONE_STORAGE_KEY, timezone)
-    } else {
-      localStorage.removeItem(APP_TIMEZONE_STORAGE_KEY)
-    }
     // Dispatch custom event to notify components in the same tab
     window.dispatchEvent(new CustomEvent('taskwatch-timezone-changed', { detail: { timezone } }))
   } catch {
@@ -204,19 +193,9 @@ const sanitizeStoredProfile = (value: unknown): UserProfile | null => {
 }
 
 const readStoredProfile = (): UserProfile | null => {
-  if (typeof window === 'undefined') {
-    return null
-  }
-  try {
-    const raw = window.localStorage.getItem(AUTH_PROFILE_STORAGE_KEY)
-    if (!raw) {
-      return null
-    }
-    const parsed = JSON.parse(raw)
-    return sanitizeStoredProfile(parsed)
-  } catch {
-    return null
-  }
+  const parsed = storage.auth.profile.get()
+  if (!parsed) return null
+  return sanitizeStoredProfile(parsed)
 }
 
 const deriveProfileFromSupabaseUser = (user: User | null | undefined, appTimezone?: string | null): UserProfile | null => {
@@ -579,15 +558,13 @@ function MainApp() {
       return
     }
     if (userProfile) {
-      window.localStorage.setItem(AUTH_PROFILE_STORAGE_KEY, JSON.stringify(userProfile))
+      storage.auth.profile.set(userProfile)
     } else {
-      window.localStorage.removeItem(AUTH_PROFILE_STORAGE_KEY)
+      storage.auth.profile.remove()
     }
     const prev = previousProfileRef.current
     if (prev?.email !== userProfile?.email) {
-      try {
-        window.localStorage.setItem(QUICK_LIST_EXPANDED_STORAGE_KEY, 'false')
-      } catch {}
+      storage.preferences.quickListExpanded.set('false')
     }
     previousProfileRef.current = userProfile ?? null
   }, [userProfile])
@@ -893,20 +870,20 @@ function MainApp() {
       // even if another tab signs out and clears localStorage
       if (typeof window !== 'undefined') {
         try {
-          const guestRoutines = window.localStorage.getItem('nc-taskwatch-life-routines::__guest__')
-          const guestQuickList = window.localStorage.getItem('nc-taskwatch-quicklist::__guest__')
-          const guestGoals = window.localStorage.getItem('nc-taskwatch-goals-snapshot::__guest__')
+          const guestRoutines = storage.domain.lifeRoutines.get('__guest__')
+          const guestQuickList = storage.domain.quickList.get('__guest__')
+          const guestGoals = storage.domain.goals.get('__guest__')
           // Don't snapshot history or repeating rules - they have stale references
-          
+
           console.log('[signup] Snapshotting guest data:', {
-            routines: guestRoutines ? JSON.parse(guestRoutines).length : 0,
-            quickList: guestQuickList ? JSON.parse(guestQuickList).length : 0,
+            routines: guestRoutines ? guestRoutines.length : 0,
+            quickList: guestQuickList ? guestQuickList.length : 0,
             goals: guestGoals ? 'exists' : 'none',
           })
-          
-          if (guestRoutines) window.localStorage.setItem('nc-taskwatch-bootstrap-snapshot::life-routines', guestRoutines)
-          if (guestQuickList) window.localStorage.setItem('nc-taskwatch-bootstrap-snapshot::quick-list', guestQuickList)
-          if (guestGoals) window.localStorage.setItem('nc-taskwatch-bootstrap-snapshot::goals', guestGoals)
+
+          if (guestRoutines) storage.bootstrap.snapshotLifeRoutines.set(guestRoutines)
+          if (guestQuickList) storage.bootstrap.snapshotQuickList.set(guestQuickList)
+          if (guestGoals) storage.bootstrap.snapshotGoals.set(guestGoals)
         } catch (e) {
           console.warn('[signup] Could not snapshot guest data:', e)
         }
@@ -1062,7 +1039,7 @@ function MainApp() {
   // Sync timezone state with localStorage changes (cross-tab or from ReflectionPage)
   useEffect(() => {
     const handleStorageChange = (event: StorageEvent) => {
-      if (event.key === APP_TIMEZONE_STORAGE_KEY) {
+      if (event.key === STORAGE_KEYS.timezone) {
         setAppTimezone(event.newValue)
       }
     }
@@ -1140,58 +1117,36 @@ function MainApp() {
     let mounted = true
 
     // Track pending alignment operations to prevent race conditions across tabs
-    const ALIGN_LOCK_KEY = 'nc-taskwatch-align-lock'
     const ALIGN_LOCK_TTL_MS = 10000 // 10 seconds
-    const ALIGN_COMPLETE_KEY = 'nc-taskwatch-align-complete'
 
     const isAlignmentComplete = (userId: string): boolean => {
-      if (typeof window === 'undefined') return false
-      try {
-        const raw = window.localStorage.getItem(ALIGN_COMPLETE_KEY)
-        if (!raw) return false
-        const parsed = JSON.parse(raw) as { userId: string; timestamp: number }
-        // Check if alignment was completed for this user in the last 30 seconds
-        return parsed.userId === userId && Date.now() - parsed.timestamp < 30000
-      } catch {
-        return false
-      }
+      const parsed = storage.locks.alignComplete.get()
+      if (!parsed) return false
+      // Check if alignment was completed for this user in the last 30 seconds
+      return parsed.userId === userId && Date.now() - parsed.timestamp < 30000
     }
 
     const markAlignmentComplete = (userId: string): void => {
-      if (typeof window === 'undefined') return
-      try {
-        window.localStorage.setItem(ALIGN_COMPLETE_KEY, JSON.stringify({ userId, timestamp: Date.now() }))
-      } catch {}
+      storage.locks.alignComplete.set({ userId, timestamp: Date.now() })
     }
 
     const acquireAlignLock = (userId: string): boolean => {
-      if (typeof window === 'undefined') return true
-      try {
-        const raw = window.localStorage.getItem(ALIGN_LOCK_KEY)
-        const now = Date.now()
-        if (raw) {
-          try {
-            const parsed = JSON.parse(raw) as { userId: string; expiresAt: number }
-            // If lock is for same user and still valid, another tab is aligning
-            if (parsed.userId === userId && parsed.expiresAt > now) {
-              return false
-            }
-          } catch {}
+      const parsed = storage.locks.alignLock.get()
+      const now = Date.now()
+      if (parsed) {
+        // If lock is for same user and still valid, another tab is aligning
+        if (parsed.userId === userId && parsed.expiresAt > now) {
+          return false
         }
-        // Acquire lock
-        const expiresAt = now + ALIGN_LOCK_TTL_MS
-        window.localStorage.setItem(ALIGN_LOCK_KEY, JSON.stringify({ userId, expiresAt }))
-        return true
-      } catch {
-        return true
       }
+      // Acquire lock
+      const expiresAt = now + ALIGN_LOCK_TTL_MS
+      storage.locks.alignLock.set({ userId, expiresAt })
+      return true
     }
 
     const releaseAlignLock = (): void => {
-      if (typeof window === 'undefined') return
-      try {
-        window.localStorage.removeItem(ALIGN_LOCK_KEY)
-      } catch {}
+      storage.locks.alignLock.remove()
     }
 
     const alignLocalStoresForUser = async (userId: string | null): Promise<void> => {
@@ -1281,7 +1236,7 @@ function MainApp() {
       if (previousUserId === undefined && typeof window !== 'undefined') {
         try {
           // On fresh page load, check localStorage for last known user
-          const stored = window.localStorage.getItem('nc-taskwatch-last-auth-user-id')
+          const stored = storage.auth.lastUserId.get()
           previousUserId = stored === null ? null : (stored === '' ? null : stored)
         } catch {}
       }
@@ -1290,22 +1245,18 @@ function MainApp() {
       // Reset app timezone to system default ONLY on actual auth changes (sign-in/sign-out)
       // Not on page refresh where user stays the same
       if (userActuallyChanged && typeof window !== 'undefined') {
+        storage.preferences.timezone.remove()
         try {
-          window.localStorage.removeItem('taskwatch_app_timezone')
           // Dispatch custom event to notify same-tab components (storage events only fire cross-tab)
           window.dispatchEvent(new CustomEvent('taskwatch-timezone-reset'))
         } catch {}
       }
-      
+
       // Persist current user ID for future page loads
-      if (typeof window !== 'undefined') {
-        try {
-          if (newUserId) {
-            window.localStorage.setItem('nc-taskwatch-last-auth-user-id', newUserId)
-          } else {
-            window.localStorage.setItem('nc-taskwatch-last-auth-user-id', '')
-          }
-        } catch {}
+      if (newUserId) {
+        storage.auth.lastUserId.set(newUserId)
+      } else {
+        storage.auth.lastUserId.set('')
       }
       
       // Fetch timezone from DB for signed-in users
@@ -1457,7 +1408,7 @@ function MainApp() {
             window.location.reload()
           }
         }
-      } else if (event.key === AUTH_SESSION_STORAGE_KEY) {
+      } else if (event.key === STORAGE_KEYS.authSession) {
         // Skip debounce for sign-out events to ensure immediate response
         const newValue = event.newValue
         const isSignOut = !newValue || newValue === 'null' || newValue === ''
@@ -1469,7 +1420,7 @@ function MainApp() {
         } else {
           void recheckSession({ skipDebounce: false })
         }
-      } else if (event.key === AUTH_PROFILE_STORAGE_KEY) {
+      } else if (event.key === STORAGE_KEYS.authProfile) {
         // Profile was cleared from another tab (sign-out), reload to reset to guest
         const newValue = event.newValue
         if (!newValue || newValue === 'null' || newValue === '') {
@@ -1477,7 +1428,7 @@ function MainApp() {
             window.location.reload()
           }
         }
-      } else if (event.key === THEME_STORAGE_KEY) {
+      } else if (event.key === STORAGE_KEYS.theme) {
         // Theme changed in another tab
         const newValue = event.newValue
         if (newValue === 'light' || newValue === 'dark') {
@@ -1555,30 +1506,21 @@ function MainApp() {
     
     // Clear auth keys to signal sign-out to other tabs
     if (typeof window !== 'undefined') {
-      try {
-        window.localStorage.removeItem(AUTH_SESSION_STORAGE_KEY)
-      } catch {}
-      try {
-        window.localStorage.removeItem(AUTH_PROFILE_STORAGE_KEY)
-      } catch {}
-      
+      storage.auth.session.remove()
+      storage.auth.profile.remove()
+
       // Clear the full sync timestamp so next sign-in doesn't skip fetches
       clearLastFullSyncTimestamp()
-      
+
       // Preserve theme preference before clearing localStorage
-      let savedTheme: string | null = null
-      try {
-        savedTheme = window.localStorage.getItem(THEME_STORAGE_KEY)
-      } catch {}
-      
+      const savedTheme = storage.preferences.theme.get()
+
       // Clear all localStorage data for a fresh guest experience
       clearAllLocalStorage()
-      
+
       // Restore theme preference after clearing
       if (savedTheme) {
-        try {
-          window.localStorage.setItem(THEME_STORAGE_KEY, savedTheme)
-        } catch {}
+        storage.preferences.theme.set(savedTheme)
       }
       
       // Immediately reload - fresh page will have clean guest defaults
@@ -1646,7 +1588,7 @@ function MainApp() {
         document.documentElement.setAttribute('data-theme', value)
       }
       if (typeof window !== 'undefined') {
-        window.localStorage.setItem(THEME_STORAGE_KEY, value)
+        storage.preferences.theme.set(value)
         // Dispatch custom event for same-tab listeners (storage event doesn't fire in same tab)
         try {
           const event = new CustomEvent('nc-taskwatch:theme-update', { detail: value })
@@ -2421,10 +2363,8 @@ const nextThemeLabel = theme === 'dark' ? 'light' : 'dark'
                     console.warn('[global-signout] Error:', err)
                   }
                   // Clear local storage and reload
-                  try {
-                    window.localStorage.removeItem(AUTH_SESSION_STORAGE_KEY)
-                    window.localStorage.removeItem(AUTH_PROFILE_STORAGE_KEY)
-                  } catch {}
+                  storage.auth.session.remove()
+                  storage.auth.profile.remove()
                   window.location.reload()
                 }}
               >
@@ -3259,11 +3199,9 @@ function AuthCallbackScreen(): React.ReactElement {
       
       if (!cancelled) {
         // Clear focus task state on sign-in so user starts with default presets
-        try {
-          window.localStorage.removeItem('nc-taskwatch-current-task')
-          window.localStorage.removeItem('nc-taskwatch-current-task-source')
-          window.localStorage.removeItem('nc-taskwatch-stopwatch-v1')
-        } catch {}
+        storage.focus.currentTask.remove()
+        storage.focus.currentTaskSource.remove()
+        storage.focus.stopwatch.remove()
         window.location.replace('/')
       }
     }

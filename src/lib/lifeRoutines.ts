@@ -58,9 +58,9 @@ const surfaceStyleFromColour = (colour: string | null | undefined): SurfaceStyle
   return match ? match[0] : DEFAULT_SURFACE_STYLE
 }
 
-export const LIFE_ROUTINE_STORAGE_KEY = 'nc-taskwatch-life-routines'
+import { storage, STORAGE_KEYS } from './storage'
+
 export const LIFE_ROUTINE_UPDATE_EVENT = 'nc-life-routines:updated'
-export const LIFE_ROUTINE_USER_STORAGE_KEY = 'nc-taskwatch-life-routines-user'
 export const LIFE_ROUTINE_GUEST_USER_ID = '__guest__'
 export const LIFE_ROUTINE_USER_EVENT = 'nc-life-routines:user-updated'
 
@@ -234,7 +234,7 @@ const storeLifeRoutinesLocal = (routines: LifeRoutineConfig[], userId?: string |
   
   if (typeof window !== 'undefined') {
     try {
-      window.localStorage.setItem(storageKeyForUser(userId ?? readStoredLifeRoutineUserId()), JSON.stringify(normalized))
+      storage.domain.lifeRoutines.set(normalizeLifeRoutineUserId(userId ?? readStoredLifeRoutineUserId()), normalized)
       window.dispatchEvent(new CustomEvent(LIFE_ROUTINE_UPDATE_EVENT, { detail: normalized }))
     } catch {
       // ignore storage errors
@@ -247,7 +247,7 @@ const storeLifeRoutinesLocal = (routines: LifeRoutineConfig[], userId?: string |
 if (typeof window !== 'undefined') {
   const handleStorageChange = (event: StorageEvent) => {
     // Check if the change is for a life routines key
-    if (event.key && event.key.startsWith(LIFE_ROUTINE_STORAGE_KEY)) {
+    if (event.key && event.key.startsWith(STORAGE_KEYS.lifeRoutines)) {
       try {
         const newValue = event.newValue
         if (newValue) {
@@ -265,29 +265,23 @@ if (typeof window !== 'undefined') {
 }
 
 const readStoredLifeRoutineUserId = (): string | null => {
-  if (typeof window === 'undefined') return null
-  try {
-    const raw = window.localStorage.getItem(LIFE_ROUTINE_USER_STORAGE_KEY)
-    if (!raw) return null
-    const trimmed = raw.trim()
-    return trimmed.length > 0 ? trimmed : null
-  } catch {
-    return null
-  }
+  const raw = storage.ownership.lifeRoutinesUser.get()
+  if (!raw) return null
+  const trimmed = raw.trim()
+  return trimmed.length > 0 ? trimmed : null
 }
 
 const setStoredLifeRoutineUserId = (userId: string | null): void => {
-  if (typeof window === 'undefined') return
-  try {
-    if (!userId) {
-      window.localStorage.removeItem(LIFE_ROUTINE_USER_STORAGE_KEY)
-    } else {
-      window.localStorage.setItem(LIFE_ROUTINE_USER_STORAGE_KEY, userId)
-    }
+  if (!userId) {
+    storage.ownership.lifeRoutinesUser.remove()
+  } else {
+    storage.ownership.lifeRoutinesUser.set(userId)
+  }
+  if (typeof window !== 'undefined') {
     try {
       window.dispatchEvent(new Event(LIFE_ROUTINE_USER_EVENT))
     } catch {}
-  } catch {}
+  }
 }
 
 const normalizeLifeRoutineUserId = (userId: string | null | undefined): string =>
@@ -297,52 +291,30 @@ const isGuestLifeRoutineUser = (userId: string | null): boolean =>
   !userId || userId === LIFE_ROUTINE_GUEST_USER_ID
 
 const storageKeyForUser = (userId: string | null | undefined): string =>
-  `${LIFE_ROUTINE_STORAGE_KEY}::${normalizeLifeRoutineUserId(userId)}`
+  `${STORAGE_KEYS.lifeRoutines}::${normalizeLifeRoutineUserId(userId)}`
 
 const LIFE_ROUTINE_SYNC_LOCK_TTL_MS = 2 * 60 * 1000
-const makeLifeRoutineSyncLockKey = (userId: string) => `${LIFE_ROUTINE_STORAGE_KEY}:sync-lock::${userId}`
 
 const acquireLifeRoutineSyncLock = (userId: string): boolean => {
-  if (typeof window === 'undefined') return true
-  try {
-    const key = makeLifeRoutineSyncLockKey(userId)
-    const raw = window.localStorage.getItem(key)
-    const now = Date.now()
-    if (raw) {
-      try {
-        const parsed = JSON.parse(raw) as { expiresAt?: number }
-        if (parsed?.expiresAt && parsed.expiresAt > now) {
-          return false
-        }
-      } catch {}
-    }
-    const expiresAt = now + LIFE_ROUTINE_SYNC_LOCK_TTL_MS
-    window.localStorage.setItem(key, JSON.stringify({ expiresAt }))
-    return true
-  } catch {
-    return true
+  const parsed = storage.locks.lifeRoutinesSyncLock.get(userId)
+  const now = Date.now()
+  if (parsed?.expiresAt && parsed.expiresAt > now) {
+    return false
   }
+  const expiresAt = now + LIFE_ROUTINE_SYNC_LOCK_TTL_MS
+  storage.locks.lifeRoutinesSyncLock.set(userId, { expiresAt })
+  return true
 }
 
 const releaseLifeRoutineSyncLock = (userId: string): void => {
-  if (typeof window === 'undefined') return
-  try {
-    window.localStorage.removeItem(makeLifeRoutineSyncLockKey(userId))
-  } catch {}
+  storage.locks.lifeRoutinesSyncLock.remove(userId)
 }
 
 export const readLifeRoutineOwnerId = (): string | null => readStoredLifeRoutineUserId()
 
 // Read raw local value without default seeding; returns null when key is absent
 const readRawLifeRoutinesLocal = (userId?: string | null): unknown | null => {
-  if (typeof window === 'undefined') return null
-  try {
-    const raw = window.localStorage.getItem(storageKeyForUser(userId ?? readStoredLifeRoutineUserId()))
-    if (!raw) return null
-    return JSON.parse(raw)
-  } catch {
-    return null
-  }
+  return storage.domain.lifeRoutines.get(normalizeLifeRoutineUserId(userId ?? readStoredLifeRoutineUserId()))
 }
 
 const mapDbRowToRoutine = (row: LifeRoutineDbRow): LifeRoutineConfig | null => {
@@ -452,8 +424,8 @@ export const readStoredLifeRoutines = (): LifeRoutineConfig[] => {
   try {
     const currentUser = readStoredLifeRoutineUserId()
     const guestContext = isGuestLifeRoutineUser(currentUser)
-    const raw = window.localStorage.getItem(storageKeyForUser(currentUser))
-    if (!raw) {
+    const parsed = storage.domain.lifeRoutines.get(normalizeLifeRoutineUserId(currentUser))
+    if (!parsed) {
       if (guestContext) {
         const defaults = getDefaultLifeRoutines()
         storeLifeRoutinesLocal(defaults, currentUser)
@@ -464,12 +436,11 @@ export const readStoredLifeRoutines = (): LifeRoutineConfig[] => {
       }
       return []
     }
-    const parsed = JSON.parse(raw)
     const sanitized = sanitizeLifeRoutineList(parsed)
     if (sanitized.length > 0) {
       return sanitized
     }
-    if (Array.isArray(parsed) && parsed.length === 0) {
+    if (Array.isArray(parsed) && (parsed as any[]).length === 0) {
       return []
     }
     if (guestContext) {

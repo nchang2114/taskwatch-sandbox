@@ -16,7 +16,7 @@ export type RepeatingException = {
 	updatedAtMs: number
 }
 
-const EXC_STORAGE_KEY = 'nc-taskwatch-repeating-exceptions'
+import { storage } from './storage'
 export const EXC_EVENT = 'nc-taskwatch:repeating-exceptions-update'
 
 const nowMs = () => Date.now()
@@ -54,23 +54,17 @@ export const sanitizeExceptions = (value: unknown): RepeatingException[] => {
 }
 
 const readLocal = (): RepeatingException[] => {
-	if (typeof window === 'undefined') return []
-	try {
-		const raw = window.localStorage.getItem(EXC_STORAGE_KEY)
-		if (!raw) return []
-		return sanitizeExceptions(JSON.parse(raw))
-	} catch {
-		return []
-	}
+	return sanitizeExceptions(storage.domain.repeatingExceptions.get())
 }
 
 const writeLocal = (rows: RepeatingException[]) => {
-	if (typeof window === 'undefined') return
-	try {
-		window.localStorage.setItem(EXC_STORAGE_KEY, JSON.stringify(rows))
-		const evt = new CustomEvent<RepeatingException[]>(EXC_EVENT, { detail: rows })
-		window.dispatchEvent(evt)
-	} catch {}
+	storage.domain.repeatingExceptions.set(rows)
+	if (typeof window !== 'undefined') {
+		try {
+			const evt = new CustomEvent<RepeatingException[]>(EXC_EVENT, { detail: rows })
+			window.dispatchEvent(evt)
+		} catch {}
+	}
 }
 
 export const subscribeRepeatingExceptions = (cb: (rows: RepeatingException[]) => void) => {

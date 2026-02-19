@@ -33,11 +33,9 @@ export type RepeatingSessionRule = {
   endAtMs?: number
 }
 
-export const REPEATING_RULES_STORAGE_KEY = 'nc-taskwatch-repeating-rules'
-export const REPEATING_RULES_ACTIVATION_KEY = 'nc-taskwatch-repeating-activation-map'
-// We also persist a local end-boundary override to ensure offline correctness.
-export const REPEATING_RULES_END_KEY = 'nc-taskwatch-repeating-end-map'
-const REPEATING_RULES_USER_KEY = 'nc-taskwatch-repeating-user'
+import { storage, STORAGE_KEYS } from './storage'
+
+const REPEATING_RULES_USER_KEY = STORAGE_KEYS.repeatingUser
 export const REPEATING_RULES_GUEST_USER_ID = '__guest__'
 
 const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
@@ -180,15 +178,15 @@ const getSampleRepeatingRules = (): RepeatingSessionRule[] => {
 }
 
 const storageKeyForUser = (userId: string | null | undefined): string =>
-  `${REPEATING_RULES_STORAGE_KEY}::${normalizeRepeatingRuleUserId(userId)}`
+  `${STORAGE_KEYS.repeatingRules}::${normalizeRepeatingRuleUserId(userId)}`
 
 export const readLocalRepeatingRules = (): RepeatingSessionRule[] => {
   if (typeof window === 'undefined') return getSampleRepeatingRules()
   try {
     const currentUserId = readStoredRepeatingRuleUserId()
     const isGuest = !currentUserId || currentUserId === REPEATING_RULES_GUEST_USER_ID
-    const raw = window.localStorage.getItem(storageKeyForUser(currentUserId))
-    if (!raw) {
+    const parsed = storage.domain.repeatingRules.get(normalizeRepeatingRuleUserId(currentUserId))
+    if (!parsed) {
       // Only auto-populate samples for guest users, not real users
       if (isGuest) {
         const sample = getSampleRepeatingRules()
@@ -197,8 +195,8 @@ export const readLocalRepeatingRules = (): RepeatingSessionRule[] => {
       }
       return []
     }
-    const arr = JSON.parse(raw)
-    if (!Array.isArray(arr)) return []
+    if (!Array.isArray(parsed)) return []
+    const arr = parsed
     const mapped = arr
       .map((row) => mapRowToRule(row))
       .filter(Boolean) as RepeatingSessionRule[]
@@ -226,15 +224,13 @@ export const readLocalRepeatingRules = (): RepeatingSessionRule[] => {
 }
 
 const writeLocalRules = (rules: RepeatingSessionRule[]) => {
-  if (typeof window === 'undefined') return
-  try {
-    window.localStorage.setItem(storageKeyForUser(readStoredRepeatingRuleUserId()), JSON.stringify(rules))
-    // Dispatch custom event for same-tab listeners (storage event doesn't fire in same tab)
+  storage.domain.repeatingRules.set(normalizeRepeatingRuleUserId(readStoredRepeatingRuleUserId()), rules)
+  if (typeof window !== 'undefined') {
     try {
       const event = new CustomEvent('nc-taskwatch:repeating-rules-update', { detail: rules })
       window.dispatchEvent(event)
     } catch {}
-  } catch {}
+  }
 }
 export const storeRepeatingRulesLocal = (rules: RepeatingSessionRule[]): void => {
   writeLocalRules(rules)
@@ -259,22 +255,14 @@ export const subscribeToRepeatingRulesChange = (
 
 type ActivationMap = Record<string, number>
 const readActivationMap = (): ActivationMap => {
-  if (typeof window === 'undefined') return {}
-  try {
-    const raw = window.localStorage.getItem(REPEATING_RULES_ACTIVATION_KEY)
-    if (!raw) return {}
-    const parsed = JSON.parse(raw)
-    return (parsed && typeof parsed === 'object') ? parsed as ActivationMap : {}
-  } catch {
-    return {}
-  }
+  return storage.domain.repeatingActivationMap.get() ?? {}
 }
 
 // Listen for storage events from other tabs to sync repeating rules
 if (typeof window !== 'undefined') {
   window.addEventListener('storage', (event: StorageEvent) => {
     // Check if the change is for a repeating rules key (handles user-specific keys like ::USER_ID)
-    if (event.key && (event.key === REPEATING_RULES_STORAGE_KEY || event.key.startsWith(REPEATING_RULES_STORAGE_KEY + '::'))) {
+    if (event.key && (event.key === STORAGE_KEYS.repeatingRules || event.key.startsWith(STORAGE_KEYS.repeatingRules + '::'))) {
       try {
         const newValue = event.newValue
         if (!newValue) return
@@ -289,29 +277,15 @@ if (typeof window !== 'undefined') {
   })
 }
 const writeActivationMap = (map: ActivationMap) => {
-  if (typeof window === 'undefined') return
-  try {
-    window.localStorage.setItem(REPEATING_RULES_ACTIVATION_KEY, JSON.stringify(map))
-  } catch {}
+  storage.domain.repeatingActivationMap.set(map)
 }
 
 type EndMap = Record<string, number>
 const readEndMap = (): EndMap => {
-  if (typeof window === 'undefined') return {}
-  try {
-    const raw = window.localStorage.getItem(REPEATING_RULES_END_KEY)
-    if (!raw) return {}
-    const parsed = JSON.parse(raw)
-    return (parsed && typeof parsed === 'object') ? (parsed as EndMap) : {}
-  } catch {
-    return {}
-  }
+  return storage.domain.repeatingEndMap.get() ?? {}
 }
 const writeEndMap = (map: EndMap) => {
-  if (typeof window === 'undefined') return
-  try {
-    window.localStorage.setItem(REPEATING_RULES_END_KEY, JSON.stringify(map))
-  } catch {}
+  storage.domain.repeatingEndMap.set(map)
 }
 
 export const pushRepeatingRulesToSupabase = async (
@@ -399,28 +373,16 @@ export const pushRepeatingRulesToSupabase = async (
 }
 
 const readStoredRepeatingRuleUserId = (): string | null => {
-  if (typeof window === 'undefined') {
-    return null
-  }
-  try {
-    const raw = window.localStorage.getItem(REPEATING_RULES_USER_KEY)
-    return raw && raw.trim().length > 0 ? raw.trim() : null
-  } catch {
-    return null
-  }
+  const raw = storage.ownership.repeatingUser.get()
+  return raw && raw.trim().length > 0 ? raw.trim() : null
 }
 
 const setStoredRepeatingRuleUserId = (userId: string | null): void => {
-  if (typeof window === 'undefined') {
-    return
+  if (!userId) {
+    storage.ownership.repeatingUser.remove()
+  } else {
+    storage.ownership.repeatingUser.set(userId)
   }
-  try {
-    if (!userId) {
-      window.localStorage.removeItem(REPEATING_RULES_USER_KEY)
-    } else {
-      window.localStorage.setItem(REPEATING_RULES_USER_KEY, userId)
-    }
-  } catch {}
 }
 
 const normalizeRepeatingRuleUserId = (userId: string | null | undefined): string =>

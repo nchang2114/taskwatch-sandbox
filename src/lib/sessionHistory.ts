@@ -6,13 +6,11 @@ import {
   sanitizeSurfaceStyle,
   type SurfaceStyle,
 } from './surfaceStyles'
+import { storage, STORAGE_KEYS } from './storage'
 
-export const HISTORY_STORAGE_KEY = 'nc-taskwatch-session-history'
 export const HISTORY_EVENT_NAME = 'nc-taskwatch:history-update'
-export const HISTORY_USER_KEY = 'nc-taskwatch-session-history-user'
 export const HISTORY_GUEST_USER_ID = '__guest__'
 export const HISTORY_USER_EVENT = 'nc-taskwatch-history-user-updated'
-export const CURRENT_SESSION_STORAGE_KEY = 'nc-taskwatch-current-session'
 export const CURRENT_SESSION_EVENT_NAME = 'nc-taskwatch:session-update'
 export const HISTORY_LIMIT = 250
 // Reduce remote fetch window to limit egress; adjust as needed
@@ -28,13 +26,7 @@ export const getCurrentTimezone = (): string => {
 }
 
 // Feature flags persisted locally to enable/disable optional server columns dynamically
-const FEATURE_FLAGS_STORAGE_KEY = 'nc-taskwatch-flags'
-type FeatureFlags = {
-  repeatOriginal?: boolean
-  historyNotes?: boolean
-  historySubtasks?: boolean
-  historyFutureSession?: boolean
-}
+import type { FeatureFlags } from './storage'
 const parseEnvToggle = (value: unknown): boolean | null => {
   if (typeof value !== 'string') return null
   const normalized = value.trim().toLowerCase()
@@ -53,19 +45,10 @@ const ENV_ENABLE_HISTORY_FUTURE_SESSION = parseEnvToggle(
   (import.meta as any)?.env?.VITE_ENABLE_HISTORY_FUTURE_SESSION,
 )
 const readFeatureFlags = (): FeatureFlags => {
-  if (typeof window === 'undefined') return {}
-  try {
-    const raw = window.localStorage.getItem(FEATURE_FLAGS_STORAGE_KEY)
-    if (!raw) return {}
-    const obj = JSON.parse(raw)
-    return obj && typeof obj === 'object' ? (obj as FeatureFlags) : {}
-  } catch {
-    return {}
-  }
+  return storage.preferences.flags.get() ?? {}
 }
 const writeFeatureFlags = (flags: FeatureFlags) => {
-  if (typeof window === 'undefined') return
-  try { window.localStorage.setItem(FEATURE_FLAGS_STORAGE_KEY, JSON.stringify(flags)) } catch {}
+  storage.preferences.flags.set(flags)
 }
 const envOverride = (flag: boolean | null): boolean | null => flag
 
@@ -128,33 +111,27 @@ const buildHistorySelectColumns = (): string => {
   return columns
 }
 const getStoredHistoryUserId = (): string | null => {
-  if (typeof window === 'undefined') return null
-  try {
-    return window.localStorage.getItem(HISTORY_USER_KEY)
-  } catch {
-    return null
-  }
+  return storage.ownership.historyUser.get()
 }
 
 const normalizeHistoryUserId = (userId: string | null | undefined): string =>
   typeof userId === 'string' && userId.trim().length > 0 ? userId.trim() : HISTORY_GUEST_USER_ID
 
 const storageKeyForUser = (userId: string | null | undefined): string =>
-  `${HISTORY_STORAGE_KEY}::${normalizeHistoryUserId(userId)}`
+  `${STORAGE_KEYS.sessionHistory}::${normalizeHistoryUserId(userId)}`
 
 export const readHistoryOwnerId = (): string | null => getStoredHistoryUserId()
 const setStoredHistoryUserId = (userId: string | null): void => {
-  if (typeof window === 'undefined') return
-  try {
-    if (!userId) {
-      window.localStorage.removeItem(HISTORY_USER_KEY)
-    } else {
-      window.localStorage.setItem(HISTORY_USER_KEY, userId)
-    }
+  if (!userId) {
+    storage.ownership.historyUser.remove()
+  } else {
+    storage.ownership.historyUser.set(userId)
+  }
+  if (typeof window !== 'undefined') {
     try {
       window.dispatchEvent(new Event(HISTORY_USER_EVENT))
     } catch {}
-  } catch {}
+  }
 }
 const getErrorContext = (err: any): string => {
   if (!err) return ''
@@ -1032,9 +1009,9 @@ const readHistoryRecords = (): HistoryRecord[] => {
   }
   try {
     const currentUserId = getStoredHistoryUserId()
-    const raw = window.localStorage.getItem(storageKeyForUser(currentUserId))
+    const parsed = storage.domain.history.get(normalizeHistoryUserId(currentUserId))
     const guestContext = !currentUserId || currentUserId === HISTORY_GUEST_USER_ID
-    if (!raw) {
+    if (!parsed) {
       if (guestContext) {
         const sampleRecords = createSampleHistoryRecords()
         writeHistoryRecords(sampleRecords)
@@ -1045,7 +1022,7 @@ const readHistoryRecords = (): HistoryRecord[] => {
       }
       return []
     }
-    const records = sanitizeHistoryRecords(JSON.parse(raw))
+    const records = sanitizeHistoryRecords(parsed)
     return records
   } catch {
     return []
@@ -1067,13 +1044,8 @@ export const purgeDeletedHistoryRecords = (): void => {
 }
 
 const writeHistoryRecords = (records: HistoryRecord[]): void => {
-  if (typeof window === 'undefined') {
-    return
-  }
-  try {
-    const currentUserId = getStoredHistoryUserId()
-    window.localStorage.setItem(storageKeyForUser(currentUserId), JSON.stringify(records))
-  } catch {}
+  const currentUserId = getStoredHistoryUserId()
+  storage.domain.history.set(normalizeHistoryUserId(currentUserId), records)
 }
 
 export const readStoredHistory = (): HistoryEntry[] => recordsToActiveEntries(readHistoryRecords())

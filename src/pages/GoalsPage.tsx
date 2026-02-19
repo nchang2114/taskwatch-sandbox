@@ -48,14 +48,12 @@ import {
 } from '../lib/surfaceStyles'
 import { DEMO_GOALS } from '../lib/demoGoals'
 import {
-  LIFE_ROUTINE_STORAGE_KEY,
   LIFE_ROUTINE_UPDATE_EVENT,
   readStoredLifeRoutines,
   readLifeRoutineOwnerId,
   sanitizeLifeRoutineList,
   syncLifeRoutinesWithSupabase,
   writeStoredLifeRoutines,
-  LIFE_ROUTINE_USER_STORAGE_KEY,
   LIFE_ROUTINE_GUEST_USER_ID,
   LIFE_ROUTINE_USER_EVENT,
   type LifeRoutineConfig,
@@ -75,7 +73,6 @@ import {
   writeStoredQuickList,
   subscribeQuickList,
   readQuickListOwnerId,
-  QUICK_LIST_USER_STORAGE_KEY,
   QUICK_LIST_GUEST_USER_ID,
   QUICK_LIST_USER_EVENT,
   type QuickItem,
@@ -84,12 +81,12 @@ import {
 import { fetchQuickListRemoteItems, ensureQuickListRemoteStructures, QUICK_LIST_GOAL_NAME } from '../lib/quickListRemote'
 import {
   HISTORY_EVENT_NAME,
-  HISTORY_STORAGE_KEY,
   readStoredHistory,
   type HistoryEntry,
 } from '../lib/sessionHistory'
 import { logDebug, logInfo, logWarn } from '../lib/logging'
 import { isRecentlyFullSynced } from '../lib/bootstrap'
+import { storage, STORAGE_KEYS } from '../lib/storage'
 
 // Minimal sync instrumentation disabled by default
 const DEBUG_SYNC = false
@@ -240,8 +237,6 @@ const createTaskDetails = (overrides?: Partial<TaskDetails>): TaskDetails => ({
   ...overrides,
 })
 
-const TASK_DETAILS_STORAGE_KEY = 'nc-taskwatch-task-details-v1'
-const QUICK_LIST_EXPANDED_STORAGE_KEY = 'nc-taskwatch-quick-list-expanded-v1'
 const LIFE_ROUTINES_NAME = 'Daily Life'
 const LIFE_ROUTINES_GOAL_ID = 'life-routines'
 const LIFE_ROUTINES_SURFACE: GoalSurfaceStyle = 'linen'
@@ -311,11 +306,10 @@ const readStoredTaskDetails = (): TaskDetailsState => {
     return {}
   }
   try {
-    const raw = window.localStorage.getItem(TASK_DETAILS_STORAGE_KEY)
-    if (!raw) {
+    const parsed = storage.domain.taskDetails.get()
+    if (!parsed) {
       return {}
     }
-    const parsed = JSON.parse(raw)
     return sanitizeTaskDetailsState(parsed)
   } catch {
     return {}
@@ -327,7 +321,7 @@ const readStoredQuickListExpanded = (): boolean => {
     return false
   }
   try {
-    const raw = window.localStorage.getItem(QUICK_LIST_EXPANDED_STORAGE_KEY)
+    const raw = storage.preferences.quickListExpanded.get()
     if (raw === 'true') {
       return true
     }
@@ -1447,13 +1441,11 @@ type Milestone = {
   hidden?: boolean
 }
 
-const MILESTONE_DATA_KEY = 'nc-taskwatch-milestones-state-v1'
 
 const readMilestonesFor = (goalId: string): Milestone[] => {
   if (typeof window === 'undefined') return []
   try {
-    const raw = window.localStorage.getItem(MILESTONE_DATA_KEY)
-    const map = raw ? (JSON.parse(raw) as Record<string, Milestone[]>) : {}
+    const map = storage.domain.milestones.get() ?? {}
     const list = Array.isArray(map[goalId]) ? map[goalId] : []
     return list
   } catch {
@@ -1463,10 +1455,9 @@ const readMilestonesFor = (goalId: string): Milestone[] => {
 const writeMilestonesFor = (goalId: string, list: Milestone[]) => {
   if (typeof window === 'undefined') return
   try {
-    const raw = window.localStorage.getItem(MILESTONE_DATA_KEY)
-    const map = raw ? (JSON.parse(raw) as Record<string, Milestone[]>) : {}
+    const map = storage.domain.milestones.get() ?? {}
     map[goalId] = list
-    window.localStorage.setItem(MILESTONE_DATA_KEY, JSON.stringify(map))
+    storage.domain.milestones.set(map)
   } catch {}
 }
 
@@ -5527,7 +5518,7 @@ export default function GoalsPage(): ReactElement {
       setScheduledTaskIds((current) => (areStringSetsEqual(current, next) ? current : next))
     }
     const handleStorage = (event: StorageEvent) => {
-      if (event.key && event.key !== HISTORY_STORAGE_KEY) {
+      if (event.key && event.key !== STORAGE_KEYS.sessionHistory) {
         return
       }
       syncScheduledTasks()
@@ -5794,7 +5785,7 @@ export default function GoalsPage(): ReactElement {
     }
     const bump = () => setLifeRoutineOwnerSignal((value) => value + 1)
     const handleStorage = (event: StorageEvent) => {
-      if (event.key === LIFE_ROUTINE_USER_STORAGE_KEY) {
+      if (event.key === STORAGE_KEYS.lifeRoutinesUser) {
         bump()
       }
     }
@@ -5912,7 +5903,7 @@ export default function GoalsPage(): ReactElement {
       return false
     }
     try {
-      const quickUser = window.localStorage.getItem(QUICK_LIST_USER_STORAGE_KEY)
+      const quickUser = storage.ownership.quickListUser.get()
       return !quickUser || quickUser === QUICK_LIST_GUEST_USER_ID
     } catch {
       return false
@@ -5923,7 +5914,7 @@ export default function GoalsPage(): ReactElement {
       return
     }
     try {
-      window.localStorage.setItem(QUICK_LIST_EXPANDED_STORAGE_KEY, quickListExpanded ? 'true' : 'false')
+      storage.preferences.quickListExpanded.set(quickListExpanded ? 'true' : 'false')
     } catch {}
   }, [quickListExpanded])
   useEffect(() => {
@@ -5934,7 +5925,7 @@ export default function GoalsPage(): ReactElement {
       setQuickListOwnerSignal((value) => value + 1)
     }
     const handleStorage = (event: StorageEvent) => {
-      if (event.key === QUICK_LIST_USER_STORAGE_KEY) {
+      if (event.key === STORAGE_KEYS.quickListUser) {
         bump()
       }
     }
@@ -6732,7 +6723,7 @@ export default function GoalsPage(): ReactElement {
       return
     }
     const handleStorage = (event: StorageEvent) => {
-      if (event.key === LIFE_ROUTINE_STORAGE_KEY) {
+      if (event.key === STORAGE_KEYS.lifeRoutines) {
         setLifeRoutineTasks(readStoredLifeRoutines())
       }
     }
@@ -6968,10 +6959,7 @@ export default function GoalsPage(): ReactElement {
     taskDetailsPersistTimerRef.current = window.setTimeout(() => {
       taskDetailsPersistTimerRef.current = null
       try {
-        window.localStorage.setItem(
-          TASK_DETAILS_STORAGE_KEY,
-          JSON.stringify(taskDetailsLatestPersistRef.current),
-        )
+        storage.domain.taskDetails.set(taskDetailsLatestPersistRef.current)
       } catch {
         // Ignore quota or storage errors silently
       }

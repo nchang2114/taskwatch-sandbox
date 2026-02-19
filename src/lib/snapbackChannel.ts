@@ -4,9 +4,10 @@
  * Falls back to localStorage events for older browsers.
  */
 
+import { storage, STORAGE_KEYS } from './storage'
+
 export const SNAPBACK_CHANNEL_NAME = 'nc-taskwatch-snapback-sync'
 export const SNAPBACK_SYNC_EVENT = 'nc-taskwatch:snapback-sync'
-export const SNAPBACK_SYNC_STORAGE_KEY = 'nc-taskwatch-snapback-sync-signal'
 
 type SnapbackSyncMessage = {
   type: 'snapback-updated'
@@ -49,9 +50,8 @@ export const broadcastSnapbackUpdate = (): void => {
   }
   
   // Also use localStorage for fallback and same-tab notification
+  storage.locks.snapbackSyncSignal.set(message)
   try {
-    window.localStorage.setItem(SNAPBACK_SYNC_STORAGE_KEY, JSON.stringify(message))
-    // Dispatch custom event for same-tab listeners
     window.dispatchEvent(new CustomEvent(SNAPBACK_SYNC_EVENT, { detail: message }))
   } catch {}
 }
@@ -81,7 +81,7 @@ export const subscribeToSnapbackSync = (callback: SnapbackSyncCallback): (() => 
   
   // Storage event listener (for cross-tab when BroadcastChannel not available)
   const storageHandler = (event: StorageEvent) => {
-    if (event.key === SNAPBACK_SYNC_STORAGE_KEY && event.newValue) {
+    if (event.key === STORAGE_KEYS.snapbackSyncSignal && event.newValue) {
       try {
         const message = JSON.parse(event.newValue) as SnapbackSyncMessage
         if (message?.type === 'snapback-updated') {

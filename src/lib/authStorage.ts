@@ -1,7 +1,8 @@
 import type { Session } from '@supabase/supabase-js'
 import type { SupportedStorage } from '@supabase/auth-js'
+import { storage, STORAGE_KEYS } from './storage'
 
-export const AUTH_SESSION_STORAGE_KEY = 'nc-taskwatch-supabase-session-v1'
+export const AUTH_SESSION_STORAGE_KEY = STORAGE_KEYS.authSession
 const AUTH_SESSION_COOKIE = 'nc-taskwatch-supabase-session'
 const COOKIE_MAX_AGE_SECONDS = 60 * 60 * 24 * 30
 
@@ -155,7 +156,7 @@ export const clearCachedSupabaseSession = (): void => {
 // Migration Lock: Coordinates sign-in across multiple tabs
 // ─────────────────────────────────────────────────────────────────────────────
 
-export const MIGRATION_LOCK_STORAGE_KEY = 'nc-taskwatch-migration-lock'
+export const MIGRATION_LOCK_STORAGE_KEY = STORAGE_KEYS.migrationLock
 const MIGRATION_LOCK_STALE_MS = 60_000 // 60 seconds
 
 export type MigrationLockStatus = 'in-progress' | 'complete'
@@ -213,47 +214,27 @@ export const setMigrationLock = (status: MigrationLockStatus = 'in-progress'): v
     status,
     ...(status === 'complete' ? { completedAt: now } : {}),
   }
-  const storage = getBrowserLocalStorage()
-  if (storage) {
-    try {
-      storage.setItem(MIGRATION_LOCK_STORAGE_KEY, JSON.stringify(lock))
-    } catch {}
-  }
+  storage.locks.migrationLock.set(lock)
 }
 
 export const clearMigrationLock = (): void => {
-  const storage = getBrowserLocalStorage()
-  if (storage) {
-    try {
-      storage.removeItem(MIGRATION_LOCK_STORAGE_KEY)
-    } catch {}
-  }
+  storage.locks.migrationLock.remove()
 }
 
 export const readMigrationLock = (): MigrationLock | null => {
-  const storage = getBrowserLocalStorage()
-  if (!storage) {
-    return null
+  const parsed = storage.locks.migrationLock.get()
+  if (
+    parsed &&
+    typeof parsed === 'object' &&
+    typeof parsed.tabId === 'string' &&
+    typeof parsed.timestamp === 'number'
+  ) {
+    // Default status to 'in-progress' for backwards compatibility
+    if (!parsed.status) {
+      ;(parsed as any).status = 'in-progress'
+    }
+    return parsed as MigrationLock
   }
-  try {
-    const raw = storage.getItem(MIGRATION_LOCK_STORAGE_KEY)
-    if (!raw) {
-      return null
-    }
-    const parsed = JSON.parse(raw)
-    if (
-      parsed &&
-      typeof parsed === 'object' &&
-      typeof parsed.tabId === 'string' &&
-      typeof parsed.timestamp === 'number'
-    ) {
-      // Default status to 'in-progress' for backwards compatibility
-      if (!parsed.status) {
-        parsed.status = 'in-progress'
-      }
-      return parsed as MigrationLock
-    }
-  } catch {}
   return null
 }
 

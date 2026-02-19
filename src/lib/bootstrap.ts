@@ -13,12 +13,13 @@ import {
   upsertGoalMilestone,
 } from './goalsApi'
 import { pushLifeRoutinesToSupabase, syncLifeRoutinesWithSupabase, type LifeRoutineConfig } from './lifeRoutines'
-import { GOALS_GUEST_USER_ID, GOALS_SNAPSHOT_STORAGE_KEY, createGoalsSnapshot, syncGoalsSnapshotFromSupabase } from './goalsSync'
+import { GOALS_GUEST_USER_ID, createGoalsSnapshot, syncGoalsSnapshotFromSupabase } from './goalsSync'
 import { QUICK_LIST_GOAL_NAME } from './quickListRemote'
 import { DEFAULT_SURFACE_STYLE, ensureServerBucketStyle } from './surfaceStyles'
 import { pushSnapbackTriggersToSupabase, syncSnapbackTriggersFromSupabase, type SnapbackTriggerPayload } from './snapbackApi'
-import { pushRepeatingRulesToSupabase, syncRepeatingRulesFromSupabase, REPEATING_RULES_STORAGE_KEY, REPEATING_RULES_GUEST_USER_ID } from './repeatingSessions'
-import { pushAllHistoryToSupabase, syncHistoryWithSupabase, HISTORY_STORAGE_KEY, HISTORY_GUEST_USER_ID, sanitizeHistoryRecords } from './sessionHistory'
+import { pushRepeatingRulesToSupabase, syncRepeatingRulesFromSupabase, REPEATING_RULES_GUEST_USER_ID } from './repeatingSessions'
+import { pushAllHistoryToSupabase, syncHistoryWithSupabase, HISTORY_GUEST_USER_ID, sanitizeHistoryRecords } from './sessionHistory'
+import { storage, STORAGE_KEYS } from './storage'
 
 // Type for ID mappings returned from migrations
 export type IdMaps = {
@@ -28,34 +29,22 @@ export type IdMaps = {
 }
 
 // Freshness check: skip redundant fetches immediately after a full sync
-const LAST_FULL_SYNC_KEY = 'nc-taskwatch-last-full-sync'
 const FRESHNESS_WINDOW_MS = 5000 // 5 seconds
 
 export const setLastFullSyncTimestamp = (): void => {
-  if (typeof window === 'undefined') return
-  try {
-    window.localStorage.setItem(LAST_FULL_SYNC_KEY, String(Date.now()))
-  } catch {}
+  storage.locks.lastFullSync.set(String(Date.now()))
 }
 
 export const clearLastFullSyncTimestamp = (): void => {
-  if (typeof window === 'undefined') return
-  try {
-    window.localStorage.removeItem(LAST_FULL_SYNC_KEY)
-  } catch {}
+  storage.locks.lastFullSync.remove()
 }
 
 export const isRecentlyFullSynced = (): boolean => {
-  if (typeof window === 'undefined') return false
-  try {
-    const raw = window.localStorage.getItem(LAST_FULL_SYNC_KEY)
-    if (!raw) return false
-    const timestamp = Number(raw)
-    if (!Number.isFinite(timestamp)) return false
-    return Date.now() - timestamp < FRESHNESS_WINDOW_MS
-  } catch {
-    return false
-  }
+  const raw = storage.locks.lastFullSync.get()
+  if (!raw) return false
+  const timestamp = Number(raw)
+  if (!Number.isFinite(timestamp)) return false
+  return Date.now() - timestamp < FRESHNESS_WINDOW_MS
 }
 
 /**
@@ -82,28 +71,8 @@ export const runAllSyncs = async (): Promise<void> => {
  * Called during new user bootstrap to wipe guest/demo data before syncing.
  */
 export const clearAppDataFromLocalStorage = (): void => {
-  if (typeof window === 'undefined') return
-  // Keys to preserve (auth-related)
-  const AUTH_KEYS_TO_PRESERVE = [
-    'nc-taskwatch-supabase-session-v1',
-    'nc-taskwatch-last-auth-user-id',
-  ]
-  try {
-    console.log('[bootstrap] Clearing app data from localStorage (preserving auth)')
-    const keysToRemove: string[] = []
-    for (let i = 0; i < window.localStorage.length; i++) {
-      const key = window.localStorage.key(i)
-      if (key && key.startsWith('nc-taskwatch-') && !AUTH_KEYS_TO_PRESERVE.includes(key)) {
-        keysToRemove.push(key)
-      }
-    }
-    keysToRemove.forEach((key) => {
-      window.localStorage.removeItem(key)
-    })
-    console.log(`[bootstrap] Cleared ${keysToRemove.length} app data keys`)
-  } catch (e) {
-    console.warn('[bootstrap] Failed to clear app data:', e)
-  }
+  console.log('[bootstrap] Clearing app data from localStorage (preserving auth)')
+  storage.clearAppData()
 }
 
 /**
@@ -112,50 +81,26 @@ export const clearAppDataFromLocalStorage = (): void => {
  * For bootstrap/sync operations, use clearAppDataFromLocalStorage() instead.
  */
 export const clearAllLocalStorage = (): void => {
-  if (typeof window === 'undefined') return
-  try {
-    console.log('[bootstrap] Clearing all localStorage')
-    window.localStorage.clear()
-  } catch (e) {
-    console.warn('[bootstrap] Failed to clear localStorage:', e)
-  }
+  console.log('[bootstrap] Clearing all localStorage')
+  storage.clearAll()
 }
 
 let bootstrapPromises = new Map<string, Promise<boolean>>()
 const BOOTSTRAP_LOCK_TTL_MS = 2 * 60 * 1000
-const makeBootstrapLockKey = (userId: string) => `nc-taskwatch-bootstrap-lock::${userId}`
 
 const acquireBootstrapLock = (userId: string): boolean => {
-  if (typeof window === 'undefined') {
-    return true
+  const parsed = storage.locks.bootstrapLock.get(userId)
+  const now = Date.now()
+  if (parsed?.expiresAt && parsed.expiresAt > now) {
+    return false
   }
-  try {
-    const key = makeBootstrapLockKey(userId)
-    const raw = window.localStorage.getItem(key)
-    const now = Date.now()
-    if (raw) {
-      try {
-        const parsed = JSON.parse(raw) as { expiresAt?: number }
-        if (parsed?.expiresAt && parsed.expiresAt > now) {
-          return false
-        }
-      } catch {}
-    }
-    const expiresAt = now + BOOTSTRAP_LOCK_TTL_MS
-    window.localStorage.setItem(key, JSON.stringify({ expiresAt }))
-    return true
-  } catch {
-    return true
-  }
+  const expiresAt = now + BOOTSTRAP_LOCK_TTL_MS
+  storage.locks.bootstrapLock.set(userId, { expiresAt })
+  return true
 }
 
 const releaseBootstrapLock = (userId: string): void => {
-  if (typeof window === 'undefined') {
-    return
-  }
-  try {
-    window.localStorage.removeItem(makeBootstrapLockKey(userId))
-  } catch {}
+  storage.locks.bootstrapLock.remove(userId)
 }
 const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
 const isUuid = (value: string | undefined | null): value is string => !!value && UUID_REGEX.test(value)
@@ -260,19 +205,15 @@ const pushGoalsToSupabase = async (): Promise<IdMaps> => {
   }
   
   // Read directly from the guest key (not the current user's key)
-  const guestGoalsKey = `${GOALS_SNAPSHOT_STORAGE_KEY}::${GOALS_GUEST_USER_ID}`
-  const guestGoalsRaw = typeof window !== 'undefined'
-    ? window.localStorage.getItem(guestGoalsKey)
-    : null
-  
-  if (!guestGoalsRaw) {
+  const guestGoals = storage.domain.goals.get(GOALS_GUEST_USER_ID)
+
+  if (!guestGoals) {
     return emptyMaps
   }
-  
+
   let snapshot: ReturnType<typeof createGoalsSnapshot> = []
   try {
-    const parsed = JSON.parse(guestGoalsRaw)
-    snapshot = createGoalsSnapshot(parsed).filter(
+    snapshot = createGoalsSnapshot(guestGoals).filter(
       (goal) => goal.name?.trim() !== QUICK_LIST_GOAL_NAME,
     )
   } catch {
@@ -429,12 +370,11 @@ const pushGoalsToSupabase = async (): Promise<IdMaps> => {
 const pushMilestonesToSupabase = async (goalIdMap: Map<string, string>): Promise<void> => {
   if (typeof window === 'undefined' || !supabase) return
   
-  const MILESTONE_DATA_KEY = 'nc-taskwatch-milestones-state-v1'
-  const raw = window.localStorage.getItem(MILESTONE_DATA_KEY)
-  if (!raw) return
-  
+  const map = storage.domain.milestones.get()
+  if (!map) return
+
   try {
-    const map = JSON.parse(raw) as Record<string, Array<{
+    const typedMap = map as Record<string, Array<{
       id: string
       name: string
       date: string
@@ -443,7 +383,7 @@ const pushMilestonesToSupabase = async (goalIdMap: Map<string, string>): Promise
       hidden?: boolean
     }>>
     
-    for (const [oldGoalId, milestones] of Object.entries(map)) {
+    for (const [oldGoalId, milestones] of Object.entries(typedMap)) {
       // Remap the goal ID
       const newGoalId = goalIdMap.get(oldGoalId) ?? oldGoalId
       // Skip if goal wasn't migrated (no mapping exists and ID isn't a valid UUID)
@@ -489,35 +429,20 @@ const migrateGuestData = async (): Promise<void> => {
 
   // CRITICAL: Clear goals snapshot immediately after migration
   // The snapshot has demo IDs that will cause 400 errors if used
-  if (typeof window !== 'undefined') {
-    try {
-      window.localStorage.removeItem('nc-taskwatch-goals-snapshot')
-      window.localStorage.removeItem('nc-taskwatch-goals-snapshot::__guest__')
-      window.localStorage.removeItem('nc-taskwatch-bootstrap-snapshot::goals')
-    } catch {}
-  }
+  storage.domain.goals.remove(GOALS_GUEST_USER_ID)
+  storage.bootstrap.snapshotGoals.remove()
 
   // 2. Push milestones to Supabase (using goal ID map)
   await pushMilestonesToSupabase(goalIdMap)
 
   // 3. Migrate repeating rules and get rule ID map
   // Read directly from the guest key (not the current user's key)
-  const guestRulesKey = `${REPEATING_RULES_STORAGE_KEY}::${REPEATING_RULES_GUEST_USER_ID}`
-  const guestRulesRaw = typeof window !== 'undefined'
-    ? window.localStorage.getItem(guestRulesKey)
-    : null
-  
+  const guestRules = storage.domain.repeatingRules.get(REPEATING_RULES_GUEST_USER_ID)
+
   let rules: { id: string; [key: string]: unknown }[] = []
-  if (guestRulesRaw) {
-    try {
-      const parsed = JSON.parse(guestRulesRaw)
-      if (Array.isArray(parsed)) {
-        rules = parsed.filter((r: unknown) => r && typeof r === 'object' && typeof (r as any).id === 'string')
-      }
-      console.log('[bootstrap] Found', rules.length, 'guest repeating rules to migrate')
-    } catch {
-      console.warn('[bootstrap] Could not parse guest repeating rules')
-    }
+  if (guestRules && Array.isArray(guestRules)) {
+    rules = guestRules.filter((r: unknown) => r && typeof r === 'object' && typeof (r as any).id === 'string')
+    console.log('[bootstrap] Found', rules.length, 'guest repeating rules to migrate')
   }
   
   let ruleIdMap: Record<string, string> = {}
@@ -529,20 +454,12 @@ const migrateGuestData = async (): Promise<void> => {
 
   // 4. Migrate session history with all ID mappings
   // Read directly from the guest key (not the current user's key)
-  const guestHistoryKey = `${HISTORY_STORAGE_KEY}::${HISTORY_GUEST_USER_ID}`
-  const guestHistoryRaw = typeof window !== 'undefined'
-    ? window.localStorage.getItem(guestHistoryKey)
-    : null
-  
+  const guestHistory = storage.domain.history.get(HISTORY_GUEST_USER_ID)
+
   let guestHistoryRecords: ReturnType<typeof sanitizeHistoryRecords> = []
-  if (guestHistoryRaw) {
-    try {
-      const parsed = JSON.parse(guestHistoryRaw)
-      guestHistoryRecords = sanitizeHistoryRecords(parsed)
-      console.log('[bootstrap] Found', guestHistoryRecords.length, 'guest history records to migrate')
-    } catch {
-      console.warn('[bootstrap] Could not parse guest history records')
-    }
+  if (guestHistory) {
+    guestHistoryRecords = sanitizeHistoryRecords(guestHistory)
+    console.log('[bootstrap] Found', guestHistoryRecords.length, 'guest history records to migrate')
   }
   
   // Convert Maps to Records for the history function
@@ -565,75 +482,49 @@ const migrateGuestData = async (): Promise<void> => {
   console.log('[bootstrap] Session history migration complete')
 
   // Read from snapshot first (created at sign-up), fall back to guest key
-  const snapshotRoutinesRaw = typeof window !== 'undefined'
-    ? window.localStorage.getItem('nc-taskwatch-bootstrap-snapshot::life-routines')
-    : null
-  const guestRoutinesRaw = !snapshotRoutinesRaw && typeof window !== 'undefined'
-    ? window.localStorage.getItem('nc-taskwatch-life-routines::__guest__')
-    : null
-  const routinesRaw = snapshotRoutinesRaw || guestRoutinesRaw
-  
+  const snapshotRoutines = storage.bootstrap.snapshotLifeRoutines.get()
+  const guestRoutines = !snapshotRoutines ? storage.domain.lifeRoutines.get('__guest__') : null
+  const routinesData = snapshotRoutines || guestRoutines
+
   console.log('[bootstrap] Life routines migration:', {
-    hasSnapshot: !!snapshotRoutinesRaw,
-    hasGuestData: !!guestRoutinesRaw,
-    usingSource: snapshotRoutinesRaw ? 'snapshot' : guestRoutinesRaw ? 'guest' : 'none',
+    hasSnapshot: !!snapshotRoutines,
+    hasGuestData: !!guestRoutines,
+    usingSource: snapshotRoutines ? 'snapshot' : guestRoutines ? 'guest' : 'none',
   })
-  
-  // Parse and validate - ONLY use snapshot or guest data, never fallback to current user
+
+  // Validate - ONLY use snapshot or guest data, never fallback to current user
   let routines: LifeRoutineConfig[] = []
-  if (routinesRaw) {
-    try {
-      const parsed = JSON.parse(routinesRaw)
-      if (Array.isArray(parsed) && parsed.length > 0) {
-        routines = parsed
-        console.log('[bootstrap] Migrating', routines.length, 'life routines')
-      }
-    } catch (e) {
-      console.warn('[bootstrap] Could not parse life routines:', e)
-    }
+  if (routinesData && Array.isArray(routinesData) && routinesData.length > 0) {
+    routines = routinesData
+    console.log('[bootstrap] Migrating', routines.length, 'life routines')
   }
   
   // Clear snapshots after reading
-  if (typeof window !== 'undefined') {
-    try {
-      window.localStorage.removeItem('nc-taskwatch-bootstrap-snapshot::life-routines')
-      window.localStorage.removeItem('nc-taskwatch-bootstrap-snapshot::quick-list')
-      window.localStorage.removeItem('nc-taskwatch-bootstrap-snapshot::goals')
-      window.localStorage.removeItem('nc-taskwatch-bootstrap-snapshot::history')
-      window.localStorage.removeItem('nc-taskwatch-bootstrap-snapshot::repeating')
-    } catch {}
-  }
+  storage.bootstrap.snapshotLifeRoutines.remove()
+  storage.bootstrap.snapshotQuickList.remove()
+  storage.bootstrap.snapshotGoals.remove()
+  storage.bootstrap.snapshotHistory.remove()
+  storage.bootstrap.snapshotRepeating.remove()
   
   if (routines.length > 0) {
     await pushLifeRoutinesToSupabase(routines, { strict: true, skipOrphanDelete: true })
   }
 
   // Read quick list from snapshot first (created at sign-up), fall back to guest key
-  const snapshotQuickListRaw = typeof window !== 'undefined'
-    ? window.localStorage.getItem('nc-taskwatch-bootstrap-snapshot::quick-list')
-    : null
-  const guestQuickListRaw = !snapshotQuickListRaw && typeof window !== 'undefined'
-    ? window.localStorage.getItem('nc-taskwatch-quicklist::__guest__')
-    : null
-  const quickListRaw = snapshotQuickListRaw || guestQuickListRaw
-  
+  const snapshotQuickList = storage.bootstrap.snapshotQuickList.get()
+  const guestQuickList = !snapshotQuickList ? storage.domain.quickList.get('__guest__') : null
+  const quickListData = snapshotQuickList || guestQuickList
+
   console.log('[bootstrap] Quick list migration:', {
-    hasSnapshot: !!snapshotQuickListRaw,
-    hasGuestData: !!guestQuickListRaw,
-    usingSource: snapshotQuickListRaw ? 'snapshot' : guestQuickListRaw ? 'guest' : 'none',
+    hasSnapshot: !!snapshotQuickList,
+    hasGuestData: !!guestQuickList,
+    usingSource: snapshotQuickList ? 'snapshot' : guestQuickList ? 'guest' : 'none',
   })
-  
+
   let quickItems: QuickItem[] = []
-  if (quickListRaw) {
-    try {
-      const parsed = JSON.parse(quickListRaw)
-      if (Array.isArray(parsed)) {
-        quickItems = parsed
-        console.log('[bootstrap] Migrating', quickItems.length, 'quick list items')
-      }
-    } catch (e) {
-      console.warn('[bootstrap] Could not parse quick list:', e)
-    }
+  if (quickListData && Array.isArray(quickListData)) {
+    quickItems = quickListData
+    console.log('[bootstrap] Migrating', quickItems.length, 'quick list items')
   }
   
   if (quickItems.length > 0) {
@@ -641,41 +532,24 @@ const migrateGuestData = async (): Promise<void> => {
   }
   
   // Migrate Snapback triggers and plans
-  const LOCAL_TRIGGERS_KEY = 'nc-taskwatch-local-snapback-triggers'
-  const LOCAL_PLANS_KEY = 'nc-taskwatch-local-snap-plans'
-  
   type LocalTrigger = { id: string; label: string; cue: string; deconstruction: string; plan: string }
   type LocalPlan = { cue: string; deconstruction: string; plan: string }
-  
+
   let localTriggers: LocalTrigger[] = []
   let localPlans: Record<string, LocalPlan> = {}
-  
+
   // Read local triggers (custom triggers created by guest)
-  const triggersRaw = typeof window !== 'undefined' ? window.localStorage.getItem(LOCAL_TRIGGERS_KEY) : null
-  if (triggersRaw) {
-    try {
-      const parsed = JSON.parse(triggersRaw)
-      if (Array.isArray(parsed)) {
-        localTriggers = parsed
-        console.log('[bootstrap] Found', localTriggers.length, 'local snapback triggers')
-      }
-    } catch (e) {
-      console.warn('[bootstrap] Could not parse local snapback triggers:', e)
-    }
+  const triggersData = storage.guest.snapbackTriggers.get()
+  if (triggersData && Array.isArray(triggersData)) {
+    localTriggers = triggersData
+    console.log('[bootstrap] Found', localTriggers.length, 'local snapback triggers')
   }
-  
+
   // Read local plans (plans for history-derived triggers like Doomscrolling)
-  const plansRaw = typeof window !== 'undefined' ? window.localStorage.getItem(LOCAL_PLANS_KEY) : null
-  if (plansRaw) {
-    try {
-      const parsed = JSON.parse(plansRaw)
-      if (parsed && typeof parsed === 'object') {
-        localPlans = parsed
-        console.log('[bootstrap] Found local snapback plans for', Object.keys(localPlans).length, 'triggers')
-      }
-    } catch (e) {
-      console.warn('[bootstrap] Could not parse local snapback plans:', e)
-    }
+  const plansData = storage.guest.snapPlans.get()
+  if (plansData && typeof plansData === 'object') {
+    localPlans = plansData
+    console.log('[bootstrap] Found local snapback plans for', Object.keys(localPlans).length, 'triggers')
   }
   
   // Build list of triggers to migrate
@@ -715,18 +589,14 @@ const migrateGuestData = async (): Promise<void> => {
   
   // Clear all guest data after successful migration
   // This ensures sign-out will show fresh defaults
-  if (typeof window !== 'undefined') {
-    try {
-      window.localStorage.removeItem('nc-taskwatch-life-routines::__guest__')
-      window.localStorage.removeItem('nc-taskwatch-quicklist::__guest__')
-      window.localStorage.removeItem('nc-taskwatch-session-history::__guest__')
-      window.localStorage.removeItem('nc-taskwatch-repeating-rules::__guest__')
-      window.localStorage.removeItem('nc-taskwatch-goals-snapshot::__guest__')
-      // Clear snapback guest data
-      window.localStorage.removeItem(LOCAL_TRIGGERS_KEY)
-      window.localStorage.removeItem(LOCAL_PLANS_KEY)
-    } catch {}
-  }
+  storage.domain.lifeRoutines.remove('__guest__')
+  storage.domain.quickList.remove('__guest__')
+  storage.domain.history.remove('__guest__')
+  storage.domain.repeatingRules.remove('__guest__')
+  storage.domain.goals.remove('__guest__')
+  // Clear snapback guest data
+  storage.guest.snapbackTriggers.remove()
+  storage.guest.snapPlans.remove()
 }
 
 export const bootstrapGuestDataIfNeeded = async (userId: string | null | undefined): Promise<boolean> => {

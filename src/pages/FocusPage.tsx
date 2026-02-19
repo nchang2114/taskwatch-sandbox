@@ -32,7 +32,6 @@ import {
   subscribeToGoalsSnapshot,
   type GoalSnapshot,
   type GoalTaskSnapshot,
-  GOALS_SNAPSHOT_USER_KEY,
   GOALS_GUEST_USER_ID,
 } from '../lib/goalsSync'
 import {
@@ -53,13 +52,11 @@ import {
   upsertRepeatingException,
 } from '../lib/repeatingExceptions'
 import {
-  LIFE_ROUTINE_STORAGE_KEY,
   LIFE_ROUTINE_UPDATE_EVENT,
   readStoredLifeRoutines,
   readLifeRoutineOwnerId,
   sanitizeLifeRoutineList,
   syncLifeRoutinesWithSupabase,
-  LIFE_ROUTINE_USER_STORAGE_KEY,
   LIFE_ROUTINE_GUEST_USER_ID,
   LIFE_ROUTINE_USER_EVENT,
   type LifeRoutineConfig,
@@ -69,7 +66,6 @@ import {
   subscribeQuickList,
   writeStoredQuickList,
   readQuickListOwnerId,
-  QUICK_LIST_USER_STORAGE_KEY,
   QUICK_LIST_GUEST_USER_ID,
   QUICK_LIST_USER_EVENT,
   type QuickItem,
@@ -78,13 +74,10 @@ import {
 import { fetchQuickListRemoteItems } from '../lib/quickListRemote'
 import {
   CURRENT_SESSION_EVENT_NAME,
-  CURRENT_SESSION_STORAGE_KEY,
   HISTORY_EVENT_NAME,
   HISTORY_GUEST_USER_ID,
   HISTORY_LIMIT,
-  HISTORY_STORAGE_KEY,
   HISTORY_USER_EVENT,
-  HISTORY_USER_KEY,
   persistHistorySnapshot,
   readHistoryOwnerId,
   readStoredHistory as readPersistedHistory,
@@ -95,6 +88,7 @@ import {
 } from '../lib/sessionHistory'
 import { logDebug, logWarn } from '../lib/logging'
 import { isRecentlyFullSynced } from '../lib/bootstrap'
+import { storage, STORAGE_KEYS } from '../lib/storage'
 
 // Minimal sync instrumentation disabled by default
 const DEBUG_SYNC = false
@@ -174,13 +168,9 @@ const getNextDifficulty = (value: FocusCandidate['difficulty'] | null): FocusCan
   }
 }
 
-const CURRENT_TASK_STORAGE_KEY = 'nc-taskwatch-current-task'
-const CURRENT_TASK_SOURCE_KEY = 'nc-taskwatch-current-task-source'
-const NOTEBOOK_STORAGE_KEY = 'nc-taskwatch-notebook'
 const MAX_TASK_STORAGE_LENGTH = 256
 const FOCUS_COMPLETION_RESET_DELAY_MS = 800
 const PRIORITY_HOLD_MS = 300
-const STOPWATCH_STORAGE_KEY = 'nc-taskwatch-stopwatch-v1'
 const STOPWATCH_SAVE_INTERVAL_MS = 15_000
 const DEBUG_STOPWATCH = false
 
@@ -260,11 +250,7 @@ const makeNotebookSubtaskInputId = (entryKey: string, subtaskId: string): string
 const shouldDebugStopwatch = (): boolean => {
   if (DEBUG_STOPWATCH) return true
   if (typeof window === 'undefined') return false
-  try {
-    return window.localStorage.getItem('nc-debug-stopwatch') === '1'
-  } catch {
-    return false
-  }
+  return storage.preferences.debugStopwatch.get() === '1'
 }
 
 const debugStopwatch = (...args: unknown[]) => {
@@ -483,7 +469,7 @@ const getStoredTaskName = (): string => {
     return ''
   }
 
-  const stored = window.localStorage.getItem(CURRENT_TASK_STORAGE_KEY)
+  const stored = storage.focus.currentTask.get()
   if (!stored) {
     return ''
   }
@@ -501,11 +487,7 @@ const readStoredFocusSource = (): FocusSource | null => {
   }
 
   try {
-    const raw = window.localStorage.getItem(CURRENT_TASK_SOURCE_KEY)
-    if (!raw) {
-      return null
-    }
-    const parsed = JSON.parse(raw)
+    const parsed = storage.focus.currentTaskSource.get()
     if (typeof parsed !== 'object' || parsed === null) {
       return null
     }
@@ -824,8 +806,6 @@ export function FocusPage({ viewportWidth: _viewportWidth, showMilliseconds = tr
   const [snapbackCustomReason, setSnapbackCustomReason] = useState('')
   const [snapbackCustomDuration, setSnapbackCustomDuration] = useState<string>('')
   const [snapbackReasonSelect, setSnapbackReasonSelect] = useState('')
-  const SNAPBACK_CUSTOM_TRIGGERS_KEY = 'nc-taskwatch-snapback-custom-triggers'
-  const SNAPBACK_OVERVIEW_TRIGGERS_KEY = 'nc-taskwatch-overview-triggers'
   const [overviewTriggersVersion, setOverviewTriggersVersion] = useState(0)
   const [timeMode, setTimeMode] = useState<TimeMode>('focus')
 
@@ -852,16 +832,11 @@ export function FocusPage({ viewportWidth: _viewportWidth, showMilliseconds = tr
     if (typeof window === 'undefined') {
       return {}
     }
-    try {
-      const raw = window.localStorage.getItem(NOTEBOOK_STORAGE_KEY)
-      if (!raw) {
-        return {}
-      }
-      const parsed = JSON.parse(raw)
-      return sanitizeNotebookState(parsed)
-    } catch {
+    const parsed = storage.focus.notebook.get()
+    if (!parsed) {
       return {}
     }
+    return sanitizeNotebookState(parsed)
   })
   const notebookPersistTimerRef = useRef<number | null>(null)
   const [, setNotebookSubtasksCollapsed] = useState(false)
@@ -988,12 +963,8 @@ export function FocusPage({ viewportWidth: _viewportWidth, showMilliseconds = tr
     if (typeof window === 'undefined') {
       return false
     }
-    try {
-      const owner = window.localStorage.getItem(GOALS_SNAPSHOT_USER_KEY)
-      return !owner || owner === GOALS_GUEST_USER_ID
-    } catch {
-      return false
-    }
+    const owner = storage.ownership.goalsUser.get()
+    return !owner || owner === GOALS_GUEST_USER_ID
   }, [])
   const goalGradientById = useMemo(() => {
     const map = new Map<string, string>()
@@ -1027,7 +998,7 @@ export function FocusPage({ viewportWidth: _viewportWidth, showMilliseconds = tr
     }
     const bump = () => setQuickListOwnerSignal((value) => value + 1)
     const handleStorage = (event: StorageEvent) => {
-      if (event.key === QUICK_LIST_USER_STORAGE_KEY) {
+      if (event.key === STORAGE_KEYS.quickListUser) {
         bump()
       }
     }
@@ -1046,7 +1017,7 @@ export function FocusPage({ viewportWidth: _viewportWidth, showMilliseconds = tr
       setHistoryOwnerSignal((current) => current + 1)
     }
     const handleStorage = (event: StorageEvent) => {
-      if (event.key === HISTORY_USER_KEY) {
+      if (event.key === STORAGE_KEYS.historyUser) {
         bump()
       }
     }
@@ -1185,7 +1156,7 @@ export function FocusPage({ viewportWidth: _viewportWidth, showMilliseconds = tr
     }
     const bump = () => setLifeRoutineOwnerSignal((value) => value + 1)
     const handleStorage = (event: StorageEvent) => {
-      if (event.key === LIFE_ROUTINE_USER_STORAGE_KEY) {
+      if (event.key === STORAGE_KEYS.lifeRoutinesUser) {
         bump()
       }
     }
@@ -1229,7 +1200,7 @@ useEffect(() => {
 }, [refreshGoalsSnapshotFromSupabase, shouldSkipGoalsRemote])
 useEffect(() => {
   if (typeof window !== 'undefined') {
-    const quickUser = window.localStorage.getItem(QUICK_LIST_USER_STORAGE_KEY)
+    const quickUser = storage.ownership.quickListUser.get()
     if (!quickUser || quickUser === QUICK_LIST_GUEST_USER_ID) {
       return
     }
@@ -1254,11 +1225,8 @@ useEffect(() => {
   const snapbackReasonStats = useMemo(() => {
     const labels: string[] = (() => {
       if (typeof window === 'undefined') return []
-      try {
-        const raw = window.localStorage.getItem(SNAPBACK_OVERVIEW_TRIGGERS_KEY)
-        const parsed = raw ? JSON.parse(raw) : []
-        return Array.isArray(parsed) ? (parsed as string[]).filter((s) => typeof s === 'string' && s.trim().length > 0) : []
-      } catch { return [] }
+      const parsed = storage.focus.overviewTriggers.get()
+      return Array.isArray(parsed) ? (parsed as string[]).filter((s) => typeof s === 'string' && s.trim().length > 0) : []
     })()
     const ordered = labels.map((s) => s.trim())
     const topTwo = ordered.slice(0, 2)
@@ -1270,7 +1238,7 @@ useEffect(() => {
   useEffect(() => {
     if (typeof window === 'undefined') return
     const handler = (e: StorageEvent) => {
-      if (e.key === SNAPBACK_OVERVIEW_TRIGGERS_KEY) {
+      if (e.key === STORAGE_KEYS.overviewTriggers) {
         setOverviewTriggersVersion((v) => v + 1)
       }
     }
@@ -1283,7 +1251,7 @@ useEffect(() => {
       return
     }
     const handleStorage = (event: StorageEvent) => {
-      if (event.key === LIFE_ROUTINE_STORAGE_KEY) {
+      if (event.key === STORAGE_KEYS.lifeRoutines) {
         setLifeRoutineTasks(readStoredLifeRoutines())
       }
     }
@@ -1339,7 +1307,7 @@ useEffect(() => {
     }
 
     const handleStorage = (event: StorageEvent) => {
-      if (!event.key?.startsWith(HISTORY_STORAGE_KEY)) {
+      if (!event.key?.startsWith(STORAGE_KEYS.sessionHistory)) {
         return
       }
       try {
@@ -1373,7 +1341,7 @@ useEffect(() => {
     }
     const handle = window.setTimeout(() => {
       try {
-        window.localStorage.setItem(NOTEBOOK_STORAGE_KEY, JSON.stringify(notebookState))
+        storage.focus.notebook.set(notebookState)
       } catch (error) {
         logWarn('Failed to persist Focus notebook state', error)
       }
@@ -1401,9 +1369,7 @@ useEffect(() => {
       notebookSubtaskSaveTimersRef.current.clear()
       // Flush latest notebook state to storage
       try {
-        if (typeof window !== 'undefined') {
-          window.localStorage.setItem(NOTEBOOK_STORAGE_KEY, JSON.stringify(notebookState))
-        }
+        storage.focus.notebook.set(notebookState)
       } catch (error) {
         logWarn('Failed to persist Focus notebook state on unload', error)
       }
@@ -1439,7 +1405,7 @@ useEffect(() => {
     const value = trimmed.length > 0 ? trimmed : ''
 
     try {
-      window.localStorage.setItem(CURRENT_TASK_STORAGE_KEY, value)
+      storage.focus.currentTask.set(value)
     } catch (error) {
       logWarn('Failed to persist current task name', error)
     }
@@ -1451,9 +1417,9 @@ useEffect(() => {
     if (timeMode !== 'focus') return
     try {
       if (focusSource) {
-        window.localStorage.setItem(CURRENT_TASK_SOURCE_KEY, JSON.stringify(focusSource))
+        storage.focus.currentTaskSource.set(focusSource)
       } else {
-        window.localStorage.removeItem(CURRENT_TASK_SOURCE_KEY)
+        storage.focus.currentTaskSource.remove()
       }
     } catch (error) {
       logWarn('Failed to persist current task source', error)
@@ -1556,7 +1522,7 @@ useEffect(() => {
     const handleFocus = () => {
       if (!document.hidden) {
         refreshGoalsSnapshotFromSupabase('window-focus')
-        const quickUser = typeof window !== 'undefined' ? window.localStorage.getItem(QUICK_LIST_USER_STORAGE_KEY) : null
+        const quickUser = typeof window !== 'undefined' ? storage.ownership.quickListUser.get() : null
         if (quickUser && quickUser !== QUICK_LIST_GUEST_USER_ID) {
           refreshQuickListFromSupabase('window-focus')
         }
@@ -1565,7 +1531,7 @@ useEffect(() => {
     const handleVisibility = () => {
       if (!document.hidden) {
         refreshGoalsSnapshotFromSupabase('document-visible')
-        const quickUser = typeof window !== 'undefined' ? window.localStorage.getItem(QUICK_LIST_USER_STORAGE_KEY) : null
+        const quickUser = typeof window !== 'undefined' ? storage.ownership.quickListUser.get() : null
         if (quickUser && quickUser !== QUICK_LIST_GUEST_USER_ID) {
           refreshQuickListFromSupabase('document-visible')
         }
@@ -1690,7 +1656,7 @@ useEffect(() => {
         updatedAt: Date.now(),
       }
 
-      window.localStorage.setItem(STOPWATCH_STORAGE_KEY, JSON.stringify(payload))
+      storage.focus.stopwatch.set(payload)
       debugStopwatch('persist', payload)
     } catch (error) {
       logWarn('Failed to persist stopwatch state', error)
@@ -1703,8 +1669,8 @@ useEffect(() => {
       return
     }
     try {
-      const raw = window.localStorage.getItem(STOPWATCH_STORAGE_KEY)
-      if (!raw) {
+      const parsed = storage.focus.stopwatch.get()
+      if (!parsed) {
         debugStopwatch('hydrate: no stored stopwatch state')
         // Sync modeStateRef.current.focus with the initial focusSource state
         // This ensures the focus snapshot has the correct source from the start
@@ -1718,8 +1684,7 @@ useEffect(() => {
         hasHydratedStopwatchRef.current = true
         return
       }
-      debugStopwatch('hydrate: raw payload', raw)
-      const parsed = JSON.parse(raw)
+      debugStopwatch('hydrate: restored payload', parsed)
       const fallbackFocus = initialTaskName || ''
       const focusSnapshot =
         sanitizeStoredModeSnapshot(parsed?.modes?.focus, fallbackFocus, fallbackFocus) ??
@@ -2086,12 +2051,11 @@ useEffect(() => {
       }
       suggestions.push({ ...candidate, startedAt: entry.startedAt, endedAt: entry.endedAt, isGuide: false })
     })
-    // Also include the active (running) session overlay from CURRENT_SESSION_STORAGE_KEY if present
+    // Also include the active (running) session overlay from currentSession if present
     if (typeof window !== 'undefined') {
       try {
-        const raw = window.localStorage.getItem(CURRENT_SESSION_STORAGE_KEY)
-        if (raw) {
-          const s = JSON.parse(raw) as any
+        const s = storage.focus.currentSession.get() as any
+        if (s) {
           const baseElapsed = Math.max(0, Number(s?.baseElapsed) || 0)
           const updatedAt = Number(s?.updatedAt) || now
           const startedAtStored = Number(s?.startedAt)
@@ -4554,7 +4518,7 @@ useEffect(() => {
     const hasActiveSession = isRunning || elapsed > 0
     if (!hasActiveSession) {
       try {
-        window.localStorage.removeItem(CURRENT_SESSION_STORAGE_KEY)
+        storage.focus.currentSession.remove()
       } catch (error) {
         logWarn('Failed to clear active session state', error)
       }
@@ -4584,7 +4548,7 @@ useEffect(() => {
     }
 
     try {
-      window.localStorage.setItem(CURRENT_SESSION_STORAGE_KEY, JSON.stringify(payload))
+      storage.focus.currentSession.set(payload)
     } catch (error) {
       logWarn('Failed to persist active session state', error)
     }
@@ -5690,21 +5654,18 @@ useEffect(() => {
     })
 
     // Persist new custom reason as a trigger for the overview
-    try {
-      if (snapbackReasonMode === 'custom') {
-        const label = reasonLabel.trim()
-        if (label.length > 0 && typeof window !== 'undefined') {
-          const raw = window.localStorage.getItem(SNAPBACK_CUSTOM_TRIGGERS_KEY)
-          const parsed = raw ? JSON.parse(raw) : []
-          const list = Array.isArray(parsed) ? parsed : []
-          const exists = list.some((it: any) => typeof it?.label === 'string' && it.label.trim().toLowerCase() === label.toLowerCase())
-          if (!exists) {
-            list.push({ id: `snap-custom-${Date.now()}`, label })
-            window.localStorage.setItem(SNAPBACK_CUSTOM_TRIGGERS_KEY, JSON.stringify(list))
-          }
+    if (snapbackReasonMode === 'custom') {
+      const label = reasonLabel.trim()
+      if (label.length > 0 && typeof window !== 'undefined') {
+        const parsed = storage.focus.snapbackCustomTriggers.get()
+        const list = Array.isArray(parsed) ? parsed : []
+        const exists = list.some((it: any) => typeof it?.label === 'string' && it.label.trim().toLowerCase() === label.toLowerCase())
+        if (!exists) {
+          list.push({ id: `snap-custom-${Date.now()}`, label })
+          storage.focus.snapbackCustomTriggers.set(list)
         }
       }
-    } catch {}
+    }
 
     
     setIsSnapbackOpen(false)

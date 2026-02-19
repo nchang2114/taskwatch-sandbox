@@ -23,9 +23,9 @@ export type QuickItem = {
   priority?: boolean
 }
 
-export const QUICK_LIST_STORAGE_KEY = 'nc-taskwatch-quicklist'
+import { storage, STORAGE_KEYS } from './storage'
+
 export const QUICK_LIST_UPDATE_EVENT = 'nc-quick-list:updated'
-export const QUICK_LIST_USER_STORAGE_KEY = 'nc-taskwatch-quicklist-user'
 export const QUICK_LIST_GUEST_USER_ID = '__guest__'
 export const QUICK_LIST_USER_EVENT = 'nc-quick-list:user-updated'
 
@@ -94,29 +94,23 @@ const getDefaultQuickList = (): QuickItem[] =>
   }))
 
 const readStoredQuickListUserId = (): string | null => {
-  if (typeof window === 'undefined') return null
-  try {
-    const value = window.localStorage.getItem(QUICK_LIST_USER_STORAGE_KEY)
-    if (!value) return null
-    const trimmed = value.trim()
-    return trimmed.length > 0 ? trimmed : null
-  } catch {
-    return null
-  }
+  const value = storage.ownership.quickListUser.get()
+  if (!value) return null
+  const trimmed = value.trim()
+  return trimmed.length > 0 ? trimmed : null
 }
 
 const setStoredQuickListUserId = (userId: string | null): void => {
-  if (typeof window === 'undefined') return
-  try {
-    if (!userId) {
-      window.localStorage.removeItem(QUICK_LIST_USER_STORAGE_KEY)
-    } else {
-      window.localStorage.setItem(QUICK_LIST_USER_STORAGE_KEY, userId)
-    }
+  if (!userId) {
+    storage.ownership.quickListUser.remove()
+  } else {
+    storage.ownership.quickListUser.set(userId)
+  }
+  if (typeof window !== 'undefined') {
     try {
       window.dispatchEvent(new Event(QUICK_LIST_USER_EVENT))
     } catch {}
-  } catch {}
+  }
 }
 
 const normalizeQuickListUserId = (userId: string | null | undefined): string =>
@@ -126,7 +120,7 @@ const isGuestQuickListUser = (userId: string | null): boolean =>
   !userId || userId === QUICK_LIST_GUEST_USER_ID
 
 const storageKeyForUser = (userId: string | null | undefined): string =>
-  `${QUICK_LIST_STORAGE_KEY}::${normalizeQuickListUserId(userId)}`
+  `${STORAGE_KEYS.quickList}::${normalizeQuickListUserId(userId)}`
 
 export const readQuickListOwnerId = (): string | null => readStoredQuickListUserId()
 
@@ -213,9 +207,9 @@ export const readStoredQuickList = (): QuickItem[] => {
   if (typeof window === 'undefined') return []
   try {
     const currentUser = readStoredQuickListUserId()
-    const raw = window.localStorage.getItem(storageKeyForUser(currentUser))
+    const parsed = storage.domain.quickList.get(normalizeQuickListUserId(currentUser))
     const guestContext = isGuestQuickListUser(currentUser)
-    if (!raw) {
+    if (!parsed) {
       if (guestContext) {
         const seeded = writeStoredQuickList(getDefaultQuickList())
         if (!currentUser) {
@@ -225,12 +219,11 @@ export const readStoredQuickList = (): QuickItem[] => {
       }
       return []
     }
-    const parsed = JSON.parse(raw)
     const sanitized = sanitizeQuickList(parsed)
     if (sanitized.length > 0) {
       return sanitized
     }
-    if (Array.isArray(parsed) && parsed.length === 0) {
+    if (Array.isArray(parsed) && (parsed as any[]).length === 0) {
       return []
     }
     if (guestContext) {
@@ -244,10 +237,10 @@ export const readStoredQuickList = (): QuickItem[] => {
 
 export const writeStoredQuickList = (items: QuickItem[]): QuickItem[] => {
   const normalized = sanitizeQuickList(items)
+  const currentUser = readStoredQuickListUserId()
+  storage.domain.quickList.set(normalizeQuickListUserId(currentUser), normalized)
   if (typeof window !== 'undefined') {
     try {
-      const currentUser = readStoredQuickListUserId()
-      window.localStorage.setItem(storageKeyForUser(currentUser), JSON.stringify(normalized))
       window.dispatchEvent(new CustomEvent<QuickItem[]>(QUICK_LIST_UPDATE_EVENT, { detail: normalized }))
     } catch {}
   }
@@ -286,7 +279,7 @@ export const subscribeQuickList = (cb: (items: QuickItem[]) => void): (() => voi
 if (typeof window !== 'undefined') {
   const handleStorageChange = (event: StorageEvent) => {
     // Check if the change is for a quicklist key (any user)
-    if (event.key && event.key.startsWith(QUICK_LIST_STORAGE_KEY + '::')) {
+    if (event.key && event.key.startsWith(STORAGE_KEYS.quickList + '::')) {
       try {
         const newValue = event.newValue
         if (newValue) {

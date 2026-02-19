@@ -14,7 +14,7 @@ export type TaskDetailSnapshot = {
   notesCollapsed: boolean
 }
 
-const TASK_DETAILS_STORAGE_KEY = 'nc-taskwatch-task-details-v1'
+import { storage } from './storage'
 
 const sanitizeSubtask = (value: unknown, index: number): TaskDetailSubtask | null => {
   if (typeof value !== 'object' || value === null) {
@@ -96,19 +96,8 @@ const sanitizeDetailsState = (value: unknown): Record<string, TaskDetailSnapshot
 }
 
 export const readStoredTaskDetailsSnapshot = (): Record<string, TaskDetailSnapshot> => {
-  if (typeof window === 'undefined') {
-    return {}
-  }
-  try {
-    const raw = window.localStorage.getItem(TASK_DETAILS_STORAGE_KEY)
-    if (!raw) {
-      return {}
-    }
-    const parsed = JSON.parse(raw)
-    return sanitizeDetailsState(parsed)
-  } catch {
-    return {}
-  }
+  const parsed = storage.domain.taskDetails.get()
+  if (!parsed) return {}
+  return sanitizeDetailsState(parsed)
 }
 
-export { TASK_DETAILS_STORAGE_KEY }

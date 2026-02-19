@@ -3,19 +3,17 @@ import { DEFAULT_SURFACE_STYLE, ensureSurfaceStyle, type SurfaceStyle } from './
 import { DEMO_GOALS } from './demoGoals'
 import { fetchGoalsHierarchy } from './goalsApi'
 import { ensureSingleUserSession } from './supabaseClient'
+import { storage, STORAGE_KEYS } from './storage'
 
-const STORAGE_KEY = 'nc-taskwatch-goals-snapshot'
-export const GOALS_SNAPSHOT_STORAGE_KEY = STORAGE_KEY
 const EVENT_NAME = 'nc-taskwatch:goals-update'
 export const GOALS_SNAPSHOT_REQUEST_EVENT = 'nc-taskwatch:goals-snapshot-request'
-export const GOALS_SNAPSHOT_USER_KEY = 'nc-taskwatch-goals-user'
 export const GOALS_GUEST_USER_ID = '__guest__'
 
 const normalizeGoalsUserId = (userId: string | null | undefined): string =>
   typeof userId === 'string' && userId.trim().length > 0 ? userId.trim() : GOALS_GUEST_USER_ID
 
 const storageKeyForUser = (userId: string | null | undefined): string =>
-  `${STORAGE_KEY}::${normalizeGoalsUserId(userId)}`
+  `${STORAGE_KEYS.goalsSnapshot}::${normalizeGoalsUserId(userId)}`
 
 export type GoalTaskSubtaskSnapshot = {
   id: string
@@ -198,11 +196,7 @@ export const publishGoalsSnapshot = (snapshot: GoalSnapshot[], userId?: string |
   }
   // Use provided userId or fall back to stored user ID
   const effectiveUserId = userId !== undefined ? userId : readStoredGoalsSnapshotUserId()
-  try {
-    window.localStorage.setItem(storageKeyForUser(effectiveUserId), JSON.stringify(snapshot))
-  } catch {
-    // Ignore storage errors (e.g., quota exceeded, restricted environments)
-  }
+  storage.domain.goals.set(normalizeGoalsUserId(effectiveUserId), snapshot)
   const dispatch = () => {
     try {
       const event = new CustomEvent<GoalSnapshot[]>(EVENT_NAME, { detail: snapshot })
@@ -224,11 +218,7 @@ export const readStoredGoalsSnapshot = (): GoalSnapshot[] => {
   }
   try {
     const currentUser = readStoredGoalsSnapshotUserId()
-    const raw = window.localStorage.getItem(storageKeyForUser(currentUser))
-    if (!raw) {
-      return []
-    }
-    const parsed = JSON.parse(raw)
+    const parsed = storage.domain.goals.get(normalizeGoalsUserId(currentUser))
     if (!Array.isArray(parsed)) {
       return []
     }
@@ -242,7 +232,7 @@ export const readStoredGoalsSnapshot = (): GoalSnapshot[] => {
 if (typeof window !== 'undefined') {
   window.addEventListener('storage', (event: StorageEvent) => {
     // Check if the change is for a goals snapshot key (any user)
-    if (event.key && event.key.startsWith(STORAGE_KEY + '::')) {
+    if (event.key && event.key.startsWith(STORAGE_KEYS.goalsSnapshot + '::')) {
       try {
         const newValue = event.newValue
         if (!newValue) return
@@ -276,33 +266,17 @@ export const subscribeToGoalsSnapshot = (
 }
 
 const readStoredGoalsSnapshotUserId = (): string | null => {
-  if (typeof window === 'undefined') {
-    return null
-  }
-  try {
-    const raw = window.localStorage.getItem(GOALS_SNAPSHOT_USER_KEY)
-    if (!raw) {
-      return null
-    }
-    const trimmed = raw.trim()
-    return trimmed.length > 0 ? trimmed : null
-  } catch {
-    return null
-  }
+  const raw = storage.ownership.goalsUser.get()
+  if (!raw) return null
+  const trimmed = raw.trim()
+  return trimmed.length > 0 ? trimmed : null
 }
 
 const setStoredGoalsSnapshotUserId = (userId: string | null): void => {
-  if (typeof window === 'undefined') {
-    return
-  }
-  try {
-    if (!userId) {
-      window.localStorage.removeItem(GOALS_SNAPSHOT_USER_KEY)
-    } else {
-      window.localStorage.setItem(GOALS_SNAPSHOT_USER_KEY, userId)
-    }
-  } catch {
-    // ignore storage failures
+  if (!userId) {
+    storage.ownership.goalsUser.remove()
+  } else {
+    storage.ownership.goalsUser.set(userId)
   }
 }
 
@@ -335,9 +309,7 @@ export const ensureGoalsUser = (
   } else {
     // Always clear when switching to a real user
     // Bootstrap reads directly from ::__guest__ key, so this is safe
-    try {
-      window.localStorage.removeItem(storageKeyForUser(normalized))
-    } catch {}
+    storage.domain.goals.remove(normalized)
     try {
       const event = new CustomEvent<GoalSnapshot[]>(EVENT_NAME, { detail: [] })
       window.dispatchEvent(event)

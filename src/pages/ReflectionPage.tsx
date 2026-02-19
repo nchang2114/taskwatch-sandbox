@@ -25,6 +25,7 @@ import './ReflectionPage.css'
 import './FocusPage.css'
 import './GoalsPage.css'
 import { readStoredGoalsSnapshot, subscribeToGoalsSnapshot, publishGoalsSnapshot, createGoalsSnapshot, syncGoalsSnapshotFromSupabase, readGoalsSnapshotOwner, GOALS_GUEST_USER_ID, type GoalSnapshot } from '../lib/goalsSync'
+import { storage, STORAGE_KEYS } from '../lib/storage'
 import { SCHEDULE_EVENT_TYPE, type ScheduleBroadcastEvent } from '../lib/scheduleChannel'
 import { broadcastPauseFocus } from '../lib/focusChannel'
 import { createTask as apiCreateTask, fetchGoalsHierarchy, moveTaskToBucket, updateTaskNotes as apiUpdateTaskNotes } from '../lib/goalsApi'
@@ -35,21 +36,17 @@ import {
   type SurfaceStyle,
 } from '../lib/surfaceStyles'
 import {
-  LIFE_ROUTINE_STORAGE_KEY,
   LIFE_ROUTINE_UPDATE_EVENT,
   readStoredLifeRoutines,
   sanitizeLifeRoutineList,
   syncLifeRoutinesWithSupabase,
   type LifeRoutineConfig,
 } from '../lib/lifeRoutines'
-import { 
+import {
   CURRENT_SESSION_EVENT_NAME,
-  CURRENT_SESSION_STORAGE_KEY,
   HISTORY_EVENT_NAME,
   HISTORY_GUEST_USER_ID,
-  HISTORY_STORAGE_KEY,
   HISTORY_USER_EVENT,
-  HISTORY_USER_KEY,
   readHistoryOwnerId,
   readStoredHistory as readPersistedHistory,
   persistHistorySnapshot,
@@ -795,9 +792,6 @@ const CITY_TO_IANA_TIMEZONE: Record<string, string> = {
   'Bogota, Colombia': 'America/Bogota',
 }
 
-// App timezone override - stored in localStorage
-const APP_TIMEZONE_STORAGE_KEY = 'taskwatch_app_timezone'
-
 // Get IANA timezone from city name (full "City, Country" format)
 const getIanaTimezoneForCity = (cityFullName: string): string | null => {
   return CITY_TO_IANA_TIMEZONE[cityFullName] ?? null
@@ -810,23 +804,17 @@ const getCurrentSystemTimezone = (): string => {
 
 // Read app timezone override from localStorage
 const readStoredAppTimezone = (): string | null => {
-  if (typeof localStorage === 'undefined') return null
-  try {
-    return localStorage.getItem(APP_TIMEZONE_STORAGE_KEY)
-  } catch {
-    return null
-  }
+  return storage.preferences.timezone.get()
 }
 
 // Save app timezone override to localStorage
 const storeAppTimezone = (timezone: string | null): void => {
-  if (typeof localStorage === 'undefined') return
+  if (timezone) {
+    storage.preferences.timezone.set(timezone)
+  } else {
+    storage.preferences.timezone.remove()
+  }
   try {
-    if (timezone) {
-      localStorage.setItem(APP_TIMEZONE_STORAGE_KEY, timezone)
-    } else {
-      localStorage.removeItem(APP_TIMEZONE_STORAGE_KEY)
-    }
     // Dispatch custom event to notify components in the same tab (e.g., settings panel)
     window.dispatchEvent(new CustomEvent('taskwatch-timezone-changed', { detail: { timezone } }))
   } catch {
@@ -3688,19 +3676,9 @@ const sanitizeActiveSession = (value: unknown): ActiveSessionState | null => {
 }
 
 const readStoredActiveSession = (): ActiveSessionState | null => {
-  if (typeof window === 'undefined') {
-    return null
-  }
-  try {
-    const raw = window.localStorage.getItem(CURRENT_SESSION_STORAGE_KEY)
-    if (!raw) {
-      return null
-    }
-    const parsed = JSON.parse(raw)
-    return sanitizeActiveSession(parsed)
-  } catch {
-    return null
-  }
+  const parsed = storage.focus.currentSession.get()
+  if (!parsed) return null
+  return sanitizeActiveSession(parsed)
 }
 
 /**
@@ -3928,7 +3906,6 @@ type ReflectionPageProps = {
   snapToInterval?: 0 | 5 | 10 | 15 // 0 = none, or minutes
 }
 
-const REFLECTION_UNLOCK_STORAGE_KEY = 'taskwatch-reflection-unlocked'
 const REFLECTION_BYPASS_PASSWORD = (import.meta.env.VITE_REFLECTION_BYPASS_PASSWORD ?? '123').trim()
 
 export default function ReflectionPage({ use24HourTime = false, weekStartDay = 0, defaultCalendarView = 6, snapToInterval = 0 }: ReflectionPageProps) {
@@ -3938,7 +3915,7 @@ export default function ReflectionPage({ use24HourTime = false, weekStartDay = 0
   const deferredAppTimezone = useDeferredValue(appTimezone)
   const [reflectionUnlocked, setReflectionUnlocked] = useState(() => {
     if (typeof window === 'undefined') return false
-    return window.localStorage.getItem(REFLECTION_UNLOCK_STORAGE_KEY) === 'true'
+    return storage.preferences.reflectionUnlocked.get() === 'true'
   })
   const [isReflectionActive, setIsReflectionActive] = useState(true)
   const [reflectionUnlockInput, setReflectionUnlockInput] = useState('')
@@ -4002,7 +3979,7 @@ export default function ReflectionPage({ use24HourTime = false, weekStartDay = 0
   useEffect(() => {
     // Handle cross-tab storage changes
     const handleStorageChange = (event: StorageEvent) => {
-      if (event.key === APP_TIMEZONE_STORAGE_KEY) {
+      if (event.key === STORAGE_KEYS.timezone) {
         // Timezone was changed or removed - sync in-memory state
         const newValue = event.newValue
         if (!newValue || newValue === '') {
@@ -4824,7 +4801,7 @@ const [showInlineExtras, setShowInlineExtras] = useState(false)
       return
     }
     const handleStorage = (event: StorageEvent) => {
-      if (event.key === LIFE_ROUTINE_STORAGE_KEY) {
+      if (event.key === STORAGE_KEYS.lifeRoutines) {
         setLifeRoutineTasks(readStoredLifeRoutines())
       }
     }
@@ -4951,24 +4928,16 @@ const [showInlineExtras, setShowInlineExtras] = useState(false)
   }, [refetchSnapDbRows])
 
   // Local triggers for guest users (stored in localStorage) - defined early for snapbackTriggerOptions
-  const LOCAL_TRIGGERS_KEY = 'nc-taskwatch-local-snapback-triggers'
   type LocalTrigger = { id: string; label: string; cue: string; deconstruction: string; plan: string }
   const [localTriggers, setLocalTriggers] = useState<LocalTrigger[]>(() => {
-    try {
-      const raw = window.localStorage.getItem(LOCAL_TRIGGERS_KEY)
-      if (raw) {
-        const parsed = JSON.parse(raw)
-        if (Array.isArray(parsed)) return parsed as LocalTrigger[]
-      }
-    } catch {}
+    const parsed = storage.guest.snapbackTriggers.get()
+    if (Array.isArray(parsed)) return parsed as LocalTrigger[]
     return []
   })
   // Persist local triggers to localStorage and broadcast for cross-tab sync
   useEffect(() => {
-    try {
-      window.localStorage.setItem(LOCAL_TRIGGERS_KEY, JSON.stringify(localTriggers))
-      broadcastSnapbackUpdate()
-    } catch {}
+    storage.guest.snapbackTriggers.set(localTriggers as any)
+    broadcastSnapbackUpdate()
   }, [localTriggers])
   
   // Storage listener for localTriggers moved to after snapPlans is defined (for proper sync)
@@ -5120,7 +5089,7 @@ const [showInlineExtras, setShowInlineExtras] = useState(false)
       setHistoryOwnerSignal((current) => current + 1)
     }
     const handleStorage = (event: StorageEvent) => {
-      if (event.key === HISTORY_USER_KEY) {
+      if (event.key === STORAGE_KEYS.historyUser) {
         bump()
       }
     }
@@ -7353,14 +7322,14 @@ useEffect(() => {
       return
     }
     const handleStorage = (event: StorageEvent) => {
-      if (event.key?.startsWith(HISTORY_STORAGE_KEY)) {
+      if (event.key?.startsWith(STORAGE_KEYS.sessionHistory)) {
         const stored = readPersistedHistory()
         if (!historiesAreEqual(latestHistoryRef.current, stored)) {
           setHistory(stored)
         }
         return
       }
-      if (event.key === CURRENT_SESSION_STORAGE_KEY) {
+      if (event.key === STORAGE_KEYS.currentSession) {
         setActiveSession(readStoredActiveSession())
       }
     }
@@ -7871,15 +7840,9 @@ useEffect(() => {
   const snapActiveRangeConfig = SNAP_RANGE_DEFS[snapActiveRange]
 
   // Local plans for guest users (history-derived snap-* triggers)
-  const LOCAL_SNAP_PLANS_KEY = 'nc-taskwatch-local-snap-plans'
   const [localSnapPlans, setLocalSnapPlans] = useState<Record<string, { cue: string; deconstruction: string; plan: string }>>(() => {
-    try {
-      const raw = window.localStorage.getItem(LOCAL_SNAP_PLANS_KEY)
-      if (raw) {
-        const parsed = JSON.parse(raw)
-        if (typeof parsed === 'object' && parsed !== null) return parsed
-      }
-    } catch {}
+    const parsed = storage.guest.snapPlans.get()
+    if (typeof parsed === 'object' && parsed !== null) return parsed
     return {}
   })
   // Ref to access localSnapPlans in callbacks without stale closures
@@ -7888,10 +7851,8 @@ useEffect(() => {
   
   // Persist local plans to localStorage and broadcast for cross-tab sync
   useEffect(() => {
-    try {
-      window.localStorage.setItem(LOCAL_SNAP_PLANS_KEY, JSON.stringify(localSnapPlans))
-      broadcastSnapbackUpdate()
-    } catch {}
+    storage.guest.snapPlans.set(localSnapPlans)
+    broadcastSnapbackUpdate()
   }, [localSnapPlans])
   
   // Listen for localStorage changes from other tabs (guest mode plan sync)
@@ -7903,7 +7864,7 @@ useEffect(() => {
   
   useEffect(() => {
     const handleStorage = (event: StorageEvent) => {
-      if (event.key === LOCAL_SNAP_PLANS_KEY && event.newValue) {
+      if (event.key === STORAGE_KEYS.localSnapPlans && event.newValue) {
         try {
           const parsed = JSON.parse(event.newValue)
           if (typeof parsed === 'object' && parsed !== null) {
@@ -7935,7 +7896,7 @@ useEffect(() => {
   // This is here because setSnapPlans needs to be defined first
   useEffect(() => {
     const handleStorage = (event: StorageEvent) => {
-      if (event.key === LOCAL_TRIGGERS_KEY && event.newValue) {
+      if (event.key === STORAGE_KEYS.localSnapbackTriggers && event.newValue) {
         try {
           const parsed = JSON.parse(event.newValue)
           if (Array.isArray(parsed)) {
@@ -8137,11 +8098,9 @@ useEffect(() => {
   useEffect(() => { setLocalTriggersRef.current = setLocalTriggers }, [])
 
   // DEPRECATED: snapbackAliases removed - renaming now updates trigger_name directly
-  const LOCAL_ALIASES_KEY = 'nc-taskwatch-local-snap-aliases'
-  // DEPRECATED: no longer using aliases, but keep for local storage cleanup
+  // Clean up old aliases localStorage key
   useEffect(() => {
-    // Clean up old aliases localStorage key
-    try { window.localStorage.removeItem(LOCAL_ALIASES_KEY) } catch {}
+    storage.guest.snapAliases.remove()
   }, [])
 
   
@@ -8276,10 +8235,8 @@ useEffect(() => {
   // Persist current overview trigger labels for the Snapback panel to mirror
   useEffect(() => {
     if (typeof window === 'undefined') return
-    try {
-      const labels = combinedLegend.map((i) => i.label)
-      window.localStorage.setItem('nc-taskwatch-overview-triggers', JSON.stringify(labels))
-    } catch {}
+    const labels = combinedLegend.map((i) => i.label)
+    storage.focus.overviewTriggers.set(labels)
   }, [combinedLegend.map((i) => i.label).join('|')])
 
   const [selectedTriggerKey, setSelectedTriggerKey] = useState<string | null>(null)
@@ -16079,7 +16036,7 @@ useEffect(() => {
       setReflectionUnlocked(true)
       setReflectionUnlockError(null)
       setReflectionUnlockInput('')
-      window.localStorage.setItem(REFLECTION_UNLOCK_STORAGE_KEY, 'true')
+      storage.preferences.reflectionUnlocked.set('true')
     } else {
       setReflectionUnlockError('Incorrect password.')
     }
