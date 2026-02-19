@@ -6,7 +6,7 @@ import {
   sanitizeSurfaceStyle,
   type SurfaceStyle,
 } from './surfaceStyles'
-import { storage, STORAGE_KEYS } from './storage'
+import { storage } from './storage'
 
 export const HISTORY_EVENT_NAME = 'nc-taskwatch:history-update'
 export const HISTORY_GUEST_USER_ID = '__guest__'
@@ -117,8 +117,6 @@ const getStoredHistoryUserId = (): string | null => {
 const normalizeHistoryUserId = (userId: string | null | undefined): string =>
   typeof userId === 'string' && userId.trim().length > 0 ? userId.trim() : HISTORY_GUEST_USER_ID
 
-const storageKeyForUser = (userId: string | null | undefined): string =>
-  `${STORAGE_KEYS.sessionHistory}::${normalizeHistoryUserId(userId)}`
 
 export const readHistoryOwnerId = (): string | null => getStoredHistoryUserId()
 const setStoredHistoryUserId = (userId: string | null): void => {

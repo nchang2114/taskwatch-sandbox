@@ -119,8 +119,6 @@ const normalizeQuickListUserId = (userId: string | null | undefined): string =>
 const isGuestQuickListUser = (userId: string | null): boolean =>
   !userId || userId === QUICK_LIST_GUEST_USER_ID
 
-const storageKeyForUser = (userId: string | null | undefined): string =>
-  `${STORAGE_KEYS.quickList}::${normalizeQuickListUserId(userId)}`
 
 export const readQuickListOwnerId = (): string | null => readStoredQuickListUserId()
 

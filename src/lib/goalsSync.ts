@@ -12,8 +12,6 @@ export const GOALS_GUEST_USER_ID = '__guest__'
 const normalizeGoalsUserId = (userId: string | null | undefined): string =>
   typeof userId === 'string' && userId.trim().length > 0 ? userId.trim() : GOALS_GUEST_USER_ID
 
-const storageKeyForUser = (userId: string | null | undefined): string =>
-  `${STORAGE_KEYS.goalsSnapshot}::${normalizeGoalsUserId(userId)}`
 
 export type GoalTaskSubtaskSnapshot = {
   id: string

@@ -246,7 +246,7 @@ export type Milestone = {
   name: string
   date: string
   completed: boolean
-  role: string
+  role: 'start' | 'end' | 'normal'
   hidden?: boolean
 }
 
@@ -292,7 +292,7 @@ export const storage = {
 
   focus: {
     currentTask: createStringAccessor(KEYS.currentTask),
-    currentTaskSource: createAccessor<{ goalId?: string; bucketId?: string; taskId?: string; source?: string }>(KEYS.currentTaskSource),
+    currentTaskSource: createAccessor<Record<string, unknown>>(KEYS.currentTaskSource),
     currentSession: createAccessor<Record<string, unknown>>(KEYS.currentSession),
     stopwatch: createAccessor<Record<string, unknown>>(KEYS.stopwatch),
     notebook: createAccessor<Record<string, unknown>>(KEYS.notebook),

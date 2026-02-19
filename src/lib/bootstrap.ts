@@ -19,7 +19,7 @@ import { DEFAULT_SURFACE_STYLE, ensureServerBucketStyle } from './surfaceStyles'
 import { pushSnapbackTriggersToSupabase, syncSnapbackTriggersFromSupabase, type SnapbackTriggerPayload } from './snapbackApi'
 import { pushRepeatingRulesToSupabase, syncRepeatingRulesFromSupabase, REPEATING_RULES_GUEST_USER_ID } from './repeatingSessions'
 import { pushAllHistoryToSupabase, syncHistoryWithSupabase, HISTORY_GUEST_USER_ID, sanitizeHistoryRecords } from './sessionHistory'
-import { storage, STORAGE_KEYS } from './storage'
+import { storage } from './storage'
 
 // Type for ID mappings returned from migrations
 export type IdMaps = {

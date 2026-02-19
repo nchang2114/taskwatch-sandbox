@@ -35,7 +35,6 @@ export type RepeatingSessionRule = {
 
 import { storage, STORAGE_KEYS } from './storage'
 
-const REPEATING_RULES_USER_KEY = STORAGE_KEYS.repeatingUser
 export const REPEATING_RULES_GUEST_USER_ID = '__guest__'
 
 const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
@@ -176,9 +175,6 @@ const getSampleRepeatingRules = (): RepeatingSessionRule[] => {
     },
   ]
 }
-
-const storageKeyForUser = (userId: string | null | undefined): string =>
-  `${STORAGE_KEYS.repeatingRules}::${normalizeRepeatingRuleUserId(userId)}`
 
 export const readLocalRepeatingRules = (): RepeatingSessionRule[] => {
   if (typeof window === 'undefined') return getSampleRepeatingRules()

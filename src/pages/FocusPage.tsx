@@ -1669,7 +1669,7 @@ useEffect(() => {
       return
     }
     try {
-      const parsed = storage.focus.stopwatch.get()
+      const parsed = storage.focus.stopwatch.get() as any
       if (!parsed) {
         debugStopwatch('hydrate: no stored stopwatch state')
         // Sync modeStateRef.current.focus with the initial focusSource state

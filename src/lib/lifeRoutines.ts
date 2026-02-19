@@ -290,8 +290,6 @@ const normalizeLifeRoutineUserId = (userId: string | null | undefined): string =
 const isGuestLifeRoutineUser = (userId: string | null): boolean =>
   !userId || userId === LIFE_ROUTINE_GUEST_USER_ID
 
-const storageKeyForUser = (userId: string | null | undefined): string =>
-  `${STORAGE_KEYS.lifeRoutines}::${normalizeLifeRoutineUserId(userId)}`
 
 const LIFE_ROUTINE_SYNC_LOCK_TTL_MS = 2 * 60 * 1000
 
