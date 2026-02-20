@@ -2,6 +2,8 @@ import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
 import './index.css'
 import App from './App.tsx'
+import { hydrateGoalsData } from './lib/idbGoals'
+import { getCurrentUserId } from './lib/namespaceManager'
 
 // Some third-party instrumentation assumes document.classList exists; provide a no-op shim to prevent runtime errors.
 if (typeof document !== 'undefined' && !(document as any).classList) {
@@ -29,8 +31,12 @@ if (typeof document !== 'undefined' && !(document as any).classList) {
   Object.defineProperty(document, 'classList', { value: emptyClassList, configurable: true })
 }
 
-createRoot(document.getElementById('root')!).render(
-  <StrictMode>
-    <App />
-  </StrictMode>,
-)
+async function boot() {
+  await hydrateGoalsData(getCurrentUserId())
+  createRoot(document.getElementById('root')!).render(
+    <StrictMode>
+      <App />
+    </StrictMode>,
+  )
+}
+boot()

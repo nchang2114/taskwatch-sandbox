@@ -15,6 +15,7 @@ import {
 import { pushLifeRoutinesToSupabase, syncLifeRoutinesWithSupabase, type LifeRoutineConfig } from './lifeRoutines'
 import { GUEST_USER_ID } from './namespaceManager'
 import { createGoalsSnapshot, syncGoalsSnapshotFromSupabase } from './goalsSync'
+import { assembleSnapshot as assembleGoalsFromCache, clearGoalsCache } from './idbGoals'
 import { QUICK_LIST_GOAL_NAME } from './quickListRemote'
 import { DEFAULT_SURFACE_STYLE, ensureServerBucketStyle } from './surfaceStyles'
 import { pushSnapbackTriggersToSupabase, syncSnapbackTriggersFromSupabase, type SnapbackTriggerPayload } from './snapbackApi'
@@ -205,22 +206,16 @@ const pushGoalsToSupabase = async (): Promise<IdMaps> => {
     taskIdMap: new Map<string, string>(),
   }
   
-  // Read directly from the guest key (not the current user's key)
-  const guestGoals = storage.domain.goals.get(GUEST_USER_ID)
-
-  if (!guestGoals) {
-    return emptyMaps
-  }
-
+  // Read guest goals from IDB cache (already hydrated at boot)
   let snapshot: ReturnType<typeof createGoalsSnapshot> = []
   try {
-    snapshot = createGoalsSnapshot(guestGoals).filter(
+    snapshot = assembleGoalsFromCache(GUEST_USER_ID).filter(
       (goal) => goal.name?.trim() !== QUICK_LIST_GOAL_NAME,
     )
   } catch {
     return emptyMaps
   }
-  
+
   if (snapshot.length === 0) {
     return emptyMaps
   }
@@ -428,9 +423,9 @@ const migrateGuestData = async (): Promise<void> => {
     tasks: taskIdMap.size,
   })
 
-  // CRITICAL: Clear goals snapshot immediately after migration
+  // CRITICAL: Clear goals data immediately after migration
   // The snapshot has demo IDs that will cause 400 errors if used
-  storage.domain.goals.remove(GUEST_USER_ID)
+  clearGoalsCache(GUEST_USER_ID)
   storage.bootstrap.snapshotGoals.remove()
 
   // 2. Push milestones to Supabase (using goal ID map)
@@ -594,7 +589,7 @@ const migrateGuestData = async (): Promise<void> => {
   storage.domain.quickList.remove('__guest__')
   storage.domain.history.remove('__guest__')
   storage.domain.repeatingRules.remove('__guest__')
-  storage.domain.goals.remove('__guest__')
+  clearGoalsCache('__guest__')
   // Clear snapback guest data
   storage.guest.snapbackTriggers.remove()
   storage.guest.snapPlans.remove()

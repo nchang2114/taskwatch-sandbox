@@ -14,6 +14,7 @@ import { readCachedSessionTokens } from './lib/authStorage'
 import { storage, STORAGE_KEYS } from './lib/storage'
 import { bootstrapGuestDataIfNeeded, clearAllLocalStorage, clearLastFullSyncTimestamp } from './lib/bootstrap'
 import { setCurrentUserId } from './lib/namespaceManager'
+import { assembleSnapshot as assembleGoalsFromCache } from './lib/idbGoals'
 
 type Theme = 'light' | 'dark'
 type TabKey = 'goals' | 'focus' | 'reflection'
@@ -868,18 +869,18 @@ function MainApp() {
         try {
           const guestRoutines = storage.domain.lifeRoutines.get('__guest__')
           const guestQuickList = storage.domain.quickList.get('__guest__')
-          const guestGoals = storage.domain.goals.get('__guest__')
+          const guestGoals = assembleGoalsFromCache('__guest__')
           // Don't snapshot history or repeating rules - they have stale references
 
           console.log('[signup] Snapshotting guest data:', {
             routines: guestRoutines ? guestRoutines.length : 0,
             quickList: guestQuickList ? guestQuickList.length : 0,
-            goals: guestGoals ? 'exists' : 'none',
+            goals: guestGoals.length > 0 ? 'exists' : 'none',
           })
 
           if (guestRoutines) storage.bootstrap.snapshotLifeRoutines.set(guestRoutines)
           if (guestQuickList) storage.bootstrap.snapshotQuickList.set(guestQuickList)
-          if (guestGoals) storage.bootstrap.snapshotGoals.set(guestGoals)
+          if (guestGoals.length > 0) storage.bootstrap.snapshotGoals.set(guestGoals)
         } catch (e) {
           console.warn('[signup] Could not snapshot guest data:', e)
         }

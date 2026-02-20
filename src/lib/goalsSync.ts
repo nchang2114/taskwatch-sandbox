@@ -3,8 +3,8 @@ import { DEFAULT_SURFACE_STYLE, ensureSurfaceStyle, type SurfaceStyle } from './
 import { DEMO_GOALS } from './demoGoals'
 import { fetchGoalsHierarchy } from './goalsApi'
 import { ensureSingleUserSession } from './supabaseClient'
-import { storage, STORAGE_KEYS } from './storage'
 import { getCurrentUserId, GUEST_USER_ID, onUserChange } from './namespaceManager'
+import { writeGoalsToCache, assembleSnapshot, clearGoalsCache } from './idbGoals'
 
 const EVENT_NAME = 'nc-taskwatch:goals-update'
 export const GOALS_SNAPSHOT_REQUEST_EVENT = 'nc-taskwatch:goals-snapshot-request'
@@ -192,7 +192,7 @@ export const publishGoalsSnapshot = (snapshot: GoalSnapshot[], userId?: string |
     return
   }
   const effectiveUserId = userId !== undefined && userId !== null ? userId : getCurrentUserId()
-  storage.domain.goals.set(effectiveUserId, snapshot)
+  writeGoalsToCache(effectiveUserId, snapshot)
   const dispatch = () => {
     try {
       const event = new CustomEvent<GoalSnapshot[]>(EVENT_NAME, { detail: snapshot })
@@ -213,34 +213,10 @@ export const readStoredGoalsSnapshot = (): GoalSnapshot[] => {
     return []
   }
   try {
-    const parsed = storage.domain.goals.get(getCurrentUserId())
-    if (!Array.isArray(parsed)) {
-      return []
-    }
-    return createGoalsSnapshot(parsed)
+    return assembleSnapshot(getCurrentUserId())
   } catch {
     return []
   }
-}
-
-// Listen for storage events from other tabs to sync goals
-if (typeof window !== 'undefined') {
-  window.addEventListener('storage', (event: StorageEvent) => {
-    // Check if the change is for a goals snapshot key (any user)
-    if (event.key && event.key.startsWith(STORAGE_KEYS.goalsSnapshot + '::')) {
-      try {
-        const newValue = event.newValue
-        if (!newValue) return
-        const parsed = JSON.parse(newValue)
-        if (Array.isArray(parsed)) {
-          const snapshot = createGoalsSnapshot(parsed)
-          // Dispatch custom event to notify same-tab listeners
-          const customEvent = new CustomEvent<GoalSnapshot[]>(EVENT_NAME, { detail: snapshot })
-          window.dispatchEvent(customEvent)
-        }
-      } catch {}
-    }
-  })
 }
 
 export const subscribeToGoalsSnapshot = (
@@ -280,7 +256,7 @@ if (typeof window !== 'undefined') {
       }
     } else {
       // Clear when switching to a real user — bootstrap will fill it
-      storage.domain.goals.remove(next)
+      clearGoalsCache(next)
       try {
         const event = new CustomEvent<GoalSnapshot[]>(EVENT_NAME, { detail: [] })
         window.dispatchEvent(event)
