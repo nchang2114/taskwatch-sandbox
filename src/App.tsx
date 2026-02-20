@@ -865,18 +865,16 @@ function MainApp() {
       if (typeof window !== 'undefined') {
         try {
           const guestRoutines = storage.domain.lifeRoutines.get('__guest__')
-          const guestQuickList = storage.domain.quickList.get('__guest__')
           const guestGoals = assembleGoalsFromCache('__guest__')
           // Don't snapshot history or repeating rules - they have stale references
+          // Quick list is in IDB cache — bootstrap reads it directly
 
           console.log('[signup] Snapshotting guest data:', {
             routines: guestRoutines ? guestRoutines.length : 0,
-            quickList: guestQuickList ? guestQuickList.length : 0,
             goals: guestGoals.length > 0 ? 'exists' : 'none',
           })
 
           if (guestRoutines) storage.bootstrap.snapshotLifeRoutines.set(guestRoutines)
-          if (guestQuickList) storage.bootstrap.snapshotQuickList.set(guestQuickList)
           if (guestGoals.length > 0) storage.bootstrap.snapshotGoals.set(guestGoals)
         } catch (e) {
           console.warn('[signup] Could not snapshot guest data:', e)

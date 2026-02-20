@@ -70,6 +70,10 @@ export type SubtaskRecord = {
   updatedAt?: string
 }
 
+// ── Quick List sentinel ──────────────────────────────────────────────────────
+
+export const QUICK_LIST_CONTAINER_ID = '__quicklist__'
+
 // ── In-memory cache ─────────────────────────────────────────────────────────
 
 const cache = {
@@ -134,6 +138,102 @@ async function replaceUserRecords<T>(storeName: string, userId: string, records:
       } else {
         // All old records deleted — insert new ones
         records.forEach((record) => store.put(record))
+      }
+    }
+    tx.oncomplete = () => resolve()
+    tx.onerror = () => reject(tx.error)
+  })
+}
+
+/** Replace only goal tasks (containerId !== __quicklist__) for a user. */
+async function replaceGoalTasks(userId: string, records: TaskRecord[]): Promise<void> {
+  const db = await openDB()
+  return new Promise<void>((resolve, reject) => {
+    const tx = db.transaction(STORE.tasks, 'readwrite')
+    const store = tx.objectStore(STORE.tasks)
+    const index = store.index('userId')
+    const cursorReq = index.openCursor(userId)
+    cursorReq.onsuccess = () => {
+      const cursor = cursorReq.result
+      if (cursor) {
+        if ((cursor.value as TaskRecord).containerId !== QUICK_LIST_CONTAINER_ID) {
+          cursor.delete()
+        }
+        cursor.continue()
+      } else {
+        records.forEach((r) => store.put(r))
+      }
+    }
+    tx.oncomplete = () => resolve()
+    tx.onerror = () => reject(tx.error)
+  })
+}
+
+/** Replace only quick list tasks (containerId === __quicklist__) for a user. */
+async function replaceQuickListTasks(userId: string, records: TaskRecord[]): Promise<void> {
+  const db = await openDB()
+  return new Promise<void>((resolve, reject) => {
+    const tx = db.transaction(STORE.tasks, 'readwrite')
+    const store = tx.objectStore(STORE.tasks)
+    const index = store.index('userId')
+    const cursorReq = index.openCursor(userId)
+    cursorReq.onsuccess = () => {
+      const cursor = cursorReq.result
+      if (cursor) {
+        if ((cursor.value as TaskRecord).containerId === QUICK_LIST_CONTAINER_ID) {
+          cursor.delete()
+        }
+        cursor.continue()
+      } else {
+        records.forEach((r) => store.put(r))
+      }
+    }
+    tx.oncomplete = () => resolve()
+    tx.onerror = () => reject(tx.error)
+  })
+}
+
+/** Replace only goal subtasks (belonging to non-QL tasks) for a user. */
+async function replaceGoalSubtasks(userId: string, records: SubtaskRecord[], qlTaskIds: Set<string>): Promise<void> {
+  const db = await openDB()
+  return new Promise<void>((resolve, reject) => {
+    const tx = db.transaction(STORE.subtasks, 'readwrite')
+    const store = tx.objectStore(STORE.subtasks)
+    const index = store.index('userId')
+    const cursorReq = index.openCursor(userId)
+    cursorReq.onsuccess = () => {
+      const cursor = cursorReq.result
+      if (cursor) {
+        if (!qlTaskIds.has((cursor.value as SubtaskRecord).taskId)) {
+          cursor.delete()
+        }
+        cursor.continue()
+      } else {
+        records.forEach((r) => store.put(r))
+      }
+    }
+    tx.oncomplete = () => resolve()
+    tx.onerror = () => reject(tx.error)
+  })
+}
+
+/** Replace only quick list subtasks (belonging to QL tasks) for a user. */
+async function replaceQuickListSubtasks(userId: string, records: SubtaskRecord[], qlTaskIds: Set<string>): Promise<void> {
+  const db = await openDB()
+  return new Promise<void>((resolve, reject) => {
+    const tx = db.transaction(STORE.subtasks, 'readwrite')
+    const store = tx.objectStore(STORE.subtasks)
+    const index = store.index('userId')
+    const cursorReq = index.openCursor(userId)
+    cursorReq.onsuccess = () => {
+      const cursor = cursorReq.result
+      if (cursor) {
+        if (qlTaskIds.has((cursor.value as SubtaskRecord).taskId)) {
+          cursor.delete()
+        }
+        cursor.continue()
+      } else {
+        records.forEach((r) => store.put(r))
       }
     }
     tx.oncomplete = () => resolve()
@@ -350,10 +450,21 @@ export function assembleSnapshot(userId: string): GoalSnapshot[] {
 
 export function writeGoalsToCache(userId: string, snapshot: GoalSnapshot[]): void {
   const { goals, buckets, tasks, subtasks } = flattenSnapshot(userId, snapshot)
+
+  // Preserve quick list tasks/subtasks in the cache
+  const existingTasks = cache.tasks.get(userId) ?? []
+  const existingSubtasks = cache.subtasks.get(userId) ?? []
+  const qlTasks = existingTasks.filter((t) => t.containerId === QUICK_LIST_CONTAINER_ID)
+  const qlTaskIds = new Set(qlTasks.map((t) => t.id))
+  const qlSubtasks = existingSubtasks.filter((s) => qlTaskIds.has(s.taskId))
+
   goalsCache.set(userId, goals)
   bucketsCache.set(userId, buckets)
-  tasksCache.set(userId, tasks)
-  subtasksCache.set(userId, subtasks)
+  // Merge goal tasks with preserved QL tasks (cache only — IDB uses scoped replace)
+  cache.tasks.set(userId, [...tasks, ...qlTasks])
+  replaceGoalTasks(userId, tasks).catch(() => {})
+  cache.subtasks.set(userId, [...subtasks, ...qlSubtasks])
+  replaceGoalSubtasks(userId, subtasks, qlTaskIds).catch(() => {})
 }
 
 // ── Clear all goals data for a user ─────────────────────────────────────────
@@ -363,6 +474,49 @@ export function clearGoalsCache(userId: string): void {
   bucketsCache.remove(userId)
   tasksCache.remove(userId)
   subtasksCache.remove(userId)
+}
+
+// ── Quick List cache helpers ─────────────────────────────────────────────────
+
+/** Read quick list tasks from cache. */
+export function readQuickListTasks(userId: string): TaskRecord[] {
+  return (cache.tasks.get(userId) ?? []).filter((t) => t.containerId === QUICK_LIST_CONTAINER_ID)
+}
+
+/** Read subtasks belonging to quick list tasks. */
+export function readQuickListSubtasks(userId: string): SubtaskRecord[] {
+  const qlTaskIds = new Set(readQuickListTasks(userId).map((t) => t.id))
+  return (cache.subtasks.get(userId) ?? []).filter((s) => qlTaskIds.has(s.taskId))
+}
+
+/** Write quick list tasks + subtasks, preserving goal data. */
+export function writeQuickListToCache(userId: string, qlTasks: TaskRecord[], qlSubtasks: SubtaskRecord[]): void {
+  const existingTasks = cache.tasks.get(userId) ?? []
+  const existingSubtasks = cache.subtasks.get(userId) ?? []
+
+  // Preserve goal tasks
+  const goalTasks = existingTasks.filter((t) => t.containerId !== QUICK_LIST_CONTAINER_ID)
+  // Preserve goal subtasks (those whose taskId is NOT a QL task)
+  const newQlTaskIds = new Set(qlTasks.map((t) => t.id))
+  const oldQlTaskIds = new Set(existingTasks.filter((t) => t.containerId === QUICK_LIST_CONTAINER_ID).map((t) => t.id))
+  const allQlTaskIds = new Set([...newQlTaskIds, ...oldQlTaskIds])
+  const goalSubtasks = existingSubtasks.filter((s) => !allQlTaskIds.has(s.taskId))
+
+  cache.tasks.set(userId, [...goalTasks, ...qlTasks])
+  cache.subtasks.set(userId, [...goalSubtasks, ...qlSubtasks])
+  replaceQuickListTasks(userId, qlTasks).catch(() => {})
+  replaceQuickListSubtasks(userId, qlSubtasks, allQlTaskIds).catch(() => {})
+}
+
+/** Clear only quick list tasks/subtasks for a user. */
+export function clearQuickListCache(userId: string): void {
+  const existingTasks = cache.tasks.get(userId) ?? []
+  const existingSubtasks = cache.subtasks.get(userId) ?? []
+  const qlTaskIds = new Set(existingTasks.filter((t) => t.containerId === QUICK_LIST_CONTAINER_ID).map((t) => t.id))
+  cache.tasks.set(userId, existingTasks.filter((t) => t.containerId !== QUICK_LIST_CONTAINER_ID))
+  cache.subtasks.set(userId, existingSubtasks.filter((s) => !qlTaskIds.has(s.taskId)))
+  replaceQuickListTasks(userId, []).catch(() => {})
+  replaceQuickListSubtasks(userId, [], qlTaskIds).catch(() => {})
 }
 
 // ── Hydrate: load from IDB (with localStorage migration) ────────────────────
@@ -430,5 +584,23 @@ export async function hydrateGoalsData(userId: string): Promise<void> {
   } catch {
     // IDB unavailable — caches stay empty, goalsSync will fall back
     hydratedUsers.add(userId)
+  }
+
+  // ── Quick List migration from localStorage ──────────────────────────────
+  try {
+    const qlTasks = readQuickListTasks(userId)
+    if (qlTasks.length === 0) {
+      // Try migrating from localStorage
+      const lsQuickList = storage.domain.quickList.get(userId)
+      if (Array.isArray(lsQuickList) && lsQuickList.length > 0) {
+        const { convertQuickItemsToRecords } = await import('./quickList')
+        const { tasks: qlTaskRecords, subtasks: qlSubtaskRecords } = convertQuickItemsToRecords(userId, lsQuickList)
+        if (qlTaskRecords.length > 0) {
+          writeQuickListToCache(userId, qlTaskRecords, qlSubtaskRecords)
+        }
+      }
+    }
+  } catch {
+    // Quick list migration is non-critical
   }
 }

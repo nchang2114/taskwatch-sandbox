@@ -71,9 +71,16 @@ import {
   writeStoredQuickList,
   subscribeQuickList,
   QUICK_LIST_USER_EVENT,
-  type QuickItem,
-  type QuickSubtask,
+  type QuickListEntry,
 } from '../lib/quickList'
+import { QUICK_LIST_CONTAINER_ID, type SubtaskRecord } from '../lib/idbGoals'
+
+/** Extended entry with ephemeral UI state (not persisted). */
+type QuickItemState = QuickListEntry & { expanded?: boolean; subtasksCollapsed?: boolean; notesCollapsed?: boolean }
+
+// Backwards-compat aliases
+type QuickItem = QuickItemState
+type QuickSubtask = SubtaskRecord
 import { fetchQuickListRemoteItems, ensureQuickListRemoteStructures, QUICK_LIST_GOAL_NAME } from '../lib/quickListRemote'
 import {
   HISTORY_EVENT_NAME,
@@ -6001,7 +6008,19 @@ export default function GoalsPage(): ReactElement {
             quickListWarn('Supabase quick list refresh failed; keeping local snapshot', { reason })
             return
           }
-          const remoteItems = Array.isArray(remote.items) ? remote.items : []
+          // Bundle remote tasks + subtasks into QuickListEntry[]
+          const remoteTasks = Array.isArray(remote.tasks) ? remote.tasks : []
+          const remoteSubtasks = Array.isArray(remote.subtasks) ? remote.subtasks : []
+          const subtasksByTask = new Map<string, SubtaskRecord[]>()
+          for (const s of remoteSubtasks) {
+            const list = subtasksByTask.get(s.taskId) ?? []
+            list.push(s)
+            subtasksByTask.set(s.taskId, list)
+          }
+          const remoteItems: QuickListEntry[] = remoteTasks.map((t) => ({
+            ...t,
+            subtasks: (subtasksByTask.get(t.id) ?? []).slice().sort((a, b) => a.sortIndex - b.sortIndex),
+          }))
           quickListDebug('Supabase quick list refresh result', { count: remoteItems.length })
           const stored = writeStoredQuickList(remoteItems)
           setQuickListItems(stored)
@@ -6190,8 +6209,12 @@ export default function GoalsPage(): ReactElement {
       quickListDebug('adding quick item', { id, text, keepDraft })
       const next: QuickItem = {
         id,
+        userId: getCurrentUserId(),
+        containerId: QUICK_LIST_CONTAINER_ID,
         text,
         completed: false,
+        difficulty: 'none',
+        priority: false,
         sortIndex: 0,
         updatedAt: new Date().toISOString(),
         notes: '',
@@ -6526,6 +6549,8 @@ export default function GoalsPage(): ReactElement {
             const subs: QuickSubtask[] = Array.isArray(it.subtasks) ? it.subtasks.slice() : []
             const newSub: QuickSubtask = {
               id: createUuid(),
+              userId: getCurrentUserId(),
+              taskId,
               text: '',
               completed: false,
               sortIndex: (subs[0]?.sortIndex ?? 0) - 1,

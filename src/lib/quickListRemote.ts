@@ -1,7 +1,9 @@
 import { ensureSingleUserSession, supabase } from './supabaseClient'
 import { ensureServerBucketStyle, DEFAULT_SURFACE_STYLE } from './surfaceStyles'
-import type { QuickItem, QuickSubtask } from './quickList'
-import { writeStoredQuickList } from './quickList'
+import { QUICK_LIST_CONTAINER_ID, writeQuickListToCache, type TaskRecord, type SubtaskRecord } from './idbGoals'
+import { getCurrentUserId } from './namespaceManager'
+import type { QuickListEntry } from './quickList'
+import { QUICK_LIST_UPDATE_EVENT } from './quickList'
 
 export const QUICK_LIST_GOAL_NAME = 'Quick List (Hidden)'
 const QUICK_LIST_BUCKET_NAME = 'Quick List'
@@ -27,31 +29,11 @@ export const generateUuid = (): string => {
 
 const normalizeDifficulty = (
   difficulty: unknown,
-): QuickItem['difficulty'] => {
+): 'none' | 'green' | 'yellow' | 'red' => {
   if (difficulty === 'green' || difficulty === 'yellow' || difficulty === 'red') {
     return difficulty
   }
   return 'none'
-}
-
-const mapTasksToQuickItems = (tasks: any[], subtasksByTaskId: Map<string, QuickSubtask[]>): QuickItem[] => {
-  return tasks.map((task, index) => {
-    const subs = subtasksByTaskId.get(task.id) ?? []
-    return {
-      id: task.id,
-      text: typeof task.text === 'string' ? task.text : '',
-      completed: Boolean(task.completed),
-      difficulty: normalizeDifficulty(task.difficulty),
-      priority: Boolean(task.priority),
-      sortIndex: index,
-      updatedAt: typeof task.updated_at === 'string' ? task.updated_at : new Date().toISOString(),
-      notes: typeof task.notes === 'string' ? task.notes : '',
-      subtasks: subs,
-      expanded: false,
-      subtasksCollapsed: subs.length === 0,
-      notesCollapsed: !(typeof task.notes === 'string' && task.notes.trim().length > 0),
-    }
-  })
 }
 
 const normalizeQuickListGoalColour = (value: string | null | undefined): string => {
@@ -173,7 +155,8 @@ export async function ensureQuickListRemoteStructures(): Promise<{ goalId: strin
 export async function fetchQuickListRemoteItems(): Promise<{
   goalId: string
   bucketId: string
-  items: QuickItem[]
+  tasks: TaskRecord[]
+  subtasks: SubtaskRecord[]
 } | null> {
   if (!supabase) return null
   const ids = (await ensureQuickListRemoteStructures()) ?? null
@@ -181,8 +164,9 @@ export async function fetchQuickListRemoteItems(): Promise<{
     return null
   }
   const { bucketId, goalId } = ids
+  const userId = getCurrentUserId()
   try {
-    const { data: tasks, error: taskError } = await supabase
+    const { data: taskRows, error: taskError } = await supabase
       .from('tasks')
       .select('id, text, completed, difficulty, priority, sort_index, notes, updated_at')
       .eq('bucket_id', bucketId)
@@ -192,9 +176,10 @@ export async function fetchQuickListRemoteItems(): Promise<{
     if (taskError) {
       return null
     }
-    const taskRows = Array.isArray(tasks) ? tasks : []
-    const taskIds = taskRows.map((task) => task.id)
-    let subtasks: any[] = []
+    const rows = Array.isArray(taskRows) ? taskRows : []
+    const taskIds = rows.map((task) => task.id)
+
+    let subtaskRows: any[] = []
     if (taskIds.length) {
       const { data } = await supabase
         .from('task_subtasks')
@@ -202,46 +187,75 @@ export async function fetchQuickListRemoteItems(): Promise<{
         .in('task_id', taskIds)
         .order('sort_index', { ascending: true })
       if (Array.isArray(data)) {
-        subtasks = data
+        subtaskRows = data
       }
     }
-    const subtasksByTaskId = new Map<string, QuickSubtask[]>()
-    subtasks.forEach((subtask) => {
-      const list = subtasksByTaskId.get(subtask.task_id) ?? []
-      list.push({
-        id: subtask.id,
-        text: typeof subtask.text === 'string' ? subtask.text : '',
-        completed: Boolean(subtask.completed),
-        sortIndex: typeof subtask.sort_index === 'number' ? subtask.sort_index : 0,
-        updatedAt: typeof subtask.updated_at === 'string' ? subtask.updated_at : undefined,
-      })
-      subtasksByTaskId.set(subtask.task_id, list)
-    })
-    const items = mapTasksToQuickItems(taskRows, subtasksByTaskId)
-    return { goalId, bucketId, items }
+
+    const tasks: TaskRecord[] = rows.map((task, index) => ({
+      id: task.id,
+      userId,
+      containerId: QUICK_LIST_CONTAINER_ID,
+      text: typeof task.text === 'string' ? task.text : '',
+      completed: Boolean(task.completed),
+      difficulty: normalizeDifficulty(task.difficulty),
+      priority: Boolean(task.priority),
+      notes: typeof task.notes === 'string' ? task.notes : '',
+      sortIndex: index,
+      updatedAt: typeof task.updated_at === 'string' ? task.updated_at : undefined,
+    }))
+
+    const subtasks: SubtaskRecord[] = subtaskRows.map((sub) => ({
+      id: sub.id,
+      userId,
+      taskId: sub.task_id,
+      text: typeof sub.text === 'string' ? sub.text : '',
+      completed: Boolean(sub.completed),
+      sortIndex: typeof sub.sort_index === 'number' ? sub.sort_index : 0,
+      updatedAt: typeof sub.updated_at === 'string' ? sub.updated_at : undefined,
+    }))
+
+    return { goalId, bucketId, tasks, subtasks }
   } catch {
     return null
   }
 }
 
 /**
- * Syncs quick list from Supabase to localStorage.
+ * Syncs quick list from Supabase to IDB cache.
  * Called during bootstrap to populate the user's quick list after sign-in.
  */
-export async function syncQuickListFromSupabase(): Promise<QuickItem[] | null> {
-  // Use authenticated session directly (localStorage may be stale during bootstrap)
+export async function syncQuickListFromSupabase(): Promise<QuickListEntry[] | null> {
   const session = await ensureSingleUserSession()
   if (!session?.user?.id) {
     return null
   }
-  
+
   const remote = await fetchQuickListRemoteItems()
-  if (!remote?.items) {
+  if (!remote?.tasks) {
     return null
   }
-  
-  // Write to localStorage and broadcast update
-  const stored = writeStoredQuickList(remote.items)
-  console.log('[quickListRemote] Synced', stored.length, 'quick list items from Supabase')
-  return stored
+
+  const userId = getCurrentUserId()
+  writeQuickListToCache(userId, remote.tasks, remote.subtasks)
+
+  // Bundle for event dispatch
+  const subtasksByTask = new Map<string, SubtaskRecord[]>()
+  for (const s of remote.subtasks) {
+    const list = subtasksByTask.get(s.taskId) ?? []
+    list.push(s)
+    subtasksByTask.set(s.taskId, list)
+  }
+  const entries: QuickListEntry[] = remote.tasks.map((task) => ({
+    ...task,
+    subtasks: (subtasksByTask.get(task.id) ?? []).slice().sort((a, b) => a.sortIndex - b.sortIndex),
+  }))
+
+  if (typeof window !== 'undefined') {
+    try {
+      window.dispatchEvent(new CustomEvent(QUICK_LIST_UPDATE_EVENT, { detail: entries }))
+    } catch {}
+  }
+
+  console.log('[quickListRemote] Synced', entries.length, 'quick list items from Supabase')
+  return entries
 }

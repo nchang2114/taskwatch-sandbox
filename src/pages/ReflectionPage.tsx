@@ -85,7 +85,7 @@ import { supabase } from '../lib/supabaseClient'
 import { logWarn } from '../lib/logging'
 import { isRecentlyFullSynced } from '../lib/bootstrap'
 import { ensureQuickListRemoteStructures, QUICK_LIST_GOAL_NAME } from '../lib/quickListRemote'
-import { readStoredQuickList, subscribeQuickList, type QuickItem } from '../lib/quickList'
+import { readStoredQuickList, subscribeQuickList, type QuickListEntry } from '../lib/quickList'
 
 type ReflectionRangeKey = '24h' | '48h' | '7d' | 'all'
 
@@ -4429,7 +4429,7 @@ export default function ReflectionPage({ use24HourTime = false, weekStartDay = 0
   const [lifeRoutineTasks, setLifeRoutineTasks] = useState<LifeRoutineConfig[]>(() => readStoredLifeRoutines())
   const initialLifeRoutineCountRef = useRef(lifeRoutineTasks.length)
   // Quick List state
-  const [quickListItems, setQuickListItems] = useState<QuickItem[]>(() => readStoredQuickList())
+  const [quickListItems, setQuickListItems] = useState<QuickListEntry[]>(() => readStoredQuickList())
   // Quick List remote IDs (goalId, bucketId) for Supabase - fetched on mount
   const [_quickListRemoteIds, setQuickListRemoteIds] = useState<{ goalId: string; bucketId: string } | null>(null)
   const [activeSession, setActiveSession] = useState<ActiveSessionState | null>(() => readStoredActiveSession())

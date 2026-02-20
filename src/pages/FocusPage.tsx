@@ -64,9 +64,9 @@ import {
   subscribeQuickList,
   writeStoredQuickList,
   QUICK_LIST_USER_EVENT,
-  type QuickItem,
-  type QuickSubtask,
+  type QuickListEntry,
 } from '../lib/quickList'
+import type { SubtaskRecord } from '../lib/idbGoals'
 import { fetchQuickListRemoteItems } from '../lib/quickListRemote'
 import {
   CURRENT_SESSION_EVENT_NAME,
@@ -946,7 +946,7 @@ export function FocusPage({ viewportWidth: _viewportWidth, showMilliseconds = tr
     () => new Set(lifeRoutineTasks.map((task) => task.bucketId)),
     [lifeRoutineTasks],
   )
-  const [quickListItems, setQuickListItems] = useState<QuickItem[]>(() => readStoredQuickList())
+  const [quickListItems, setQuickListItems] = useState<QuickListEntry[]>(() => readStoredQuickList())
   const [quickListOwnerSignal, setQuickListOwnerSignal] = useState(0)
   const [quickListExpanded, setQuickListExpanded] = useState(false)
   const [quickListRemoteIds, setQuickListRemoteIds] = useState<{ goalId: string; bucketId: string } | null>(null)
@@ -1078,8 +1078,18 @@ export function FocusPage({ viewportWidth: _viewportWidth, showMilliseconds = tr
           if (remote?.goalId && remote?.bucketId) {
             setQuickListRemoteIds({ goalId: remote.goalId, bucketId: remote.bucketId })
           }
-          if (remote?.items) {
-            const stored = writeStoredQuickList(remote.items)
+          if (remote?.tasks) {
+            const subtasksByTask = new Map<string, SubtaskRecord[]>()
+            for (const s of remote.subtasks) {
+              const list = subtasksByTask.get(s.taskId) ?? []
+              list.push(s)
+              subtasksByTask.set(s.taskId, list)
+            }
+            const entries: QuickListEntry[] = remote.tasks.map((task) => ({
+              ...task,
+              subtasks: (subtasksByTask.get(task.id) ?? []).slice().sort((a, b) => a.sortIndex - b.sortIndex),
+            }))
+            const stored = writeStoredQuickList(entries)
             setQuickListItems(stored)
           }
         } catch (error) {
@@ -2919,15 +2929,17 @@ useEffect(() => {
           return current
         }
         const item = current[index]
-        // Convert NotebookSubtask[] to QuickSubtask[]
-        const quickSubtasks: QuickSubtask[] = entry.subtasks.map((subtask) => ({
+        // Convert NotebookSubtask[] to SubtaskRecord[]
+        const quickSubtasks: SubtaskRecord[] = entry.subtasks.map((subtask) => ({
           id: subtask.id,
+          userId: item.userId,
+          taskId: item.id,
           text: subtask.text,
           completed: subtask.completed,
           sortIndex: subtask.sortIndex,
           updatedAt: subtask.updatedAt ?? new Date().toISOString(),
         }))
-        const updated: QuickItem = {
+        const updated: QuickListEntry = {
           ...item,
           notes: entry.notes,
           subtasks: quickSubtasks,

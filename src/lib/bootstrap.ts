@@ -1,5 +1,4 @@
 import { supabase, ensureSingleUserSession } from './supabaseClient'
-import type { QuickItem } from './quickList'
 import { ensureQuickListRemoteStructures, generateUuid, syncQuickListFromSupabase } from './quickListRemote'
 import {
   createTask,
@@ -15,7 +14,7 @@ import {
 import { pushLifeRoutinesToSupabase, syncLifeRoutinesWithSupabase, type LifeRoutineConfig } from './lifeRoutines'
 import { GUEST_USER_ID } from './namespaceManager'
 import { createGoalsSnapshot, syncGoalsSnapshotFromSupabase } from './goalsSync'
-import { assembleSnapshot as assembleGoalsFromCache, clearGoalsCache } from './idbGoals'
+import { assembleSnapshot as assembleGoalsFromCache, clearGoalsCache, readQuickListTasks, readQuickListSubtasks, clearQuickListCache, type TaskRecord, type SubtaskRecord } from './idbGoals'
 import { readAllMilestones, clearMilestonesCache } from './idbMilestones'
 import { readLifeRoutinesFromCache, clearLifeRoutinesCache } from './idbLifeRoutines'
 import { QUICK_LIST_GOAL_NAME } from './quickListRemote'
@@ -142,8 +141,8 @@ const sortByIndex = (a: { sortIndex?: number }, b: { sortIndex?: number }) => {
   return left - right
 }
 
-const pushQuickListToSupabase = async (items: QuickItem[]): Promise<void> => {
-  if (!supabase || items.length === 0) {
+const pushQuickListToSupabase = async (tasks: TaskRecord[], subtaskRecords: SubtaskRecord[]): Promise<void> => {
+  if (!supabase || tasks.length === 0) {
     return
   }
   const remote = await ensureQuickListRemoteStructures()
@@ -156,9 +155,17 @@ const pushQuickListToSupabase = async (items: QuickItem[]): Promise<void> => {
   }
   const { bucketId } = remote
 
+  // Group subtasks by taskId
+  const subtasksByTask = new Map<string, SubtaskRecord[]>()
+  subtaskRecords.forEach((s) => {
+    const list = subtasksByTask.get(s.taskId) ?? []
+    list.push(s)
+    subtasksByTask.set(s.taskId, list)
+  })
+
   const ordered = [
-    ...items.filter((item) => !item.completed).sort(sortByIndex),
-    ...items.filter((item) => item.completed).sort(sortByIndex),
+    ...tasks.filter((t) => !t.completed).sort(sortByIndex),
+    ...tasks.filter((t) => t.completed).sort(sortByIndex),
   ]
   for (const item of ordered) {
     try {
@@ -168,15 +175,14 @@ const pushQuickListToSupabase = async (items: QuickItem[]): Promise<void> => {
       if (!taskId) {
         throw new Error('Failed to create Quick List task during migration')
       }
-      const subtasks = Array.isArray(item.subtasks) ? [...item.subtasks].sort(sortByIndex) : []
-      for (let idx = 0; idx < subtasks.length; idx += 1) {
-        const sub = subtasks[idx]
-        const sortIndex = typeof sub.sortIndex === 'number' ? sub.sortIndex : idx
+      const subs = (subtasksByTask.get(item.id) ?? []).slice().sort(sortByIndex)
+      for (let idx = 0; idx < subs.length; idx += 1) {
+        const sub = subs[idx]
         await upsertTaskSubtask(taskId, {
           id: ensureUuid(sub.id),
           text: sub.text,
           completed: Boolean(sub.completed),
-          sort_index: sortIndex,
+          sort_index: typeof sub.sortIndex === 'number' ? sub.sortIndex : idx,
           updated_at: sub.updatedAt,
         })
       }
@@ -500,25 +506,17 @@ const migrateGuestData = async (): Promise<void> => {
     await pushLifeRoutinesToSupabase(routines, { strict: true, skipOrphanDelete: true })
   }
 
-  // Read quick list from snapshot first (created at sign-up), fall back to guest key
-  const snapshotQuickList = storage.bootstrap.snapshotQuickList.get()
-  const guestQuickList = !snapshotQuickList ? storage.domain.quickList.get('__guest__') : null
-  const quickListData = snapshotQuickList || guestQuickList
+  // Read quick list from IDB cache (already hydrated/migrated at boot)
+  const qlTasks = readQuickListTasks(GUEST_USER_ID)
+  const qlSubtasks = readQuickListSubtasks(GUEST_USER_ID)
 
   console.log('[bootstrap] Quick list migration:', {
-    hasSnapshot: !!snapshotQuickList,
-    hasGuestData: !!guestQuickList,
-    usingSource: snapshotQuickList ? 'snapshot' : guestQuickList ? 'guest' : 'none',
+    taskCount: qlTasks.length,
+    subtaskCount: qlSubtasks.length,
   })
 
-  let quickItems: QuickItem[] = []
-  if (quickListData && Array.isArray(quickListData)) {
-    quickItems = quickListData
-    console.log('[bootstrap] Migrating', quickItems.length, 'quick list items')
-  }
-  
-  if (quickItems.length > 0) {
-    await pushQuickListToSupabase(quickItems)
+  if (qlTasks.length > 0) {
+    await pushQuickListToSupabase(qlTasks, qlSubtasks)
   }
   
   // Migrate Snapback triggers and plans
@@ -581,7 +579,7 @@ const migrateGuestData = async (): Promise<void> => {
   // This ensures sign-out will show fresh defaults
   clearLifeRoutinesCache('__guest__')
   clearMilestonesCache('__guest__')
-  storage.domain.quickList.remove('__guest__')
+  clearQuickListCache('__guest__')
   storage.domain.history.remove('__guest__')
   storage.domain.repeatingRules.remove('__guest__')
   clearGoalsCache('__guest__')

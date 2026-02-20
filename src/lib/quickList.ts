@@ -1,56 +1,68 @@
-export type QuickSubtask = {
-  id: string
-  text: string
-  completed: boolean
-  sortIndex: number
-  updatedAt?: string
-}
+/**
+ * Quick List — unified with IDB tasks store.
+ *
+ * Quick list items are regular TaskRecords with containerId === '__quicklist__'.
+ * Subtasks are regular SubtaskRecords. No separate storage path.
+ *
+ * For component convenience, readStoredQuickList() returns QuickListEntry[]
+ * (TaskRecord with subtasks bundled). The persistence layer splits them.
+ */
 
-export type QuickItem = {
-  id: string
-  text: string
-  completed: boolean
-  sortIndex: number
-  updatedAt?: string
-  // Optional details (to mirror bucket task capabilities visually)
-  notes?: string
-  subtasks?: QuickSubtask[]
-  expanded?: boolean
-  subtasksCollapsed?: boolean
-  notesCollapsed?: boolean
-  // Visual parity: difficulty and priority
-  difficulty?: 'none' | 'green' | 'yellow' | 'red'
-  priority?: boolean
-}
-
-import { storage, STORAGE_KEYS } from './storage'
+import {
+  QUICK_LIST_CONTAINER_ID,
+  readQuickListTasks,
+  readQuickListSubtasks,
+  writeQuickListToCache,
+  type TaskRecord,
+  type SubtaskRecord,
+} from './idbGoals'
 import { getCurrentUserId, GUEST_USER_ID, onUserChange } from './namespaceManager'
+
+// ── Re-exports for transition ────────────────────────────────────────────────
+
+/** @deprecated Use TaskRecord from idbGoals instead */
+export type QuickItem = TaskRecord & { subtasks: SubtaskRecord[] }
+/** @deprecated Use SubtaskRecord from idbGoals instead */
+export type QuickSubtask = SubtaskRecord
+
+/** Bundled type: a TaskRecord with its subtasks attached for convenience. */
+export type QuickListEntry = TaskRecord & { subtasks: SubtaskRecord[] }
+
+// ── Events ───────────────────────────────────────────────────────────────────
 
 export const QUICK_LIST_UPDATE_EVENT = 'nc-quick-list:updated'
 /** @deprecated Use GUEST_USER_ID from namespaceManager instead */
 export const QUICK_LIST_GUEST_USER_ID = GUEST_USER_ID
 export const QUICK_LIST_USER_EVENT = 'nc-quick-list:user-updated'
 
-const QUICK_LIST_DEFAULT_ITEMS: QuickItem[] = [
+// ── Default quick list items ─────────────────────────────────────────────────
+
+const QUICK_LIST_DEFAULT_ITEMS: Array<{
+  id: string
+  text: string
+  completed: boolean
+  notes: string
+  difficulty: 'none' | 'green' | 'yellow' | 'red'
+  priority: boolean
+  subtasks?: Array<{ id: string; text: string; completed: boolean }>
+}> = [
   {
     id: 'quick-groceries',
-    text: 'Groceries – restock basics',
+    text: 'Groceries \u2013 restock basics',
     completed: false,
-    sortIndex: 0,
     notes: 'Think breakfast, greens, grab-and-go snacks.',
     difficulty: 'green',
     priority: true,
     subtasks: [
-      { id: 'quick-groceries-1', text: 'Fruit + greens', completed: false, sortIndex: 0 },
-      { id: 'quick-groceries-2', text: 'Breakfast staples', completed: false, sortIndex: 1 },
-      { id: 'quick-groceries-3', text: 'Snacks / treats', completed: false, sortIndex: 2 },
+      { id: 'quick-groceries-1', text: 'Fruit + greens', completed: false },
+      { id: 'quick-groceries-2', text: 'Breakfast staples', completed: false },
+      { id: 'quick-groceries-3', text: 'Snacks / treats', completed: false },
     ],
   },
   {
     id: 'quick-laundry',
     text: 'Laundry + fold',
     completed: false,
-    sortIndex: 1,
     notes: 'Start a load before work, fold during a show.',
     difficulty: 'green',
     priority: false,
@@ -59,7 +71,6 @@ const QUICK_LIST_DEFAULT_ITEMS: QuickItem[] = [
     id: 'quick-clean',
     text: '10-min reset: tidy desk & surfaces',
     completed: false,
-    sortIndex: 2,
     notes: 'Clear cups, wipe surfaces, light candle or diffuser.',
     difficulty: 'yellow',
     priority: false,
@@ -68,7 +79,6 @@ const QUICK_LIST_DEFAULT_ITEMS: QuickItem[] = [
     id: 'quick-bills',
     text: 'Pay bills & snapshot budget',
     completed: false,
-    sortIndex: 3,
     notes: 'Autopay check + log any big expenses.',
     difficulty: 'yellow',
     priority: false,
@@ -77,188 +87,217 @@ const QUICK_LIST_DEFAULT_ITEMS: QuickItem[] = [
     id: 'quick-social',
     text: 'Send a check-in text',
     completed: false,
-    sortIndex: 4,
-    notes: 'Ping a friend/family member you’ve been thinking about.',
+    notes: "Ping a friend/family member you\u2019ve been thinking about.",
     difficulty: 'green',
     priority: false,
   },
 ]
 
-const getDefaultQuickList = (): QuickItem[] =>
-  QUICK_LIST_DEFAULT_ITEMS.map((item, index) => ({
-    ...item,
-    sortIndex: index,
-    subtasks:
-      item.subtasks?.map((subtask, subIndex) => ({
-        ...subtask,
-        sortIndex: subIndex,
-      })) ?? [],
-  }))
+// ── Conversion helpers ───────────────────────────────────────────────────────
+
+/** Convert legacy QuickItem[] (from localStorage) to TaskRecord[] + SubtaskRecord[]. */
+export function convertQuickItemsToRecords(
+  userId: string,
+  items: unknown[],
+): { tasks: TaskRecord[]; subtasks: SubtaskRecord[] } {
+  const tasks: TaskRecord[] = []
+  const subtasks: SubtaskRecord[] = []
+  const sanitized = sanitizeLegacyItems(items)
+  sanitized.forEach((item, idx) => {
+    tasks.push({
+      id: item.id,
+      userId,
+      containerId: QUICK_LIST_CONTAINER_ID,
+      text: item.text,
+      completed: item.completed,
+      difficulty: item.difficulty ?? 'none',
+      priority: item.priority ?? false,
+      notes: item.notes,
+      sortIndex: idx,
+      updatedAt: item.updatedAt,
+    })
+    const subs = Array.isArray(item.subtasks) ? item.subtasks : []
+    subs.forEach((sub: any, subIdx: number) => {
+      if (!sub || typeof sub !== 'object') return
+      const subId = typeof sub.id === 'string' && sub.id.trim() ? sub.id : `${item.id}-sub-${subIdx}`
+      subtasks.push({
+        id: subId,
+        userId,
+        taskId: item.id,
+        text: typeof sub.text === 'string' ? sub.text : '',
+        completed: Boolean(sub.completed),
+        sortIndex: subIdx,
+        updatedAt: typeof sub.updatedAt === 'string' ? sub.updatedAt : undefined,
+      })
+    })
+  })
+  return { tasks, subtasks }
+}
+
+/** Generate default quick list records for a user. */
+export function getDefaultQuickListRecords(userId: string): { tasks: TaskRecord[]; subtasks: SubtaskRecord[] } {
+  const tasks: TaskRecord[] = []
+  const subtasks: SubtaskRecord[] = []
+  QUICK_LIST_DEFAULT_ITEMS.forEach((item, idx) => {
+    tasks.push({
+      id: item.id,
+      userId,
+      containerId: QUICK_LIST_CONTAINER_ID,
+      text: item.text,
+      completed: item.completed,
+      difficulty: item.difficulty,
+      priority: item.priority,
+      notes: item.notes,
+      sortIndex: idx,
+    })
+    ;(item.subtasks ?? []).forEach((sub, subIdx) => {
+      subtasks.push({
+        id: sub.id,
+        userId,
+        taskId: item.id,
+        text: sub.text,
+        completed: sub.completed,
+        sortIndex: subIdx,
+      })
+    })
+  })
+  return { tasks, subtasks }
+}
+
+// ── Sanitize legacy items (for migration) ────────────────────────────────────
+
+function sanitizeLegacyItems(value: unknown): any[] {
+  if (!Array.isArray(value)) return []
+  const seen = new Set<string>()
+  const out: any[] = []
+  for (const item of value) {
+    if (typeof item !== 'object' || item === null) continue
+    const v = item as any
+    const id = typeof v.id === 'string' && v.id.trim() ? v.id : null
+    if (!id || seen.has(id)) continue
+    seen.add(id)
+    out.push(v)
+  }
+  return out
+    .sort((a: any, b: any) => (Number(a.sortIndex) || 0) - (Number(b.sortIndex) || 0))
+    .map((it: any, i: number) => ({ ...it, sortIndex: i }))
+}
+
+// ── Public API ───────────────────────────────────────────────────────────────
 
 export const readQuickListOwnerId = (): string => getCurrentUserId()
 
-const sanitizeSubtask = (value: unknown, index: number): QuickSubtask | null => {
-  if (typeof value !== 'object' || value === null) return null
-  const v = value as any
-  const id = typeof v.id === 'string' && v.id.trim().length > 0 ? v.id : `ql-sub-${index}`
-  const text = typeof v.text === 'string' ? v.text : ''
-  const completed = Boolean(v.completed)
-  const sortIndex = Number.isFinite(v.sortIndex) ? Number(v.sortIndex) : index
-  const updatedAt = typeof v.updatedAt === 'string' ? v.updatedAt : undefined
-  return { id, text, completed, sortIndex, updatedAt }
-}
-
-const sanitizeSubtasks = (value: unknown): QuickSubtask[] => {
-  if (!Array.isArray(value)) return []
-  const seen = new Set<string>()
-  const out: QuickSubtask[] = []
-  value.forEach((item, i) => {
-    const s = sanitizeSubtask(item, i)
-    if (!s) return
-    if (seen.has(s.id)) return
-    seen.add(s.id)
-    out.push(s)
-  })
-  return out
-    .sort((a, b) => a.sortIndex - b.sortIndex)
-    .map((it, i) => ({ ...it, sortIndex: i }))
-}
-
-const sanitizeItem = (value: unknown, index: number): QuickItem | null => {
-  if (typeof value !== 'object' || value === null) return null
-  const v = value as any
-  const id = typeof v.id === 'string' && v.id.trim().length > 0 ? v.id : null
-  const text = typeof v.text === 'string' ? v.text : ''
-  const completed = Boolean(v.completed)
-  const sortIndex = Number.isFinite(v.sortIndex) ? Number(v.sortIndex) : index
-  const updatedAt = typeof v.updatedAt === 'string' ? v.updatedAt : undefined
-  if (!id) return null
-  const notes = typeof v.notes === 'string' ? v.notes : ''
-  const subtasks = sanitizeSubtasks(v.subtasks)
-  const expanded = Boolean(v.expanded)
-  const subtasksCollapsed = Boolean(v.subtasksCollapsed)
-  const notesCollapsed = Boolean(v.notesCollapsed)
-  const difficulty: QuickItem['difficulty'] =
-    v.difficulty === 'green' || v.difficulty === 'yellow' || v.difficulty === 'red' || v.difficulty === 'none'
-      ? v.difficulty
-      : 'none'
-  const priority = Boolean(v.priority)
-  return {
-    id,
-    text,
-    completed,
-    sortIndex,
-    updatedAt,
-    notes,
-    subtasks,
-    expanded,
-    subtasksCollapsed,
-    notesCollapsed,
-    difficulty,
-    priority,
-  }
-}
-
-export const sanitizeQuickList = (value: unknown): QuickItem[] => {
-  if (!Array.isArray(value)) return []
-  const seen = new Set<string>()
-  const out: QuickItem[] = []
-  value.forEach((item, i) => {
-    const s = sanitizeItem(item, i)
-    if (!s) return
-    if (seen.has(s.id)) return
-    seen.add(s.id)
-    out.push(s)
-  })
-  // normalize sortIndex sequentially
-  return out
-    .sort((a, b) => a.sortIndex - b.sortIndex)
-    .map((it, i) => ({ ...it, sortIndex: i }))
-}
-
-export const readStoredQuickList = (): QuickItem[] => {
+/** Read quick list items with subtasks bundled (sync from cache). */
+export const readStoredQuickList = (): QuickListEntry[] => {
   if (typeof window === 'undefined') return []
-  try {
-    const userId = getCurrentUserId()
-    const parsed = storage.domain.quickList.get(userId)
-    const isGuestContext = userId === GUEST_USER_ID
-    if (!parsed) {
-      if (isGuestContext) {
-        return writeStoredQuickList(getDefaultQuickList())
-      }
-      return []
-    }
-    const sanitized = sanitizeQuickList(parsed)
-    if (sanitized.length > 0) {
-      return sanitized
-    }
-    if (Array.isArray(parsed) && (parsed as any[]).length === 0) {
-      return []
-    }
-    if (isGuestContext) {
-      return writeStoredQuickList(getDefaultQuickList())
-    }
-    return sanitized
-  } catch {
-    return []
+  const userId = getCurrentUserId()
+  const tasks = readQuickListTasks(userId)
+
+  if (tasks.length === 0 && userId === GUEST_USER_ID) {
+    // Seed defaults for guest
+    return writeStoredQuickList(bundleQuickList(userId))
   }
+
+  return bundleFromCache(userId, tasks)
 }
 
-export const writeStoredQuickList = (items: QuickItem[]): QuickItem[] => {
-  const normalized = sanitizeQuickList(items)
-  storage.domain.quickList.set(getCurrentUserId(), normalized)
+/** Write quick list items (splits tasks + subtasks, writes to IDB cache). */
+export const writeStoredQuickList = (items: QuickListEntry[]): QuickListEntry[] => {
+  const userId = getCurrentUserId()
+  const tasks: TaskRecord[] = []
+  const subtasks: SubtaskRecord[] = []
+
+  items.forEach((entry, idx) => {
+    const { subtasks: entrySubs, ...task } = entry
+    tasks.push({ ...task, sortIndex: idx, userId, containerId: QUICK_LIST_CONTAINER_ID })
+    ;(entrySubs ?? []).forEach((sub, subIdx) => {
+      subtasks.push({ ...sub, sortIndex: subIdx, userId, taskId: task.id })
+    })
+  })
+
+  writeQuickListToCache(userId, tasks, subtasks)
+
+  const result = bundleFromCache(userId, tasks)
   if (typeof window !== 'undefined') {
     try {
-      window.dispatchEvent(new CustomEvent<QuickItem[]>(QUICK_LIST_UPDATE_EVENT, { detail: normalized }))
+      window.dispatchEvent(new CustomEvent(QUICK_LIST_UPDATE_EVENT, { detail: result }))
     } catch {}
   }
-  return normalized
+  return result
 }
 
-// Namespace change listener: seed guest defaults or clear for auth user
-if (typeof window !== 'undefined') {
-  onUserChange((previous, next) => {
-    if (next === GUEST_USER_ID) {
-      if (previous !== GUEST_USER_ID) {
-        writeStoredQuickList(getDefaultQuickList())
-      }
-    } else {
-      writeStoredQuickList([])
-    }
-    try {
-      window.dispatchEvent(new Event(QUICK_LIST_USER_EVENT))
-    } catch {}
-  })
-}
-
-export const subscribeQuickList = (cb: (items: QuickItem[]) => void): (() => void) => {
+/** Subscribe to quick list updates. */
+export const subscribeQuickList = (cb: (items: QuickListEntry[]) => void): (() => void) => {
   if (typeof window === 'undefined') return () => {}
   const handler = (ev: Event) => {
-    const ce = ev as CustomEvent<QuickItem[]>
-    if (Array.isArray(ce.detail)) cb(sanitizeQuickList(ce.detail))
+    const ce = ev as CustomEvent<QuickListEntry[]>
+    if (Array.isArray(ce.detail)) cb(ce.detail)
     else cb(readStoredQuickList())
   }
   window.addEventListener(QUICK_LIST_UPDATE_EVENT, handler as EventListener)
   return () => window.removeEventListener(QUICK_LIST_UPDATE_EVENT, handler as EventListener)
 }
 
-// Set up cross-tab sync via storage events
-if (typeof window !== 'undefined') {
-  const handleStorageChange = (event: StorageEvent) => {
-    // Check if the change is for a quicklist key (any user)
-    if (event.key && event.key.startsWith(STORAGE_KEYS.quickList + '::')) {
-      try {
-        const newValue = event.newValue
-        if (newValue) {
-          const items = JSON.parse(newValue) as QuickItem[]
-          // Dispatch custom event so all listeners in this tab get updated
-          window.dispatchEvent(new CustomEvent<QuickItem[]>(QUICK_LIST_UPDATE_EVENT, { detail: items }))
-        }
-      } catch {
-        // ignore parse errors
-      }
-    }
+/** @deprecated Keep for bootstrap migration compatibility. */
+export const sanitizeQuickList = sanitizeLegacyItems
+
+// ── Internal helpers ─────────────────────────────────────────────────────────
+
+/** Bundle tasks + subtasks from cache into QuickListEntry[]. */
+function bundleFromCache(userId: string, tasks: TaskRecord[]): QuickListEntry[] {
+  const allSubtasks = readQuickListSubtasks(userId)
+  const subtasksByTask = new Map<string, SubtaskRecord[]>()
+  for (const s of allSubtasks) {
+    const list = subtasksByTask.get(s.taskId) ?? []
+    list.push(s)
+    subtasksByTask.set(s.taskId, list)
   }
-  
-  window.addEventListener('storage', handleStorageChange)
+
+  return tasks
+    .slice()
+    .sort((a, b) => a.sortIndex - b.sortIndex)
+    .map((task) => ({
+      ...task,
+      subtasks: (subtasksByTask.get(task.id) ?? []).slice().sort((a, b) => a.sortIndex - b.sortIndex),
+    }))
+}
+
+/** Bundle default items for guest (when cache is empty). */
+function bundleQuickList(userId: string): QuickListEntry[] {
+  const { tasks, subtasks } = getDefaultQuickListRecords(userId)
+  writeQuickListToCache(userId, tasks, subtasks)
+  const subtasksByTask = new Map<string, SubtaskRecord[]>()
+  for (const s of subtasks) {
+    const list = subtasksByTask.get(s.taskId) ?? []
+    list.push(s)
+    subtasksByTask.set(s.taskId, list)
+  }
+  return tasks.map((task) => ({
+    ...task,
+    subtasks: (subtasksByTask.get(task.id) ?? []).slice().sort((a, b) => a.sortIndex - b.sortIndex),
+  }))
+}
+
+// ── Namespace change listener ────────────────────────────────────────────────
+
+if (typeof window !== 'undefined') {
+  onUserChange((previous, next) => {
+    if (next === GUEST_USER_ID) {
+      if (previous !== GUEST_USER_ID) {
+        // Seed guest defaults
+        const { tasks, subtasks } = getDefaultQuickListRecords(next)
+        writeQuickListToCache(next, tasks, subtasks)
+        try {
+          const entries = bundleFromCache(next, tasks)
+          window.dispatchEvent(new CustomEvent(QUICK_LIST_UPDATE_EVENT, { detail: entries }))
+        } catch {}
+      }
+    } else {
+      // Clear QL cache for new auth user (will be populated by sync)
+      writeQuickListToCache(next, [], [])
+    }
+    try {
+      window.dispatchEvent(new Event(QUICK_LIST_USER_EVENT))
+    } catch {}
+  })
 }
