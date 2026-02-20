@@ -1,15 +1,23 @@
 /**
- * Low-level IndexedDB wrapper.
+ * Low-level IndexedDB setup.
  *
- * DB name: "taskwatch", single object store "domain".
- * Records: { key: string, value: unknown }
- *
- * All domain data is stored as scoped keys like "goals::userId".
+ * DB name: "taskwatch"
+ * 4 object stores: goals, buckets, tasks, subtasks
+ * Each store uses `id` (UUID) as keyPath with a `userId` index
+ * for per-user scoping, plus FK indexes for parent lookups.
  */
 
 const DB_NAME = 'taskwatch'
 const DB_VERSION = 1
-const STORE_NAME = 'domain'
+
+export const STORE = {
+  goals: 'goals',
+  buckets: 'buckets',
+  tasks: 'tasks',
+  subtasks: 'subtasks',
+} as const
+
+export type StoreName = (typeof STORE)[keyof typeof STORE]
 
 let dbPromise: Promise<IDBDatabase> | null = null
 
@@ -19,8 +27,32 @@ export function openDB(): Promise<IDBDatabase> {
     const request = indexedDB.open(DB_NAME, DB_VERSION)
     request.onupgradeneeded = () => {
       const db = request.result
-      if (!db.objectStoreNames.contains(STORE_NAME)) {
-        db.createObjectStore(STORE_NAME, { keyPath: 'key' })
+
+      // goals: id (keyPath), userId index
+      if (!db.objectStoreNames.contains(STORE.goals)) {
+        const store = db.createObjectStore(STORE.goals, { keyPath: 'id' })
+        store.createIndex('userId', 'userId', { unique: false })
+      }
+
+      // buckets: id (keyPath), userId + goalId indexes
+      if (!db.objectStoreNames.contains(STORE.buckets)) {
+        const store = db.createObjectStore(STORE.buckets, { keyPath: 'id' })
+        store.createIndex('userId', 'userId', { unique: false })
+        store.createIndex('goalId', 'goalId', { unique: false })
+      }
+
+      // tasks: id (keyPath), userId + containerId indexes
+      if (!db.objectStoreNames.contains(STORE.tasks)) {
+        const store = db.createObjectStore(STORE.tasks, { keyPath: 'id' })
+        store.createIndex('userId', 'userId', { unique: false })
+        store.createIndex('containerId', 'containerId', { unique: false })
+      }
+
+      // subtasks: id (keyPath), userId + taskId indexes
+      if (!db.objectStoreNames.contains(STORE.subtasks)) {
+        const store = db.createObjectStore(STORE.subtasks, { keyPath: 'id' })
+        store.createIndex('userId', 'userId', { unique: false })
+        store.createIndex('taskId', 'taskId', { unique: false })
       }
     }
     request.onsuccess = () => resolve(request.result)
@@ -30,40 +62,4 @@ export function openDB(): Promise<IDBDatabase> {
     }
   })
   return dbPromise
-}
-
-export async function idbGet<T>(key: string): Promise<T | null> {
-  const db = await openDB()
-  return new Promise<T | null>((resolve, reject) => {
-    const tx = db.transaction(STORE_NAME, 'readonly')
-    const store = tx.objectStore(STORE_NAME)
-    const request = store.get(key)
-    request.onsuccess = () => {
-      const record = request.result as { key: string; value: T } | undefined
-      resolve(record ? record.value : null)
-    }
-    request.onerror = () => reject(request.error)
-  })
-}
-
-export async function idbSet<T>(key: string, value: T): Promise<void> {
-  const db = await openDB()
-  return new Promise<void>((resolve, reject) => {
-    const tx = db.transaction(STORE_NAME, 'readwrite')
-    const store = tx.objectStore(STORE_NAME)
-    store.put({ key, value })
-    tx.oncomplete = () => resolve()
-    tx.onerror = () => reject(tx.error)
-  })
-}
-
-export async function idbRemove(key: string): Promise<void> {
-  const db = await openDB()
-  return new Promise<void>((resolve, reject) => {
-    const tx = db.transaction(STORE_NAME, 'readwrite')
-    const store = tx.objectStore(STORE_NAME)
-    store.delete(key)
-    tx.oncomplete = () => resolve()
-    tx.onerror = () => reject(tx.error)
-  })
 }

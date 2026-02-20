@@ -1,23 +1,27 @@
 /**
  * Goals IDB layer — normalized flat tables with in-memory cache.
  *
- * Stores 4 entity types (goals, buckets, tasks, subtasks) as separate
- * arrays in IndexedDB, keyed by userId. Provides sync reads via an
- * in-memory cache that is hydrated at boot before React mounts.
+ * 4 IDB object stores (goals, buckets, tasks, subtasks), each with
+ * individual records keyed by UUID. Records include a `userId` field
+ * for per-user scoping via IDB indexes.
+ *
+ * In-memory cache provides sync reads. Writes go to cache immediately
+ * and are flushed to IDB asynchronously (write-behind).
  *
  * The rest of the app still works with nested GoalSnapshot[] — the
  * flatten/assemble helpers handle the conversion at the boundary.
  */
 
-import { idbGet, idbSet, idbRemove } from './idbStore'
+import { openDB, STORE } from './idbStore'
 import { storage } from './storage'
 import type { GoalSnapshot, GoalBucketSnapshot, GoalTaskSnapshot, GoalTaskSubtaskSnapshot } from './goalsSync'
 import { DEFAULT_SURFACE_STYLE, ensureSurfaceStyle, type SurfaceStyle } from './surfaceStyles'
 
-// ── Record types ────────────────────────────────────────────────────────────
+// ── Record types (include userId for IDB indexing) ──────────────────────────
 
 export type GoalRecord = {
   id: string
+  userId: string
   name: string
   starred: boolean
   archived: boolean
@@ -30,6 +34,7 @@ export type GoalRecord = {
 
 export type BucketRecord = {
   id: string
+  userId: string
   goalId: string
   name: string
   favorite: boolean
@@ -42,6 +47,7 @@ export type BucketRecord = {
 
 export type TaskRecord = {
   id: string
+  userId: string
   containerId: string
   text: string
   completed: boolean
@@ -55,6 +61,7 @@ export type TaskRecord = {
 
 export type SubtaskRecord = {
   id: string
+  userId: string
   taskId: string
   text: string
   completed: boolean
@@ -62,13 +69,6 @@ export type SubtaskRecord = {
   createdAt?: string
   updatedAt?: string
 }
-
-// ── IDB key helpers ─────────────────────────────────────────────────────────
-
-const goalsKey = (userId: string) => `goals::${userId}`
-const bucketsKey = (userId: string) => `buckets::${userId}`
-const tasksKey = (userId: string) => `tasks::${userId}`
-const subtasksKey = (userId: string) => `subtasks::${userId}`
 
 // ── In-memory cache ─────────────────────────────────────────────────────────
 
@@ -82,6 +82,65 @@ const cache = {
 // Track which users have been hydrated
 const hydratedUsers = new Set<string>()
 
+// ── IDB helpers ─────────────────────────────────────────────────────────────
+
+/** Read all records from an IDB store where userId index matches. */
+async function queryByUserId<T>(storeName: string, userId: string): Promise<T[]> {
+  const db = await openDB()
+  return new Promise<T[]>((resolve, reject) => {
+    const tx = db.transaction(storeName, 'readonly')
+    const store = tx.objectStore(storeName)
+    const index = store.index('userId')
+    const request = index.getAll(userId)
+    request.onsuccess = () => resolve(request.result as T[])
+    request.onerror = () => reject(request.error)
+  })
+}
+
+/** Delete all records from an IDB store where userId index matches. */
+async function deleteByUserId(storeName: string, userId: string): Promise<void> {
+  const db = await openDB()
+  return new Promise<void>((resolve, reject) => {
+    const tx = db.transaction(storeName, 'readwrite')
+    const store = tx.objectStore(storeName)
+    const index = store.index('userId')
+    const request = index.openKeyCursor(userId)
+    request.onsuccess = () => {
+      const cursor = request.result
+      if (cursor) {
+        store.delete(cursor.primaryKey)
+        cursor.continue()
+      }
+    }
+    tx.oncomplete = () => resolve()
+    tx.onerror = () => reject(tx.error)
+  })
+}
+
+/** Replace all records for a user in a single store (delete old + insert new). */
+async function replaceUserRecords<T>(storeName: string, userId: string, records: T[]): Promise<void> {
+  const db = await openDB()
+  return new Promise<void>((resolve, reject) => {
+    const tx = db.transaction(storeName, 'readwrite')
+    const store = tx.objectStore(storeName)
+    // Delete existing records for this user
+    const index = store.index('userId')
+    const cursorReq = index.openKeyCursor(userId)
+    cursorReq.onsuccess = () => {
+      const cursor = cursorReq.result
+      if (cursor) {
+        store.delete(cursor.primaryKey)
+        cursor.continue()
+      } else {
+        // All old records deleted — insert new ones
+        records.forEach((record) => store.put(record))
+      }
+    }
+    tx.oncomplete = () => resolve()
+    tx.onerror = () => reject(tx.error)
+  })
+}
+
 // ── Cache accessors (sync read, async write-behind) ─────────────────────────
 
 export const goalsCache = {
@@ -90,11 +149,11 @@ export const goalsCache = {
   },
   set(userId: string, value: GoalRecord[]): void {
     cache.goals.set(userId, value)
-    idbSet(goalsKey(userId), value).catch(() => {})
+    replaceUserRecords(STORE.goals, userId, value).catch(() => {})
   },
   remove(userId: string): void {
     cache.goals.delete(userId)
-    idbRemove(goalsKey(userId)).catch(() => {})
+    deleteByUserId(STORE.goals, userId).catch(() => {})
   },
 }
 
@@ -104,11 +163,11 @@ export const bucketsCache = {
   },
   set(userId: string, value: BucketRecord[]): void {
     cache.buckets.set(userId, value)
-    idbSet(bucketsKey(userId), value).catch(() => {})
+    replaceUserRecords(STORE.buckets, userId, value).catch(() => {})
   },
   remove(userId: string): void {
     cache.buckets.delete(userId)
-    idbRemove(bucketsKey(userId)).catch(() => {})
+    deleteByUserId(STORE.buckets, userId).catch(() => {})
   },
 }
 
@@ -118,11 +177,11 @@ export const tasksCache = {
   },
   set(userId: string, value: TaskRecord[]): void {
     cache.tasks.set(userId, value)
-    idbSet(tasksKey(userId), value).catch(() => {})
+    replaceUserRecords(STORE.tasks, userId, value).catch(() => {})
   },
   remove(userId: string): void {
     cache.tasks.delete(userId)
-    idbRemove(tasksKey(userId)).catch(() => {})
+    deleteByUserId(STORE.tasks, userId).catch(() => {})
   },
 }
 
@@ -132,17 +191,17 @@ export const subtasksCache = {
   },
   set(userId: string, value: SubtaskRecord[]): void {
     cache.subtasks.set(userId, value)
-    idbSet(subtasksKey(userId), value).catch(() => {})
+    replaceUserRecords(STORE.subtasks, userId, value).catch(() => {})
   },
   remove(userId: string): void {
     cache.subtasks.delete(userId)
-    idbRemove(subtasksKey(userId)).catch(() => {})
+    deleteByUserId(STORE.subtasks, userId).catch(() => {})
   },
 }
 
 // ── Flatten: GoalSnapshot[] → 4 flat record arrays ─────────────────────────
 
-export function flattenSnapshot(snapshot: GoalSnapshot[]): {
+export function flattenSnapshot(userId: string, snapshot: GoalSnapshot[]): {
   goals: GoalRecord[]
   buckets: BucketRecord[]
   tasks: TaskRecord[]
@@ -156,6 +215,7 @@ export function flattenSnapshot(snapshot: GoalSnapshot[]): {
   snapshot.forEach((goal, goalIdx) => {
     goals.push({
       id: goal.id,
+      userId,
       name: goal.name,
       starred: goal.starred,
       archived: goal.archived,
@@ -167,6 +227,7 @@ export function flattenSnapshot(snapshot: GoalSnapshot[]): {
     goal.buckets.forEach((bucket, bucketIdx) => {
       buckets.push({
         id: bucket.id,
+        userId,
         goalId: goal.id,
         name: bucket.name,
         favorite: bucket.favorite,
@@ -178,6 +239,7 @@ export function flattenSnapshot(snapshot: GoalSnapshot[]): {
       bucket.tasks.forEach((task, taskIdx) => {
         tasks.push({
           id: task.id,
+          userId,
           containerId: bucket.id,
           text: task.text,
           completed: task.completed,
@@ -191,6 +253,7 @@ export function flattenSnapshot(snapshot: GoalSnapshot[]): {
         task.subtasks.forEach((subtask, subtaskIdx) => {
           subtasks.push({
             id: subtask.id,
+            userId,
             taskId: task.id,
             text: subtask.text,
             completed: subtask.completed,
@@ -286,7 +349,7 @@ export function assembleSnapshot(userId: string): GoalSnapshot[] {
 // ── Write snapshot to IDB cache (flatten + write all 4 caches) ──────────────
 
 export function writeGoalsToCache(userId: string, snapshot: GoalSnapshot[]): void {
-  const { goals, buckets, tasks, subtasks } = flattenSnapshot(snapshot)
+  const { goals, buckets, tasks, subtasks } = flattenSnapshot(userId, snapshot)
   goalsCache.set(userId, goals)
   bucketsCache.set(userId, buckets)
   tasksCache.set(userId, tasks)
@@ -308,20 +371,20 @@ export async function hydrateGoalsData(userId: string): Promise<void> {
   if (hydratedUsers.has(userId)) return
 
   try {
-    // Try IDB first
+    // Try IDB first — query each store by userId index
     const [idbGoals, idbBuckets, idbTasks, idbSubtasks] = await Promise.all([
-      idbGet<GoalRecord[]>(goalsKey(userId)),
-      idbGet<BucketRecord[]>(bucketsKey(userId)),
-      idbGet<TaskRecord[]>(tasksKey(userId)),
-      idbGet<SubtaskRecord[]>(subtasksKey(userId)),
+      queryByUserId<GoalRecord>(STORE.goals, userId),
+      queryByUserId<BucketRecord>(STORE.buckets, userId),
+      queryByUserId<TaskRecord>(STORE.tasks, userId),
+      queryByUserId<SubtaskRecord>(STORE.subtasks, userId),
     ])
 
-    if (idbGoals !== null) {
+    if (idbGoals.length > 0) {
       // IDB has data — use it
       cache.goals.set(userId, idbGoals)
-      cache.buckets.set(userId, idbBuckets ?? [])
-      cache.tasks.set(userId, idbTasks ?? [])
-      cache.subtasks.set(userId, idbSubtasks ?? [])
+      cache.buckets.set(userId, idbBuckets)
+      cache.tasks.set(userId, idbTasks)
+      cache.subtasks.set(userId, idbSubtasks)
       hydratedUsers.add(userId)
       return
     }
@@ -329,23 +392,30 @@ export async function hydrateGoalsData(userId: string): Promise<void> {
     // IDB empty — try migrating from localStorage
     const lsData = storage.domain.goals.get(userId)
     if (Array.isArray(lsData) && lsData.length > 0) {
-      // Import the coercion function to validate localStorage data
+      // Dynamic import to break circular dependency (goalsSync → idbGoals)
       const { createGoalsSnapshot } = await import('./goalsSync')
       const validated = createGoalsSnapshot(lsData)
       if (validated.length > 0) {
-        const flat = flattenSnapshot(validated)
-        // Write to both cache and IDB
+        const flat = flattenSnapshot(userId, validated)
+        // Write to cache
         cache.goals.set(userId, flat.goals)
         cache.buckets.set(userId, flat.buckets)
         cache.tasks.set(userId, flat.tasks)
         cache.subtasks.set(userId, flat.subtasks)
-        // Persist to IDB
-        await Promise.all([
-          idbSet(goalsKey(userId), flat.goals),
-          idbSet(bucketsKey(userId), flat.buckets),
-          idbSet(tasksKey(userId), flat.tasks),
-          idbSet(subtasksKey(userId), flat.subtasks),
-        ])
+        // Persist individual records to IDB
+        const db = await openDB()
+        await new Promise<void>((resolve, reject) => {
+          const tx = db.transaction(
+            [STORE.goals, STORE.buckets, STORE.tasks, STORE.subtasks],
+            'readwrite',
+          )
+          flat.goals.forEach((r) => tx.objectStore(STORE.goals).put(r))
+          flat.buckets.forEach((r) => tx.objectStore(STORE.buckets).put(r))
+          flat.tasks.forEach((r) => tx.objectStore(STORE.tasks).put(r))
+          flat.subtasks.forEach((r) => tx.objectStore(STORE.subtasks).put(r))
+          tx.oncomplete = () => resolve()
+          tx.onerror = () => reject(tx.error)
+        })
         hydratedUsers.add(userId)
         return
       }
