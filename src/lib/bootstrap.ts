@@ -16,6 +16,8 @@ import { pushLifeRoutinesToSupabase, syncLifeRoutinesWithSupabase, type LifeRout
 import { GUEST_USER_ID } from './namespaceManager'
 import { createGoalsSnapshot, syncGoalsSnapshotFromSupabase } from './goalsSync'
 import { assembleSnapshot as assembleGoalsFromCache, clearGoalsCache } from './idbGoals'
+import { readAllMilestones, clearMilestonesCache } from './idbMilestones'
+import { readLifeRoutinesFromCache, clearLifeRoutinesCache } from './idbLifeRoutines'
 import { QUICK_LIST_GOAL_NAME } from './quickListRemote'
 import { DEFAULT_SURFACE_STYLE, ensureServerBucketStyle } from './surfaceStyles'
 import { pushSnapbackTriggersToSupabase, syncSnapbackTriggersFromSupabase, type SnapbackTriggerPayload } from './snapbackApi'
@@ -366,25 +368,17 @@ const pushGoalsToSupabase = async (): Promise<IdMaps> => {
 const pushMilestonesToSupabase = async (goalIdMap: Map<string, string>): Promise<void> => {
   if (typeof window === 'undefined' || !supabase) return
   
-  const map = storage.domain.milestones.get()
-  if (!map) return
+  const map = readAllMilestones(GUEST_USER_ID)
+  const goalIds = Object.keys(map)
+  if (goalIds.length === 0) return
 
   try {
-    const typedMap = map as Record<string, Array<{
-      id: string
-      name: string
-      date: string
-      completed: boolean
-      role: 'start' | 'end' | 'normal'
-      hidden?: boolean
-    }>>
-    
-    for (const [oldGoalId, milestones] of Object.entries(typedMap)) {
+    for (const [oldGoalId, milestones] of Object.entries(map)) {
       // Remap the goal ID
       const newGoalId = goalIdMap.get(oldGoalId) ?? oldGoalId
       // Skip if goal wasn't migrated (no mapping exists and ID isn't a valid UUID)
       if (!isUuid(newGoalId)) continue
-      
+
       for (const milestone of milestones) {
         await upsertGoalMilestone(newGoalId, {
           id: ensureUuid(milestone.id),
@@ -396,8 +390,8 @@ const pushMilestonesToSupabase = async (goalIdMap: Map<string, string>): Promise
         })
       }
     }
-    
-    console.log('[bootstrap] Migrated milestones for', Object.keys(map).length, 'goals')
+
+    console.log('[bootstrap] Migrated milestones for', goalIds.length, 'goals')
   } catch (e) {
     console.warn('[bootstrap] Could not migrate milestones:', e)
   }
@@ -477,9 +471,9 @@ const migrateGuestData = async (): Promise<void> => {
   )
   console.log('[bootstrap] Session history migration complete')
 
-  // Read from snapshot first (created at sign-up), fall back to guest key
+  // Read from snapshot first (created at sign-up), fall back to IDB cache
   const snapshotRoutines = storage.bootstrap.snapshotLifeRoutines.get()
-  const guestRoutines = !snapshotRoutines ? storage.domain.lifeRoutines.get('__guest__') : null
+  const guestRoutines = !snapshotRoutines ? readLifeRoutinesFromCache(GUEST_USER_ID) : null
   const routinesData = snapshotRoutines || guestRoutines
 
   console.log('[bootstrap] Life routines migration:', {
@@ -585,7 +579,8 @@ const migrateGuestData = async (): Promise<void> => {
   
   // Clear all guest data after successful migration
   // This ensures sign-out will show fresh defaults
-  storage.domain.lifeRoutines.remove('__guest__')
+  clearLifeRoutinesCache('__guest__')
+  clearMilestonesCache('__guest__')
   storage.domain.quickList.remove('__guest__')
   storage.domain.history.remove('__guest__')
   storage.domain.repeatingRules.remove('__guest__')

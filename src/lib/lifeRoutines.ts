@@ -58,8 +58,9 @@ const surfaceStyleFromColour = (colour: string | null | undefined): SurfaceStyle
   return match ? match[0] : DEFAULT_SURFACE_STYLE
 }
 
-import { storage, STORAGE_KEYS } from './storage'
+import { storage } from './storage'
 import { getCurrentUserId, GUEST_USER_ID, onUserChange } from './namespaceManager'
+import { readLifeRoutinesFromCache, writeLifeRoutinesToCache } from './idbLifeRoutines'
 
 export const LIFE_ROUTINE_UPDATE_EVENT = 'nc-life-routines:updated'
 /** @deprecated Use GUEST_USER_ID from namespaceManager instead */
@@ -236,7 +237,7 @@ const storeLifeRoutinesLocal = (routines: LifeRoutineConfig[], userId?: string |
   
   if (typeof window !== 'undefined') {
     try {
-      storage.domain.lifeRoutines.set(userId ?? getCurrentUserId(), normalized)
+      writeLifeRoutinesToCache(userId ?? getCurrentUserId(), normalized)
       window.dispatchEvent(new CustomEvent(LIFE_ROUTINE_UPDATE_EVENT, { detail: normalized }))
     } catch {
       // ignore storage errors
@@ -245,26 +246,8 @@ const storeLifeRoutinesLocal = (routines: LifeRoutineConfig[], userId?: string |
   return normalized
 }
 
-// Set up cross-tab sync via storage events
-if (typeof window !== 'undefined') {
-  const handleStorageChange = (event: StorageEvent) => {
-    // Check if the change is for a life routines key
-    if (event.key && event.key.startsWith(STORAGE_KEYS.lifeRoutines)) {
-      try {
-        const newValue = event.newValue
-        if (newValue) {
-          const routines = JSON.parse(newValue) as LifeRoutineConfig[]
-          // Dispatch custom event so all listeners in this tab get updated
-          window.dispatchEvent(new CustomEvent(LIFE_ROUTINE_UPDATE_EVENT, { detail: routines }))
-        }
-      } catch {
-        // ignore parse errors
-      }
-    }
-  }
-  
-  window.addEventListener('storage', handleStorageChange)
-}
+// Cross-tab sync for life routines removed — IDB is now the primary store.
+// Cross-tab sync will be added back via BroadcastChannel in a future step.
 
 
 
@@ -287,9 +270,9 @@ const releaseLifeRoutineSyncLock = (userId: string): void => {
 
 export const readLifeRoutineOwnerId = (): string => getCurrentUserId()
 
-// Read raw local value without default seeding; returns null when key is absent
-const readRawLifeRoutinesLocal = (userId?: string | null): unknown | null => {
-  return storage.domain.lifeRoutines.get(userId ?? getCurrentUserId())
+// Read raw local value without default seeding; returns empty array when absent
+const readRawLifeRoutinesLocal = (userId?: string | null): LifeRoutineConfig[] => {
+  return readLifeRoutinesFromCache(userId ?? getCurrentUserId())
 }
 
 const mapDbRowToRoutine = (row: LifeRoutineDbRow): LifeRoutineConfig | null => {
@@ -399,8 +382,8 @@ export const readStoredLifeRoutines = (): LifeRoutineConfig[] => {
   try {
     const userId = getCurrentUserId()
     const isGuestContext = userId === GUEST_USER_ID
-    const parsed = storage.domain.lifeRoutines.get(userId)
-    if (!parsed) {
+    const parsed = readLifeRoutinesFromCache(userId)
+    if (parsed.length === 0) {
       if (isGuestContext) {
         const defaults = getDefaultLifeRoutines()
         storeLifeRoutinesLocal(defaults, userId)
@@ -411,9 +394,6 @@ export const readStoredLifeRoutines = (): LifeRoutineConfig[] => {
     const sanitized = sanitizeLifeRoutineList(parsed)
     if (sanitized.length > 0) {
       return sanitized
-    }
-    if (Array.isArray(parsed) && (parsed as any[]).length === 0) {
-      return []
     }
     if (isGuestContext) {
       const defaults = getDefaultLifeRoutines()
@@ -444,7 +424,7 @@ if (typeof window !== 'undefined') {
   onUserChange((_previous, next) => {
     if (next === GUEST_USER_ID) {
       const existingGuest = readRawLifeRoutinesLocal(GUEST_USER_ID)
-      if (!Array.isArray(existingGuest) || existingGuest.length === 0) {
+      if (existingGuest.length === 0) {
         storeLifeRoutinesLocal(getDefaultLifeRoutines(), GUEST_USER_ID)
       }
     }

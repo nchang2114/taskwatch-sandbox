@@ -84,6 +84,8 @@ import { logDebug, logInfo, logWarn } from '../lib/logging'
 import { isRecentlyFullSynced } from '../lib/bootstrap'
 import { storage, STORAGE_KEYS } from '../lib/storage'
 import { getCurrentUserId, GUEST_USER_ID } from '../lib/namespaceManager'
+import { readPreferences, updatePreference } from '../lib/idbUserPreferences'
+import { readMilestones as readMilestonesFromCache, writeMilestones as writeMilestonesToCache } from '../lib/idbMilestones'
 
 // Minimal sync instrumentation disabled by default
 const DEBUG_SYNC = false
@@ -318,14 +320,7 @@ const readStoredQuickListExpanded = (): boolean => {
     return false
   }
   try {
-    const raw = storage.preferences.quickListExpanded.get()
-    if (raw === 'true') {
-      return true
-    }
-    if (raw === 'false') {
-      return false
-    }
-    return false
+    return readPreferences(getCurrentUserId()).quickListExpanded
   } catch {
     return false
   }
@@ -1442,9 +1437,7 @@ type Milestone = {
 const readMilestonesFor = (goalId: string): Milestone[] => {
   if (typeof window === 'undefined') return []
   try {
-    const map = storage.domain.milestones.get() ?? {}
-    const list = Array.isArray(map[goalId]) ? map[goalId] : []
-    return list
+    return readMilestonesFromCache(getCurrentUserId(), goalId)
   } catch {
     return []
   }
@@ -1452,9 +1445,7 @@ const readMilestonesFor = (goalId: string): Milestone[] => {
 const writeMilestonesFor = (goalId: string, list: Milestone[]) => {
   if (typeof window === 'undefined') return
   try {
-    const map = storage.domain.milestones.get() ?? {}
-    map[goalId] = list
-    storage.domain.milestones.set(map)
+    writeMilestonesToCache(getCurrentUserId(), goalId, list)
   } catch {}
 }
 
@@ -5911,7 +5902,7 @@ export default function GoalsPage(): ReactElement {
       return
     }
     try {
-      storage.preferences.quickListExpanded.set(quickListExpanded ? 'true' : 'false')
+      updatePreference(getCurrentUserId(), 'quickListExpanded', quickListExpanded)
     } catch {}
   }, [quickListExpanded])
   useEffect(() => {

@@ -13,8 +13,9 @@ import { MIGRATION_LOCK_STORAGE_KEY, setMigrationLock, clearMigrationLock, isLoc
 import { readCachedSessionTokens } from './lib/authStorage'
 import { storage, STORAGE_KEYS } from './lib/storage'
 import { bootstrapGuestDataIfNeeded, clearAllLocalStorage, clearLastFullSyncTimestamp } from './lib/bootstrap'
-import { setCurrentUserId } from './lib/namespaceManager'
+import { setCurrentUserId, getCurrentUserId } from './lib/namespaceManager'
 import { assembleSnapshot as assembleGoalsFromCache } from './lib/idbGoals'
+import { readPreferences, updatePreference } from './lib/idbUserPreferences'
 
 type Theme = 'light' | 'dark'
 type TabKey = 'goals' | 'focus' | 'reflection'
@@ -31,9 +32,9 @@ const getInitialTheme = (): Theme => {
     return 'dark'
   }
 
-  const stored = storage.preferences.theme.get()
-  if (stored === 'light' || stored === 'dark') {
-    return stored
+  const prefs = readPreferences(getCurrentUserId())
+  if (prefs.theme === 'light' || prefs.theme === 'dark') {
+    return prefs.theme
   }
 
   const prefersLight = window.matchMedia('(prefers-color-scheme: light)').matches
@@ -68,18 +69,14 @@ const getCurrentSystemTimezone = (): string => {
   }
 }
 
-// Read app timezone override from localStorage
+// Read app timezone override from IDB cache
 const readStoredAppTimezone = (): string | null => {
-  return storage.preferences.timezone.get()
+  return readPreferences(getCurrentUserId()).timezone
 }
 
-// Save app timezone override to localStorage
+// Save app timezone override to IDB cache
 const storeAppTimezone = (timezone: string | null): void => {
-  if (timezone) {
-    storage.preferences.timezone.set(timezone)
-  } else {
-    storage.preferences.timezone.remove()
-  }
+  updatePreference(getCurrentUserId(), 'timezone', timezone)
   try {
     // Dispatch custom event to notify components in the same tab
     window.dispatchEvent(new CustomEvent('taskwatch-timezone-changed', { detail: { timezone } }))
@@ -474,11 +471,11 @@ function MainApp() {
   const [featureModalOpen, setFeatureModalOpen] = useState(false)
   const [shortcutsPanelOpen, setShortcutsPanelOpen] = useState(false)
   const [shortcutsSearch, setShortcutsSearch] = useState('')
-  const [showMilliseconds, setShowMilliseconds] = useState(true)
-  const [use24HourTime, setUse24HourTime] = useState(false)
-  const [weekStartDay, setWeekStartDay] = useState<0 | 1>(0) // 0 = Sunday, 1 = Monday
-  const [defaultCalendarView, setDefaultCalendarView] = useState<2 | 3 | 4 | 5 | 6 | 'week'>(6)
-  const [snapToInterval, setSnapToInterval] = useState<0 | 5 | 10 | 15>(0) // 0 = none, or 5/10/15 minutes
+  const [showMilliseconds, setShowMilliseconds] = useState(() => readPreferences(getCurrentUserId()).showMilliseconds)
+  const [use24HourTime, setUse24HourTime] = useState(() => readPreferences(getCurrentUserId()).use24HourTime)
+  const [weekStartDay, setWeekStartDay] = useState<0 | 1>(() => readPreferences(getCurrentUserId()).weekStartDay)
+  const [defaultCalendarView, setDefaultCalendarView] = useState<2 | 3 | 4 | 5 | 6 | 'week'>(() => readPreferences(getCurrentUserId()).defaultCalendarView)
+  const [snapToInterval, setSnapToInterval] = useState<0 | 5 | 10 | 15>(() => readPreferences(getCurrentUserId()).snapToInterval)
   const [appTimezone, setAppTimezone] = useState<string | null>(() => readStoredAppTimezone())
   const [timezonePickerOpen, setTimezonePickerOpen] = useState(false)
   const [timezoneSearch, setTimezoneSearch] = useState('')
@@ -561,7 +558,7 @@ function MainApp() {
     }
     const prev = previousProfileRef.current
     if (prev?.email !== userProfile?.email) {
-      storage.preferences.quickListExpanded.set('false')
+      updatePreference(getCurrentUserId(), 'quickListExpanded', false)
     }
     previousProfileRef.current = userProfile ?? null
   }, [userProfile])
@@ -1238,7 +1235,7 @@ function MainApp() {
       // Reset app timezone to system default ONLY on actual auth changes (sign-in/sign-out)
       // Not on page refresh where user stays the same
       if (userActuallyChanged && typeof window !== 'undefined') {
-        storage.preferences.timezone.remove()
+        updatePreference(getCurrentUserId(), 'timezone', null)
         try {
           // Dispatch custom event to notify same-tab components (storage events only fire cross-tab)
           window.dispatchEvent(new CustomEvent('taskwatch-timezone-reset'))
@@ -1506,14 +1503,14 @@ function MainApp() {
       clearLastFullSyncTimestamp()
 
       // Preserve theme preference before clearing localStorage
-      const savedTheme = storage.preferences.theme.get()
+      const savedTheme = readPreferences(getCurrentUserId()).theme
 
       // Clear all localStorage data for a fresh guest experience
       clearAllLocalStorage()
 
-      // Restore theme preference after clearing
+      // Restore theme preference to IDB cache (will persist on next hydrate)
       if (savedTheme) {
-        storage.preferences.theme.set(savedTheme)
+        updatePreference(getCurrentUserId(), 'theme', savedTheme)
       }
       
       // Immediately reload - fresh page will have clean guest defaults
@@ -1581,7 +1578,7 @@ function MainApp() {
         document.documentElement.setAttribute('data-theme', value)
       }
       if (typeof window !== 'undefined') {
-        storage.preferences.theme.set(value)
+        updatePreference(getCurrentUserId(), 'theme', value)
         // Dispatch custom event for same-tab listeners (storage event doesn't fire in same tab)
         try {
           const event = new CustomEvent('nc-taskwatch:theme-update', { detail: value })
@@ -2046,7 +2043,7 @@ const nextThemeLabel = theme === 'dark' ? 'light' : 'dark'
               <button
                 type="button"
                 className="settings-panel__text-toggle"
-                onClick={() => setUse24HourTime(!use24HourTime)}
+                onClick={() => { const next = !use24HourTime; setUse24HourTime(next); updatePreference(getCurrentUserId(), 'use24HourTime', next) }}
               >
                 {use24HourTime ? '24h' : '12h'}
               </button>
@@ -2156,7 +2153,7 @@ const nextThemeLabel = theme === 'dark' ? 'light' : 'dark'
               <button
                 type="button"
                 className="settings-panel__text-toggle"
-                onClick={() => setShowMilliseconds(!showMilliseconds)}
+                onClick={() => { const next = !showMilliseconds; setShowMilliseconds(next); updatePreference(getCurrentUserId(), 'showMilliseconds', next) }}
               >
                 {showMilliseconds ? 'On' : 'Off'}
               </button>
@@ -2183,7 +2180,7 @@ const nextThemeLabel = theme === 'dark' ? 'light' : 'dark'
               <select
                 className="settings-panel__select"
                 value={weekStartDay}
-                onChange={(e) => setWeekStartDay(Number(e.target.value) as 0 | 1)}
+                onChange={(e) => { const val = Number(e.target.value) as 0 | 1; setWeekStartDay(val); updatePreference(getCurrentUserId(), 'weekStartDay', val) }}
               >
                 <option value={0}>Sunday</option>
                 <option value={1}>Monday</option>
@@ -2199,7 +2196,9 @@ const nextThemeLabel = theme === 'dark' ? 'light' : 'dark'
                 value={defaultCalendarView}
                 onChange={(e) => {
                   const val = e.target.value
-                  setDefaultCalendarView(val === 'week' ? 'week' : Number(val) as 2 | 3 | 4 | 5 | 6)
+                  const view = val === 'week' ? 'week' as const : Number(val) as 2 | 3 | 4 | 5 | 6
+                  setDefaultCalendarView(view)
+                  updatePreference(getCurrentUserId(), 'defaultCalendarView', view)
                 }}
               >
                 <option value={2}>2 Days</option>
@@ -2218,7 +2217,7 @@ const nextThemeLabel = theme === 'dark' ? 'light' : 'dark'
               <select
                 className="settings-panel__select"
                 value={snapToInterval}
-                onChange={(e) => setSnapToInterval(Number(e.target.value) as 0 | 5 | 10 | 15)}
+                onChange={(e) => { const val = Number(e.target.value) as 0 | 5 | 10 | 15; setSnapToInterval(val); updatePreference(getCurrentUserId(), 'snapToInterval', val) }}
               >
                 <option value={0}>None</option>
                 <option value={5}>5 min</option>
