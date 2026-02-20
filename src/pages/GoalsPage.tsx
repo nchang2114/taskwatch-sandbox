@@ -5782,7 +5782,7 @@ export default function GoalsPage(): ReactElement {
     }
     const bump = () => setLifeRoutineOwnerSignal((value) => value + 1)
     const handleStorage = (event: StorageEvent) => {
-      if (event.key === STORAGE_KEYS.lifeRoutinesUser) {
+      if (event.key === STORAGE_KEYS.currentUser) {
         bump()
       }
     }
@@ -5922,7 +5922,7 @@ export default function GoalsPage(): ReactElement {
       setQuickListOwnerSignal((value) => value + 1)
     }
     const handleStorage = (event: StorageEvent) => {
-      if (event.key === STORAGE_KEYS.quickListUser) {
+      if (event.key === STORAGE_KEYS.currentUser) {
         bump()
       }
     }

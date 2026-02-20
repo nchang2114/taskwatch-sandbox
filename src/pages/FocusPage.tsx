@@ -992,7 +992,7 @@ export function FocusPage({ viewportWidth: _viewportWidth, showMilliseconds = tr
     }
     const bump = () => setQuickListOwnerSignal((value) => value + 1)
     const handleStorage = (event: StorageEvent) => {
-      if (event.key === STORAGE_KEYS.quickListUser) {
+      if (event.key === STORAGE_KEYS.currentUser) {
         bump()
       }
     }
@@ -1011,7 +1011,7 @@ export function FocusPage({ viewportWidth: _viewportWidth, showMilliseconds = tr
       setHistoryOwnerSignal((current) => current + 1)
     }
     const handleStorage = (event: StorageEvent) => {
-      if (event.key === STORAGE_KEYS.historyUser) {
+      if (event.key === STORAGE_KEYS.currentUser) {
         bump()
       }
     }
@@ -1150,7 +1150,7 @@ export function FocusPage({ viewportWidth: _viewportWidth, showMilliseconds = tr
     }
     const bump = () => setLifeRoutineOwnerSignal((value) => value + 1)
     const handleStorage = (event: StorageEvent) => {
-      if (event.key === STORAGE_KEYS.lifeRoutinesUser) {
+      if (event.key === STORAGE_KEYS.currentUser) {
         bump()
       }
     }

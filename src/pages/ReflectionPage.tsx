@@ -5088,7 +5088,7 @@ const [showInlineExtras, setShowInlineExtras] = useState(false)
       setHistoryOwnerSignal((current) => current + 1)
     }
     const handleStorage = (event: StorageEvent) => {
-      if (event.key === STORAGE_KEYS.historyUser) {
+      if (event.key === STORAGE_KEYS.currentUser) {
         bump()
       }
     }
