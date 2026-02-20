@@ -13,12 +13,13 @@ import {
   upsertGoalMilestone,
 } from './goalsApi'
 import { pushLifeRoutinesToSupabase, syncLifeRoutinesWithSupabase, type LifeRoutineConfig } from './lifeRoutines'
-import { GOALS_GUEST_USER_ID, createGoalsSnapshot, syncGoalsSnapshotFromSupabase } from './goalsSync'
+import { GUEST_USER_ID } from './namespaceManager'
+import { createGoalsSnapshot, syncGoalsSnapshotFromSupabase } from './goalsSync'
 import { QUICK_LIST_GOAL_NAME } from './quickListRemote'
 import { DEFAULT_SURFACE_STYLE, ensureServerBucketStyle } from './surfaceStyles'
 import { pushSnapbackTriggersToSupabase, syncSnapbackTriggersFromSupabase, type SnapbackTriggerPayload } from './snapbackApi'
-import { pushRepeatingRulesToSupabase, syncRepeatingRulesFromSupabase, REPEATING_RULES_GUEST_USER_ID } from './repeatingSessions'
-import { pushAllHistoryToSupabase, syncHistoryWithSupabase, HISTORY_GUEST_USER_ID, sanitizeHistoryRecords } from './sessionHistory'
+import { pushRepeatingRulesToSupabase, syncRepeatingRulesFromSupabase } from './repeatingSessions'
+import { pushAllHistoryToSupabase, syncHistoryWithSupabase, sanitizeHistoryRecords } from './sessionHistory'
 import { storage } from './storage'
 
 // Type for ID mappings returned from migrations
@@ -205,7 +206,7 @@ const pushGoalsToSupabase = async (): Promise<IdMaps> => {
   }
   
   // Read directly from the guest key (not the current user's key)
-  const guestGoals = storage.domain.goals.get(GOALS_GUEST_USER_ID)
+  const guestGoals = storage.domain.goals.get(GUEST_USER_ID)
 
   if (!guestGoals) {
     return emptyMaps
@@ -429,7 +430,7 @@ const migrateGuestData = async (): Promise<void> => {
 
   // CRITICAL: Clear goals snapshot immediately after migration
   // The snapshot has demo IDs that will cause 400 errors if used
-  storage.domain.goals.remove(GOALS_GUEST_USER_ID)
+  storage.domain.goals.remove(GUEST_USER_ID)
   storage.bootstrap.snapshotGoals.remove()
 
   // 2. Push milestones to Supabase (using goal ID map)
@@ -437,7 +438,7 @@ const migrateGuestData = async (): Promise<void> => {
 
   // 3. Migrate repeating rules and get rule ID map
   // Read directly from the guest key (not the current user's key)
-  const guestRules = storage.domain.repeatingRules.get(REPEATING_RULES_GUEST_USER_ID)
+  const guestRules = storage.domain.repeatingRules.get(GUEST_USER_ID)
 
   let rules: { id: string; [key: string]: unknown }[] = []
   if (guestRules && Array.isArray(guestRules)) {
@@ -454,7 +455,7 @@ const migrateGuestData = async (): Promise<void> => {
 
   // 4. Migrate session history with all ID mappings
   // Read directly from the guest key (not the current user's key)
-  const guestHistory = storage.domain.history.get(HISTORY_GUEST_USER_ID)
+  const guestHistory = storage.domain.history.get(GUEST_USER_ID)
 
   let guestHistoryRecords: ReturnType<typeof sanitizeHistoryRecords> = []
   if (guestHistory) {

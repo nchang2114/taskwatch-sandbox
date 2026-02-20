@@ -4,13 +4,12 @@ import { DEMO_GOALS } from './demoGoals'
 import { fetchGoalsHierarchy } from './goalsApi'
 import { ensureSingleUserSession } from './supabaseClient'
 import { storage, STORAGE_KEYS } from './storage'
+import { getCurrentUserId, GUEST_USER_ID, onUserChange } from './namespaceManager'
 
 const EVENT_NAME = 'nc-taskwatch:goals-update'
 export const GOALS_SNAPSHOT_REQUEST_EVENT = 'nc-taskwatch:goals-snapshot-request'
-export const GOALS_GUEST_USER_ID = '__guest__'
-
-const normalizeGoalsUserId = (userId: string | null | undefined): string =>
-  typeof userId === 'string' && userId.trim().length > 0 ? userId.trim() : GOALS_GUEST_USER_ID
+/** @deprecated Use GUEST_USER_ID from namespaceManager instead */
+export const GOALS_GUEST_USER_ID = GUEST_USER_ID
 
 
 export type GoalTaskSubtaskSnapshot = {
@@ -192,9 +191,8 @@ export const publishGoalsSnapshot = (snapshot: GoalSnapshot[], userId?: string |
   if (typeof window === 'undefined') {
     return
   }
-  // Use provided userId or fall back to stored user ID
-  const effectiveUserId = userId !== undefined ? userId : readStoredGoalsSnapshotUserId()
-  storage.domain.goals.set(normalizeGoalsUserId(effectiveUserId), snapshot)
+  const effectiveUserId = userId !== undefined && userId !== null ? userId : getCurrentUserId()
+  storage.domain.goals.set(effectiveUserId, snapshot)
   const dispatch = () => {
     try {
       const event = new CustomEvent<GoalSnapshot[]>(EVENT_NAME, { detail: snapshot })
@@ -215,8 +213,7 @@ export const readStoredGoalsSnapshot = (): GoalSnapshot[] => {
     return []
   }
   try {
-    const currentUser = readStoredGoalsSnapshotUserId()
-    const parsed = storage.domain.goals.get(normalizeGoalsUserId(currentUser))
+    const parsed = storage.domain.goals.get(getCurrentUserId())
     if (!Array.isArray(parsed)) {
       return []
     }
@@ -263,21 +260,6 @@ export const subscribeToGoalsSnapshot = (
   }
 }
 
-const readStoredGoalsSnapshotUserId = (): string | null => {
-  const raw = storage.ownership.goalsUser.get()
-  if (!raw) return null
-  const trimmed = raw.trim()
-  return trimmed.length > 0 ? trimmed : null
-}
-
-const setStoredGoalsSnapshotUserId = (userId: string | null): void => {
-  if (!userId) {
-    storage.ownership.goalsUser.remove()
-  } else {
-    storage.ownership.goalsUser.set(userId)
-  }
-}
-
 const getGuestSnapshot = (): GoalSnapshot[] => {
   try {
     return createGoalsSnapshot(DEMO_GOALS as unknown as Goal[])
@@ -286,36 +268,26 @@ const getGuestSnapshot = (): GoalSnapshot[] => {
   }
 }
 
-export const ensureGoalsUser = (
-  userId: string | null,
-  options?: { suppressGuestSnapshot?: boolean },
-): void => {
-  if (typeof window === 'undefined') {
-    return
-  }
-  const normalized = normalizeGoalsUserId(userId)
-  const current = readStoredGoalsSnapshotUserId()
-  if (current === normalized) {
-    return
-  }
-  setStoredGoalsSnapshotUserId(normalized)
-  if (normalized === GOALS_GUEST_USER_ID) {
-    if (current !== GOALS_GUEST_USER_ID && !options?.suppressGuestSnapshot) {
-      const snapshot = getGuestSnapshot()
-      publishGoalsSnapshot(snapshot, normalized)
-    }
-  } else {
-    // Always clear when switching to a real user
-    // Bootstrap reads directly from ::__guest__ key, so this is safe
-    storage.domain.goals.remove(normalized)
-    try {
-      const event = new CustomEvent<GoalSnapshot[]>(EVENT_NAME, { detail: [] })
-      window.dispatchEvent(event)
-    } catch {}
-  }
-}
+export const readGoalsSnapshotOwner = (): string => getCurrentUserId()
 
-export const readGoalsSnapshotOwner = (): string | null => readStoredGoalsSnapshotUserId()
+// Namespace change listener: seed guest defaults or clear for auth user
+if (typeof window !== 'undefined') {
+  onUserChange((previous, next) => {
+    if (next === GUEST_USER_ID) {
+      if (previous !== GUEST_USER_ID) {
+        const snapshot = getGuestSnapshot()
+        publishGoalsSnapshot(snapshot, next)
+      }
+    } else {
+      // Clear when switching to a real user — bootstrap will fill it
+      storage.domain.goals.remove(next)
+      try {
+        const event = new CustomEvent<GoalSnapshot[]>(EVENT_NAME, { detail: [] })
+        window.dispatchEvent(event)
+      } catch {}
+    }
+  })
+}
 
 /**
  * Fetches goals from Supabase and publishes the snapshot.
@@ -334,15 +306,11 @@ export const syncGoalsSnapshotFromSupabase = async (): Promise<GoalSnapshot[] | 
   try {
     const result = await fetchGoalsHierarchy()
     if (!result?.goals || result.goals.length === 0) {
-      // No goals found - set user ID but publish empty snapshot
-      setStoredGoalsSnapshotUserId(session.user.id)
       publishGoalsSnapshot([])
       return []
     }
     // Convert the fetched goals to snapshot format
     const snapshot = createGoalsSnapshot(result.goals)
-    // Set the user ID in localStorage for future reads
-    setStoredGoalsSnapshotUserId(session.user.id)
     // Always publish - force update even if signature matches
     // This ensures components get the latest data after bootstrap
     publishGoalsSnapshot(snapshot)

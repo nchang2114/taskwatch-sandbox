@@ -50,11 +50,9 @@ import { DEMO_GOALS } from '../lib/demoGoals'
 import {
   LIFE_ROUTINE_UPDATE_EVENT,
   readStoredLifeRoutines,
-  readLifeRoutineOwnerId,
   sanitizeLifeRoutineList,
   syncLifeRoutinesWithSupabase,
   writeStoredLifeRoutines,
-  LIFE_ROUTINE_GUEST_USER_ID,
   LIFE_ROUTINE_USER_EVENT,
   type LifeRoutineConfig,
 } from '../lib/lifeRoutines'
@@ -72,8 +70,6 @@ import {
   readStoredQuickList,
   writeStoredQuickList,
   subscribeQuickList,
-  readQuickListOwnerId,
-  QUICK_LIST_GUEST_USER_ID,
   QUICK_LIST_USER_EVENT,
   type QuickItem,
   type QuickSubtask,
@@ -87,6 +83,7 @@ import {
 import { logDebug, logInfo, logWarn } from '../lib/logging'
 import { isRecentlyFullSynced } from '../lib/bootstrap'
 import { storage, STORAGE_KEYS } from '../lib/storage'
+import { getCurrentUserId, GUEST_USER_ID } from '../lib/namespaceManager'
 
 // Minimal sync instrumentation disabled by default
 const DEBUG_SYNC = false
@@ -5804,8 +5801,8 @@ export default function GoalsPage(): ReactElement {
     try {
       setLifeRoutineTasks(readStoredLifeRoutines())
     } catch {}
-    const ownerId = readLifeRoutineOwnerId()
-    if (!ownerId || ownerId === LIFE_ROUTINE_GUEST_USER_ID) {
+    const ownerId = getCurrentUserId()
+    if (!ownerId || ownerId === GUEST_USER_ID) {
       lifeRoutinesSyncedRef.current = true
       return
     }
@@ -5903,8 +5900,8 @@ export default function GoalsPage(): ReactElement {
       return false
     }
     try {
-      const quickUser = storage.ownership.quickListUser.get()
-      return !quickUser || quickUser === QUICK_LIST_GUEST_USER_ID
+      const quickUser = getCurrentUserId()
+      return !quickUser || quickUser === GUEST_USER_ID
     } catch {
       return false
     }
@@ -6040,8 +6037,8 @@ export default function GoalsPage(): ReactElement {
     try {
       setQuickListItems(readStoredQuickList())
     } catch {}
-    const ownerId = readQuickListOwnerId()
-    if (!ownerId || ownerId === QUICK_LIST_GUEST_USER_ID) {
+    const ownerId = getCurrentUserId()
+    if (!ownerId || ownerId === GUEST_USER_ID) {
       return
     }
     refreshQuickListFromSupabase('owner-change')

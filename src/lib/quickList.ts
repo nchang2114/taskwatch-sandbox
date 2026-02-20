@@ -24,9 +24,11 @@ export type QuickItem = {
 }
 
 import { storage, STORAGE_KEYS } from './storage'
+import { getCurrentUserId, GUEST_USER_ID, onUserChange } from './namespaceManager'
 
 export const QUICK_LIST_UPDATE_EVENT = 'nc-quick-list:updated'
-export const QUICK_LIST_GUEST_USER_ID = '__guest__'
+/** @deprecated Use GUEST_USER_ID from namespaceManager instead */
+export const QUICK_LIST_GUEST_USER_ID = GUEST_USER_ID
 export const QUICK_LIST_USER_EVENT = 'nc-quick-list:user-updated'
 
 const QUICK_LIST_DEFAULT_ITEMS: QuickItem[] = [
@@ -93,34 +95,7 @@ const getDefaultQuickList = (): QuickItem[] =>
       })) ?? [],
   }))
 
-const readStoredQuickListUserId = (): string | null => {
-  const value = storage.ownership.quickListUser.get()
-  if (!value) return null
-  const trimmed = value.trim()
-  return trimmed.length > 0 ? trimmed : null
-}
-
-const setStoredQuickListUserId = (userId: string | null): void => {
-  if (!userId) {
-    storage.ownership.quickListUser.remove()
-  } else {
-    storage.ownership.quickListUser.set(userId)
-  }
-  if (typeof window !== 'undefined') {
-    try {
-      window.dispatchEvent(new Event(QUICK_LIST_USER_EVENT))
-    } catch {}
-  }
-}
-
-const normalizeQuickListUserId = (userId: string | null | undefined): string =>
-  typeof userId === 'string' && userId.trim().length > 0 ? userId.trim() : QUICK_LIST_GUEST_USER_ID
-
-const isGuestQuickListUser = (userId: string | null): boolean =>
-  !userId || userId === QUICK_LIST_GUEST_USER_ID
-
-
-export const readQuickListOwnerId = (): string | null => readStoredQuickListUserId()
+export const readQuickListOwnerId = (): string => getCurrentUserId()
 
 const sanitizeSubtask = (value: unknown, index: number): QuickSubtask | null => {
   if (typeof value !== 'object' || value === null) return null
@@ -204,16 +179,12 @@ export const sanitizeQuickList = (value: unknown): QuickItem[] => {
 export const readStoredQuickList = (): QuickItem[] => {
   if (typeof window === 'undefined') return []
   try {
-    const currentUser = readStoredQuickListUserId()
-    const parsed = storage.domain.quickList.get(normalizeQuickListUserId(currentUser))
-    const guestContext = isGuestQuickListUser(currentUser)
+    const userId = getCurrentUserId()
+    const parsed = storage.domain.quickList.get(userId)
+    const isGuestContext = userId === GUEST_USER_ID
     if (!parsed) {
-      if (guestContext) {
-        const seeded = writeStoredQuickList(getDefaultQuickList())
-        if (!currentUser) {
-          setStoredQuickListUserId(QUICK_LIST_GUEST_USER_ID)
-        }
-        return seeded
+      if (isGuestContext) {
+        return writeStoredQuickList(getDefaultQuickList())
       }
       return []
     }
@@ -224,7 +195,7 @@ export const readStoredQuickList = (): QuickItem[] => {
     if (Array.isArray(parsed) && (parsed as any[]).length === 0) {
       return []
     }
-    if (guestContext) {
+    if (isGuestContext) {
       return writeStoredQuickList(getDefaultQuickList())
     }
     return sanitized
@@ -235,8 +206,7 @@ export const readStoredQuickList = (): QuickItem[] => {
 
 export const writeStoredQuickList = (items: QuickItem[]): QuickItem[] => {
   const normalized = sanitizeQuickList(items)
-  const currentUser = readStoredQuickListUserId()
-  storage.domain.quickList.set(normalizeQuickListUserId(currentUser), normalized)
+  storage.domain.quickList.set(getCurrentUserId(), normalized)
   if (typeof window !== 'undefined') {
     try {
       window.dispatchEvent(new CustomEvent<QuickItem[]>(QUICK_LIST_UPDATE_EVENT, { detail: normalized }))
@@ -245,21 +215,20 @@ export const writeStoredQuickList = (items: QuickItem[]): QuickItem[] => {
   return normalized
 }
 
-export const ensureQuickListUser = (userId: string | null): void => {
-  if (typeof window === 'undefined') return
-  const normalized = normalizeQuickListUserId(userId)
-  const current = readStoredQuickListUserId()
-  if (current === normalized) return
-  setStoredQuickListUserId(normalized)
-  if (normalized === QUICK_LIST_GUEST_USER_ID) {
-    if (current !== QUICK_LIST_GUEST_USER_ID) {
-      writeStoredQuickList(getDefaultQuickList())
+// Namespace change listener: seed guest defaults or clear for auth user
+if (typeof window !== 'undefined') {
+  onUserChange((previous, next) => {
+    if (next === GUEST_USER_ID) {
+      if (previous !== GUEST_USER_ID) {
+        writeStoredQuickList(getDefaultQuickList())
+      }
+    } else {
+      writeStoredQuickList([])
     }
-  } else {
-    // Always clear when switching to a real user
-    // Bootstrap reads directly from ::__guest__ key, so this is safe
-    writeStoredQuickList([])
-  }
+    try {
+      window.dispatchEvent(new Event(QUICK_LIST_USER_EVENT))
+    } catch {}
+  })
 }
 
 export const subscribeQuickList = (cb: (items: QuickItem[]) => void): (() => void) => {

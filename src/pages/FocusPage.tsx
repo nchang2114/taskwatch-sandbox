@@ -25,6 +25,7 @@ import {
 // Repeating rules fetch not needed for selector coloring; omit imports to avoid unused warnings
 // import { readRepeatingExceptions } from '../lib/repeatingExceptions'
 import { FOCUS_EVENT_TYPE, PAUSE_FOCUS_EVENT_TYPE, type FocusBroadcastDetail, type FocusBroadcastEvent } from '../lib/focusChannel'
+import { getCurrentUserId, GUEST_USER_ID } from '../lib/namespaceManager'
 import {
   createGoalsSnapshot,
   publishGoalsSnapshot,
@@ -32,7 +33,6 @@ import {
   subscribeToGoalsSnapshot,
   type GoalSnapshot,
   type GoalTaskSnapshot,
-  GOALS_GUEST_USER_ID,
 } from '../lib/goalsSync'
 import {
   DEFAULT_SURFACE_STYLE,
@@ -54,10 +54,8 @@ import {
 import {
   LIFE_ROUTINE_UPDATE_EVENT,
   readStoredLifeRoutines,
-  readLifeRoutineOwnerId,
   sanitizeLifeRoutineList,
   syncLifeRoutinesWithSupabase,
-  LIFE_ROUTINE_GUEST_USER_ID,
   LIFE_ROUTINE_USER_EVENT,
   type LifeRoutineConfig,
 } from '../lib/lifeRoutines'
@@ -65,8 +63,6 @@ import {
   readStoredQuickList,
   subscribeQuickList,
   writeStoredQuickList,
-  readQuickListOwnerId,
-  QUICK_LIST_GUEST_USER_ID,
   QUICK_LIST_USER_EVENT,
   type QuickItem,
   type QuickSubtask,
@@ -75,11 +71,9 @@ import { fetchQuickListRemoteItems } from '../lib/quickListRemote'
 import {
   CURRENT_SESSION_EVENT_NAME,
   HISTORY_EVENT_NAME,
-  HISTORY_GUEST_USER_ID,
   HISTORY_LIMIT,
   HISTORY_USER_EVENT,
   persistHistorySnapshot,
-  readHistoryOwnerId,
   readStoredHistory as readPersistedHistory,
   syncHistoryWithSupabase,
   type HistoryEntry,
@@ -963,8 +957,8 @@ export function FocusPage({ viewportWidth: _viewportWidth, showMilliseconds = tr
     if (typeof window === 'undefined') {
       return false
     }
-    const owner = storage.ownership.goalsUser.get()
-    return !owner || owner === GOALS_GUEST_USER_ID
+    const owner = getCurrentUserId()
+    return !owner || owner === GUEST_USER_ID
   }, [])
   const goalGradientById = useMemo(() => {
     const map = new Map<string, string>()
@@ -1111,8 +1105,8 @@ export function FocusPage({ viewportWidth: _viewportWidth, showMilliseconds = tr
     try {
       setQuickListItems(readStoredQuickList())
     } catch {}
-    const ownerId = readQuickListOwnerId()
-    if (!ownerId || ownerId === QUICK_LIST_GUEST_USER_ID) {
+    const ownerId = getCurrentUserId()
+    if (!ownerId || ownerId === GUEST_USER_ID) {
       return
     }
     refreshQuickListFromSupabase('owner-change')
@@ -1174,8 +1168,8 @@ export function FocusPage({ viewportWidth: _viewportWidth, showMilliseconds = tr
     try {
       setLifeRoutineTasks(readStoredLifeRoutines())
     } catch {}
-    const ownerId = readLifeRoutineOwnerId()
-    if (!ownerId || ownerId === LIFE_ROUTINE_GUEST_USER_ID) {
+    const ownerId = getCurrentUserId()
+    if (!ownerId || ownerId === GUEST_USER_ID) {
       return
     }
     let cancelled = false
@@ -1200,8 +1194,8 @@ useEffect(() => {
 }, [refreshGoalsSnapshotFromSupabase, shouldSkipGoalsRemote])
 useEffect(() => {
   if (typeof window !== 'undefined') {
-    const quickUser = storage.ownership.quickListUser.get()
-    if (!quickUser || quickUser === QUICK_LIST_GUEST_USER_ID) {
+    const quickUser = getCurrentUserId()
+    if (!quickUser || quickUser === GUEST_USER_ID) {
       return
     }
   }
@@ -1273,8 +1267,8 @@ useEffect(() => {
   }, [history])
 
   useEffect(() => {
-    const owner = readHistoryOwnerId()
-    if (!owner || owner === HISTORY_GUEST_USER_ID) {
+    const owner = getCurrentUserId()
+    if (!owner || owner === GUEST_USER_ID) {
       return
     }
     // Skip fetch if we just did a full sync (e.g. after auth callback)
@@ -1522,8 +1516,8 @@ useEffect(() => {
     const handleFocus = () => {
       if (!document.hidden) {
         refreshGoalsSnapshotFromSupabase('window-focus')
-        const quickUser = typeof window !== 'undefined' ? storage.ownership.quickListUser.get() : null
-        if (quickUser && quickUser !== QUICK_LIST_GUEST_USER_ID) {
+        const quickUser = typeof window !== 'undefined' ? getCurrentUserId() : null
+        if (quickUser && quickUser !== GUEST_USER_ID) {
           refreshQuickListFromSupabase('window-focus')
         }
       }
@@ -1531,8 +1525,8 @@ useEffect(() => {
     const handleVisibility = () => {
       if (!document.hidden) {
         refreshGoalsSnapshotFromSupabase('document-visible')
-        const quickUser = typeof window !== 'undefined' ? storage.ownership.quickListUser.get() : null
-        if (quickUser && quickUser !== QUICK_LIST_GUEST_USER_ID) {
+        const quickUser = typeof window !== 'undefined' ? getCurrentUserId() : null
+        if (quickUser && quickUser !== GUEST_USER_ID) {
           refreshQuickListFromSupabase('document-visible')
         }
       }
@@ -2182,8 +2176,8 @@ useEffect(() => {
   useEffect(() => {
     let cancelled = false
     const hydrateRepeatingRules = async () => {
-      const ownerId = readHistoryOwnerId()
-      const isGuestOwner = !ownerId || ownerId === HISTORY_GUEST_USER_ID
+      const ownerId = getCurrentUserId()
+      const isGuestOwner = !ownerId || ownerId === GUEST_USER_ID
       try {
         const localRules = readLocalRepeatingRules()
         if (!cancelled) {

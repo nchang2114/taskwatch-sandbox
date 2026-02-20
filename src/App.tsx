@@ -12,12 +12,8 @@ import { supabase, ensureSingleUserSession } from './lib/supabaseClient'
 import { MIGRATION_LOCK_STORAGE_KEY, setMigrationLock, clearMigrationLock, isLockedByAnotherTab, markMigrationComplete, clearMigrationLockIfOwned, isMigrationComplete } from './lib/authStorage'
 import { readCachedSessionTokens } from './lib/authStorage'
 import { storage, STORAGE_KEYS } from './lib/storage'
-import { ensureQuickListUser } from './lib/quickList'
-import { ensureLifeRoutineUser } from './lib/lifeRoutines'
-import { ensureHistoryUser } from './lib/sessionHistory'
-import { ensureRepeatingRulesUser } from './lib/repeatingSessions'
 import { bootstrapGuestDataIfNeeded, clearAllLocalStorage, clearLastFullSyncTimestamp } from './lib/bootstrap'
-import { ensureGoalsUser } from './lib/goalsSync'
+import { setCurrentUserId } from './lib/namespaceManager'
 
 type Theme = 'light' | 'dark'
 type TabKey = 'goals' | 'focus' | 'reflection'
@@ -1180,6 +1176,10 @@ function MainApp() {
       }
 
       try {
+        // Set namespace — triggers domain change listeners which seed
+        // guest defaults or clear data for auth users
+        setCurrentUserId(userId)
+
         if (userId) {
           // Signed-in user: bootstrap handles everything (migrate if needed, clear, sync)
           try {
@@ -1187,14 +1187,6 @@ function MainApp() {
           } catch (error) {
             console.error('[bootstrap] failed during alignLocalStoresForUser', error)
           }
-        } else {
-          // Guest mode - just ensure defaults exist if no data
-          // Don't clear existing guest work!
-          ensureQuickListUser(null)
-          ensureLifeRoutineUser(null, { suppressGuestDefaults: false })
-          ensureHistoryUser(null)
-          ensureGoalsUser(null)
-          ensureRepeatingRulesUser(null)
         }
         
         // Mark alignment as complete so other tabs don't retry

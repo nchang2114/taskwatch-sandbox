@@ -66,6 +66,9 @@ const KEYS = {
   localSnapPlans: 'nc-taskwatch-local-snap-plans',
   localSnapAliases: 'nc-taskwatch-local-snap-aliases',
 
+  // namespace
+  currentUser: 'nc-taskwatch-current-user',
+
   // locks / cross-tab coordination
   alignLock: 'nc-taskwatch-align-lock',
   alignComplete: 'nc-taskwatch-align-complete',
@@ -82,12 +85,6 @@ const KEYS = {
   snapshotQuickList: 'nc-taskwatch-bootstrap-snapshot::quick-list',
   snapshotRepeating: 'nc-taskwatch-bootstrap-snapshot::repeating',
 
-  // ownership tracking (to be removed in IndexedDB phase)
-  goalsUser: 'nc-taskwatch-goals-user',
-  historyUser: 'nc-taskwatch-session-history-user',
-  quickListUser: 'nc-taskwatch-quicklist-user',
-  lifeRoutinesUser: 'nc-taskwatch-life-routines-user',
-  repeatingUser: 'nc-taskwatch-repeating-user',
 } as const
 
 /**
@@ -324,14 +321,6 @@ export const storage = {
     snapshotRepeating: createAccessor<RepeatingSessionRule[]>(KEYS.snapshotRepeating),
   },
 
-  ownership: {
-    goalsUser: createStringAccessor(KEYS.goalsUser),
-    historyUser: createStringAccessor(KEYS.historyUser),
-    quickListUser: createStringAccessor(KEYS.quickListUser),
-    lifeRoutinesUser: createStringAccessor(KEYS.lifeRoutinesUser),
-    repeatingUser: createStringAccessor(KEYS.repeatingUser),
-  },
-
   // ── Utilities ───────────────────────────────────────────────────────────
 
   /**
@@ -360,7 +349,8 @@ export const storage = {
           key &&
           key.startsWith('nc-taskwatch-') &&
           key !== KEYS.authSession &&
-          key !== KEYS.lastAuthUserId
+          key !== KEYS.lastAuthUserId &&
+          key !== KEYS.currentUser
         ) {
           keysToRemove.push(key)
         }

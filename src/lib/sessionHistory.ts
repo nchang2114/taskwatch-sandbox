@@ -8,8 +8,11 @@ import {
 } from './surfaceStyles'
 import { storage } from './storage'
 
+import { getCurrentUserId, GUEST_USER_ID, onUserChange } from './namespaceManager'
+
 export const HISTORY_EVENT_NAME = 'nc-taskwatch:history-update'
-export const HISTORY_GUEST_USER_ID = '__guest__'
+/** @deprecated Use GUEST_USER_ID from namespaceManager instead */
+export const HISTORY_GUEST_USER_ID = GUEST_USER_ID
 export const HISTORY_USER_EVENT = 'nc-taskwatch-history-user-updated'
 export const CURRENT_SESSION_EVENT_NAME = 'nc-taskwatch:session-update'
 export const HISTORY_LIMIT = 250
@@ -110,27 +113,7 @@ const buildHistorySelectColumns = (): string => {
   }
   return columns
 }
-const getStoredHistoryUserId = (): string | null => {
-  return storage.ownership.historyUser.get()
-}
-
-const normalizeHistoryUserId = (userId: string | null | undefined): string =>
-  typeof userId === 'string' && userId.trim().length > 0 ? userId.trim() : HISTORY_GUEST_USER_ID
-
-
-export const readHistoryOwnerId = (): string | null => getStoredHistoryUserId()
-const setStoredHistoryUserId = (userId: string | null): void => {
-  if (!userId) {
-    storage.ownership.historyUser.remove()
-  } else {
-    storage.ownership.historyUser.set(userId)
-  }
-  if (typeof window !== 'undefined') {
-    try {
-      window.dispatchEvent(new Event(HISTORY_USER_EVENT))
-    } catch {}
-  }
-}
+export const readHistoryOwnerId = (): string => getCurrentUserId()
 const getErrorContext = (err: any): string => {
   if (!err) return ''
   const msg = (err.message || err.msg || err.error_description || '') as string
@@ -1006,16 +989,13 @@ const readHistoryRecords = (): HistoryRecord[] => {
     return []
   }
   try {
-    const currentUserId = getStoredHistoryUserId()
-    const parsed = storage.domain.history.get(normalizeHistoryUserId(currentUserId))
-    const guestContext = !currentUserId || currentUserId === HISTORY_GUEST_USER_ID
+    const userId = getCurrentUserId()
+    const parsed = storage.domain.history.get(userId)
+    const isGuestContext = userId === GUEST_USER_ID
     if (!parsed) {
-      if (guestContext) {
+      if (isGuestContext) {
         const sampleRecords = createSampleHistoryRecords()
         writeHistoryRecords(sampleRecords)
-        if (!currentUserId) {
-          setStoredHistoryUserId(HISTORY_GUEST_USER_ID)
-        }
         return sampleRecords
       }
       return []
@@ -1042,8 +1022,7 @@ export const purgeDeletedHistoryRecords = (): void => {
 }
 
 const writeHistoryRecords = (records: HistoryRecord[]): void => {
-  const currentUserId = getStoredHistoryUserId()
-  storage.domain.history.set(normalizeHistoryUserId(currentUserId), records)
+  storage.domain.history.set(getCurrentUserId(), records)
 }
 
 export const readStoredHistory = (): HistoryEntry[] => recordsToActiveEntries(readHistoryRecords())
@@ -1140,28 +1119,23 @@ const persistRecords = (records: HistoryRecord[]): HistoryEntry[] => {
   return activeEntries
 }
 
-export const ensureHistoryUser = (userId: string | null): void => {
-  if (typeof window === 'undefined') return
-  const normalized = normalizeHistoryUserId(userId)
-  const current = getStoredHistoryUserId()
-  if (current === normalized) {
-    return
-  }
-  setStoredHistoryUserId(normalized)
-  // Note: HISTORY_USER_EVENT is already dispatched inside setStoredHistoryUserId,
-  // so we don't dispatch it again here to avoid double-bumping the signal
-  if (normalized === HISTORY_GUEST_USER_ID) {
-    if (current !== HISTORY_GUEST_USER_ID) {
-      const samples = createSampleHistoryRecords()
-      writeHistoryRecords(samples)
-      broadcastHistoryRecords(samples)
+// Namespace change listener: seed guest defaults or clear for auth user
+if (typeof window !== 'undefined') {
+  onUserChange((previous, next) => {
+    if (next === GUEST_USER_ID) {
+      if (previous !== GUEST_USER_ID) {
+        const samples = createSampleHistoryRecords()
+        writeHistoryRecords(samples)
+        broadcastHistoryRecords(samples)
+      }
+    } else {
+      writeHistoryRecords([])
+      broadcastHistoryRecords([])
     }
-  } else {
-    // Always clear history when switching to a real user (whether from guest or another user)
-    // This prevents guest session history from persisting on sign-in
-    writeHistoryRecords([])
-    broadcastHistoryRecords([])
-  }
+    try {
+      window.dispatchEvent(new Event(HISTORY_USER_EVENT))
+    } catch {}
+  })
 }
 
 const realignHistoryWithLifeRoutineSurfaces = (): void => {
@@ -1378,7 +1352,7 @@ export const syncHistoryWithSupabase = async (): Promise<HistoryEntry[] | null> 
     }
 
   const userId = session.user.id
-  const lastUserId = getStoredHistoryUserId()
+  const lastUserId = getCurrentUserId()
   const userChanged = lastUserId !== userId
     const now = Date.now()
     const nowIso = new Date(now).toISOString()
@@ -1526,9 +1500,7 @@ export const syncHistoryWithSupabase = async (): Promise<HistoryEntry[] | null> 
     const recordList = Array.from(recordsById.values())
     const { records: enrichedRecords } = applyLifeRoutineSurfaces(recordList)
     const persisted = persistRecords(enrichedRecords)
-  if (getStoredHistoryUserId() !== userId) {
-    setStoredHistoryUserId(userId)
-  }
+  // Namespace manager is the source of truth for the current user
     return persisted
   })()
 
@@ -1590,8 +1562,8 @@ export const fetchHistoryForDateRange = async (
     }
 
     const userId = session.user.id
-    const storedUserId = getStoredHistoryUserId()
-    if (storedUserId && storedUserId !== userId) {
+    const currentUser = getCurrentUserId()
+    if (currentUser !== GUEST_USER_ID && currentUser !== userId) {
       return null
     }
 
@@ -1706,8 +1678,8 @@ export const pushPendingHistoryToSupabase = async (): Promise<void> => {
   }
 
   const userId = session.user.id
-  const lastUserId = getStoredHistoryUserId()
-  if (lastUserId !== null && lastUserId !== userId) {
+  const lastUserId = getCurrentUserId()
+  if (lastUserId !== GUEST_USER_ID && lastUserId !== userId) {
     return
   }
   const records = readHistoryRecords()
@@ -1973,5 +1945,4 @@ export const pushAllHistoryToSupabase = async (
     return
   }
   persistRecords(normalizedRecords)
-  setStoredHistoryUserId(session.user.id)
 }

@@ -24,7 +24,8 @@ import { createPortal, flushSync } from 'react-dom'
 import './ReflectionPage.css'
 import './FocusPage.css'
 import './GoalsPage.css'
-import { readStoredGoalsSnapshot, subscribeToGoalsSnapshot, publishGoalsSnapshot, createGoalsSnapshot, syncGoalsSnapshotFromSupabase, readGoalsSnapshotOwner, GOALS_GUEST_USER_ID, type GoalSnapshot } from '../lib/goalsSync'
+import { getCurrentUserId, GUEST_USER_ID } from '../lib/namespaceManager'
+import { readStoredGoalsSnapshot, subscribeToGoalsSnapshot, publishGoalsSnapshot, createGoalsSnapshot, syncGoalsSnapshotFromSupabase, type GoalSnapshot } from '../lib/goalsSync'
 import { storage, STORAGE_KEYS } from '../lib/storage'
 import { SCHEDULE_EVENT_TYPE, type ScheduleBroadcastEvent } from '../lib/scheduleChannel'
 import { broadcastPauseFocus } from '../lib/focusChannel'
@@ -45,9 +46,7 @@ import {
 import {
   CURRENT_SESSION_EVENT_NAME,
   HISTORY_EVENT_NAME,
-  HISTORY_GUEST_USER_ID,
   HISTORY_USER_EVENT,
-  readHistoryOwnerId,
   readStoredHistory as readPersistedHistory,
   persistHistorySnapshot,
   syncHistoryWithSupabase,
@@ -3932,8 +3931,8 @@ export default function ReflectionPage({ use24HourTime = false, weekStartDay = 0
     })
     
     // Save to DB if signed in
-    const ownerId = readHistoryOwnerId()
-    if (ownerId && ownerId !== HISTORY_GUEST_USER_ID && supabase) {
+    const ownerId = getCurrentUserId()
+    if (ownerId && ownerId !== GUEST_USER_ID && supabase) {
       void (async () => {
         try {
           await supabase
@@ -4103,7 +4102,7 @@ export default function ReflectionPage({ use24HourTime = false, weekStartDay = 0
   // Repeating sessions (rules fetched from backend)
   const [repeatingRules, setRepeatingRules] = useState<RepeatingSessionRule[]>(() => readLocalRepeatingRules())
   const [historyOwnerSignal, setHistoryOwnerSignal] = useState(0)
-  const historyOwnerId = useMemo(() => readHistoryOwnerId(), [historyOwnerSignal])
+  const historyOwnerId = useMemo(() => getCurrentUserId(), [historyOwnerSignal])
   const [accountCreatedAtMs, setAccountCreatedAtMs] = useState<number | null>(null)
   const [accountCreatedAtStatus, setAccountCreatedAtStatus] = useState<'idle' | 'loading' | 'ready' | 'error' | 'guest'>('idle')
   const [customRecurrenceOpen, setCustomRecurrenceOpen] = useState(false)
@@ -4167,8 +4166,8 @@ export default function ReflectionPage({ use24HourTime = false, weekStartDay = 0
   useEffect(() => {
     let cancelled = false
     const hydrateRepeatingRules = async () => {
-      const ownerId = readHistoryOwnerId()
-      const isGuestOwner = !ownerId || ownerId === HISTORY_GUEST_USER_ID
+      const ownerId = getCurrentUserId()
+      const isGuestOwner = !ownerId || ownerId === GUEST_USER_ID
       try {
         const localRules = readLocalRepeatingRules()
         if (!cancelled) {
@@ -4942,7 +4941,7 @@ const [showInlineExtras, setShowInlineExtras] = useState(false)
   
   // Storage listener for localTriggers moved to after snapPlans is defined (for proper sync)
   
-  const isGuestUser = !historyOwnerId || historyOwnerId === HISTORY_GUEST_USER_ID
+  const isGuestUser = !historyOwnerId || historyOwnerId === GUEST_USER_ID
 
   const lifeRoutineBucketOptions = useMemo(() => {
     const seen = new Set<string>()
@@ -5102,7 +5101,7 @@ const [showInlineExtras, setShowInlineExtras] = useState(false)
   }, [])
 
   useEffect(() => {
-    if (!historyOwnerId || historyOwnerId === HISTORY_GUEST_USER_ID) {
+    if (!historyOwnerId || historyOwnerId === GUEST_USER_ID) {
       setAccountCreatedAtStatus('guest')
       setAccountCreatedAtMs(null)
       return
@@ -5149,8 +5148,8 @@ const [showInlineExtras, setShowInlineExtras] = useState(false)
   }, [historyOwnerId])
 
   useEffect(() => {
-    const owner = readHistoryOwnerId()
-    if (!owner || owner === HISTORY_GUEST_USER_ID) {
+    const owner = getCurrentUserId()
+    if (!owner || owner === GUEST_USER_ID) {
       return
     }
     // Skip fetch if we just did a full sync (e.g. after auth callback)
@@ -5173,8 +5172,8 @@ const [showInlineExtras, setShowInlineExtras] = useState(false)
   // Sync goals snapshot from Supabase when user is logged in
   // This ensures gradient colors are available immediately without waiting for GoalsPage
   useEffect(() => {
-    const owner = readGoalsSnapshotOwner()
-    if (!owner || owner === GOALS_GUEST_USER_ID) {
+    const owner = getCurrentUserId()
+    if (!owner || owner === GUEST_USER_ID) {
       return
     }
     // Skip fetch if we just did a full sync (e.g. after auth callback)
@@ -8430,9 +8429,9 @@ useEffect(() => {
   
   // On-demand fetch: when navigating to dates outside the initial sync window, fetch from DB
   useEffect(() => {
-    const ownerId = readHistoryOwnerId()
+    const ownerId = getCurrentUserId()
     // Skip for guests or if already fetched this month
-    if (!ownerId || ownerId === HISTORY_GUEST_USER_ID) return
+    if (!ownerId || ownerId === GUEST_USER_ID) return
     if (isMonthFetched(dayStart)) return
     
     // Check if dayStart is outside the initial sync window (older than 30 days)

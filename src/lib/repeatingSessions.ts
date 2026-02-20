@@ -34,8 +34,10 @@ export type RepeatingSessionRule = {
 }
 
 import { storage, STORAGE_KEYS } from './storage'
+import { getCurrentUserId, GUEST_USER_ID, onUserChange } from './namespaceManager'
 
-export const REPEATING_RULES_GUEST_USER_ID = '__guest__'
+/** @deprecated Use GUEST_USER_ID from namespaceManager instead */
+export const REPEATING_RULES_GUEST_USER_ID = GUEST_USER_ID
 
 const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
 export const isRepeatingRuleId = (value: string | undefined | null): value is string =>
@@ -179,12 +181,11 @@ const getSampleRepeatingRules = (): RepeatingSessionRule[] => {
 export const readLocalRepeatingRules = (): RepeatingSessionRule[] => {
   if (typeof window === 'undefined') return getSampleRepeatingRules()
   try {
-    const currentUserId = readStoredRepeatingRuleUserId()
-    const isGuest = !currentUserId || currentUserId === REPEATING_RULES_GUEST_USER_ID
-    const parsed = storage.domain.repeatingRules.get(normalizeRepeatingRuleUserId(currentUserId))
+    const userId = getCurrentUserId()
+    const isGuestUser = userId === GUEST_USER_ID
+    const parsed = storage.domain.repeatingRules.get(userId)
     if (!parsed) {
-      // Only auto-populate samples for guest users, not real users
-      if (isGuest) {
+      if (isGuestUser) {
         const sample = getSampleRepeatingRules()
         writeLocalRules(sample)
         return sample
@@ -197,8 +198,7 @@ export const readLocalRepeatingRules = (): RepeatingSessionRule[] => {
       .map((row) => mapRowToRule(row))
       .filter(Boolean) as RepeatingSessionRule[]
     if (mapped.length === 0) {
-      // Only auto-populate samples for guest users, not real users
-      if (isGuest) {
+      if (isGuestUser) {
         const sample = getSampleRepeatingRules()
         writeLocalRules(sample)
         return sample
@@ -207,10 +207,8 @@ export const readLocalRepeatingRules = (): RepeatingSessionRule[] => {
     }
     return mapped
   } catch {
-    // Only auto-populate samples on error for guest users
-    const currentUserId = readStoredRepeatingRuleUserId()
-    const isGuest = !currentUserId || currentUserId === REPEATING_RULES_GUEST_USER_ID
-    if (isGuest) {
+    const isGuestUser = getCurrentUserId() === GUEST_USER_ID
+    if (isGuestUser) {
       const sample = getSampleRepeatingRules()
       writeLocalRules(sample)
       return sample
@@ -220,7 +218,7 @@ export const readLocalRepeatingRules = (): RepeatingSessionRule[] => {
 }
 
 const writeLocalRules = (rules: RepeatingSessionRule[]) => {
-  storage.domain.repeatingRules.set(normalizeRepeatingRuleUserId(readStoredRepeatingRuleUserId()), rules)
+  storage.domain.repeatingRules.set(getCurrentUserId(), rules)
   if (typeof window !== 'undefined') {
     try {
       const event = new CustomEvent('nc-taskwatch:repeating-rules-update', { detail: rules })
@@ -368,45 +366,17 @@ export const pushRepeatingRulesToSupabase = async (
   return idMap
 }
 
-const readStoredRepeatingRuleUserId = (): string | null => {
-  const raw = storage.ownership.repeatingUser.get()
-  return raw && raw.trim().length > 0 ? raw.trim() : null
-}
-
-const setStoredRepeatingRuleUserId = (userId: string | null): void => {
-  if (!userId) {
-    storage.ownership.repeatingUser.remove()
-  } else {
-    storage.ownership.repeatingUser.set(userId)
-  }
-}
-
-const normalizeRepeatingRuleUserId = (userId: string | null | undefined): string =>
-  typeof userId === 'string' && userId.trim().length > 0 ? userId.trim() : REPEATING_RULES_GUEST_USER_ID
-
-export const ensureRepeatingRulesUser = async (userId: string | null): Promise<void> => {
-  if (typeof window === 'undefined') return
-  const normalized = normalizeRepeatingRuleUserId(userId)
-  const current = readStoredRepeatingRuleUserId()
-  if (current === normalized) {
-    return
-  }
-  setStoredRepeatingRuleUserId(normalized)
-  if (normalized === REPEATING_RULES_GUEST_USER_ID) {
-    writeLocalRules(getSampleRepeatingRules())
-  } else {
-    // Clear old data immediately to prevent showing stale guest rules
-    writeLocalRules([])
-    writeActivationMap({})
-    writeEndMap({})
-    
-    // Fetch from database
-    try {
-      await syncRepeatingRulesFromSupabase()
-    } catch (err) {
-      console.error('[repeatingSessions] Failed to sync from DB:', err)
+// Namespace change listener: seed guest defaults or clear for auth user
+if (typeof window !== 'undefined') {
+  onUserChange((_previous, next) => {
+    if (next === GUEST_USER_ID) {
+      writeLocalRules(getSampleRepeatingRules())
+    } else {
+      writeLocalRules([])
+      writeActivationMap({})
+      writeEndMap({})
     }
-  }
+  })
 }
 
 export const syncRepeatingRulesFromSupabase = async (): Promise<RepeatingSessionRule[]> => {
@@ -434,12 +404,6 @@ export const syncRepeatingRulesFromSupabase = async (): Promise<RepeatingSession
   }
   
   const rules = data.map(mapRowToRule).filter(Boolean) as RepeatingSessionRule[]
-  // Set user ID marker only if different (avoid triggering storage events unnecessarily)
-  // (important after localStorage.clear() during bootstrap)
-  const currentUserId = readStoredRepeatingRuleUserId()
-  if (currentUserId !== session.user.id) {
-    setStoredRepeatingRuleUserId(session.user.id)
-  }
   writeLocalRules(rules)
   return rules
 }

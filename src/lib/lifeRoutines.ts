@@ -59,9 +59,11 @@ const surfaceStyleFromColour = (colour: string | null | undefined): SurfaceStyle
 }
 
 import { storage, STORAGE_KEYS } from './storage'
+import { getCurrentUserId, GUEST_USER_ID, onUserChange } from './namespaceManager'
 
 export const LIFE_ROUTINE_UPDATE_EVENT = 'nc-life-routines:updated'
-export const LIFE_ROUTINE_GUEST_USER_ID = '__guest__'
+/** @deprecated Use GUEST_USER_ID from namespaceManager instead */
+export const LIFE_ROUTINE_GUEST_USER_ID = GUEST_USER_ID
 export const LIFE_ROUTINE_USER_EVENT = 'nc-life-routines:user-updated'
 
 const cloneRoutine = (routine: LifeRoutineConfig): LifeRoutineConfig => ({ ...routine })
@@ -234,7 +236,7 @@ const storeLifeRoutinesLocal = (routines: LifeRoutineConfig[], userId?: string |
   
   if (typeof window !== 'undefined') {
     try {
-      storage.domain.lifeRoutines.set(normalizeLifeRoutineUserId(userId ?? readStoredLifeRoutineUserId()), normalized)
+      storage.domain.lifeRoutines.set(userId ?? getCurrentUserId(), normalized)
       window.dispatchEvent(new CustomEvent(LIFE_ROUTINE_UPDATE_EVENT, { detail: normalized }))
     } catch {
       // ignore storage errors
@@ -264,31 +266,6 @@ if (typeof window !== 'undefined') {
   window.addEventListener('storage', handleStorageChange)
 }
 
-const readStoredLifeRoutineUserId = (): string | null => {
-  const raw = storage.ownership.lifeRoutinesUser.get()
-  if (!raw) return null
-  const trimmed = raw.trim()
-  return trimmed.length > 0 ? trimmed : null
-}
-
-const setStoredLifeRoutineUserId = (userId: string | null): void => {
-  if (!userId) {
-    storage.ownership.lifeRoutinesUser.remove()
-  } else {
-    storage.ownership.lifeRoutinesUser.set(userId)
-  }
-  if (typeof window !== 'undefined') {
-    try {
-      window.dispatchEvent(new Event(LIFE_ROUTINE_USER_EVENT))
-    } catch {}
-  }
-}
-
-const normalizeLifeRoutineUserId = (userId: string | null | undefined): string =>
-  typeof userId === 'string' && userId.trim().length > 0 ? userId.trim() : LIFE_ROUTINE_GUEST_USER_ID
-
-const isGuestLifeRoutineUser = (userId: string | null): boolean =>
-  !userId || userId === LIFE_ROUTINE_GUEST_USER_ID
 
 
 const LIFE_ROUTINE_SYNC_LOCK_TTL_MS = 2 * 60 * 1000
@@ -308,11 +285,11 @@ const releaseLifeRoutineSyncLock = (userId: string): void => {
   storage.locks.lifeRoutinesSyncLock.remove(userId)
 }
 
-export const readLifeRoutineOwnerId = (): string | null => readStoredLifeRoutineUserId()
+export const readLifeRoutineOwnerId = (): string => getCurrentUserId()
 
 // Read raw local value without default seeding; returns null when key is absent
 const readRawLifeRoutinesLocal = (userId?: string | null): unknown | null => {
-  return storage.domain.lifeRoutines.get(normalizeLifeRoutineUserId(userId ?? readStoredLifeRoutineUserId()))
+  return storage.domain.lifeRoutines.get(userId ?? getCurrentUserId())
 }
 
 const mapDbRowToRoutine = (row: LifeRoutineDbRow): LifeRoutineConfig | null => {
@@ -420,16 +397,13 @@ export const readStoredLifeRoutines = (): LifeRoutineConfig[] => {
     return []
   }
   try {
-    const currentUser = readStoredLifeRoutineUserId()
-    const guestContext = isGuestLifeRoutineUser(currentUser)
-    const parsed = storage.domain.lifeRoutines.get(normalizeLifeRoutineUserId(currentUser))
+    const userId = getCurrentUserId()
+    const isGuestContext = userId === GUEST_USER_ID
+    const parsed = storage.domain.lifeRoutines.get(userId)
     if (!parsed) {
-      if (guestContext) {
+      if (isGuestContext) {
         const defaults = getDefaultLifeRoutines()
-        storeLifeRoutinesLocal(defaults, currentUser)
-        if (!currentUser) {
-          setStoredLifeRoutineUserId(LIFE_ROUTINE_GUEST_USER_ID)
-        }
+        storeLifeRoutinesLocal(defaults, userId)
         return defaults
       }
       return []
@@ -441,9 +415,9 @@ export const readStoredLifeRoutines = (): LifeRoutineConfig[] => {
     if (Array.isArray(parsed) && (parsed as any[]).length === 0) {
       return []
     }
-    if (guestContext) {
+    if (isGuestContext) {
       const defaults = getDefaultLifeRoutines()
-      storeLifeRoutinesLocal(defaults, currentUser)
+      storeLifeRoutinesLocal(defaults, userId)
       return defaults
     }
     return []
@@ -458,34 +432,26 @@ export const writeStoredLifeRoutines = (
 ): LifeRoutineConfig[] => {
   const { sync = true } = options ?? {}
   const sanitized = sanitizeLifeRoutineList(routines)
-  const owner = readStoredLifeRoutineUserId()
-  const stored = storeLifeRoutinesLocal(sanitized, owner)
+  const stored = storeLifeRoutinesLocal(sanitized)
   if (sync) {
     void pushLifeRoutinesToSupabase(stored)
   }
   return stored
 }
 
-export const ensureLifeRoutineUser = (
-  userId: string | null,
-  options?: { suppressGuestDefaults?: boolean },
-): void => {
-  if (typeof window === 'undefined') return
-  const normalized = normalizeLifeRoutineUserId(userId)
-  const current = readStoredLifeRoutineUserId()
-  
-  // Always check for guest defaults, even if user hasn't changed
-  if (normalized === LIFE_ROUTINE_GUEST_USER_ID && !options?.suppressGuestDefaults) {
-    const existingGuest = readRawLifeRoutinesLocal(LIFE_ROUTINE_GUEST_USER_ID)
-    if (!Array.isArray(existingGuest) || existingGuest.length === 0) {
-      storeLifeRoutinesLocal(getDefaultLifeRoutines(), LIFE_ROUTINE_GUEST_USER_ID)
+// Namespace change listener: seed guest defaults
+if (typeof window !== 'undefined') {
+  onUserChange((_previous, next) => {
+    if (next === GUEST_USER_ID) {
+      const existingGuest = readRawLifeRoutinesLocal(GUEST_USER_ID)
+      if (!Array.isArray(existingGuest) || existingGuest.length === 0) {
+        storeLifeRoutinesLocal(getDefaultLifeRoutines(), GUEST_USER_ID)
+      }
     }
-  }
-  
-  // Only update user ID if it changed
-  if (current !== normalized) {
-    setStoredLifeRoutineUserId(normalized)
-  }
+    try {
+      window.dispatchEvent(new Event(LIFE_ROUTINE_USER_EVENT))
+    } catch {}
+  })
 }
 
 export const syncLifeRoutinesWithSupabase = async (): Promise<LifeRoutineConfig[] | null> => {
@@ -495,13 +461,6 @@ export const syncLifeRoutinesWithSupabase = async (): Promise<LifeRoutineConfig[
   const session = await ensureSingleUserSession()
   if (!session) {
     return null
-  }
-  
-  // Set user ID marker only if it's different (avoid triggering storage events unnecessarily)
-  // (important after localStorage.clear() during bootstrap)
-  const currentUserId = readStoredLifeRoutineUserId()
-  if (currentUserId !== session.user.id) {
-    setStoredLifeRoutineUserId(session.user.id)
   }
   
   // Default to preferring the remote snapshot. You can opt out by setting
