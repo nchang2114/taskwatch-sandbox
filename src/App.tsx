@@ -502,7 +502,6 @@ function MainApp() {
   const focusPanelRef = useRef<HTMLElement | null>(null)
   const reflectionPanelRef = useRef<HTMLElement | null>(null)
   const authModalRef = useRef<HTMLDivElement | null>(null)
-  const previousProfileRef = useRef<UserProfile | null>(null)
   const authEmailLookupReqIdRef = useRef(0)
   const lastAlignedUserIdRef = useRef<string | null | undefined>(undefined)
   const isSignedIn = Boolean(userProfile)
@@ -556,11 +555,6 @@ function MainApp() {
     } else {
       storage.auth.profile.remove()
     }
-    const prev = previousProfileRef.current
-    if (prev?.email !== userProfile?.email) {
-      updatePreference(getCurrentUserId(), 'quickListExpanded', false)
-    }
-    previousProfileRef.current = userProfile ?? null
   }, [userProfile])
 
   const featureModalOpenRef = useRef(false)

@@ -92,7 +92,6 @@ import { logDebug, logInfo, logWarn } from '../lib/logging'
 import { isRecentlyFullSynced } from '../lib/bootstrap'
 import { storage, STORAGE_KEYS } from '../lib/storage'
 import { getCurrentUserId, GUEST_USER_ID } from '../lib/namespaceManager'
-import { readPreferences, updatePreference } from '../lib/idbUserPreferences'
 import { readMilestones as readMilestonesFromCache, writeMilestones as writeMilestonesToCache } from '../lib/idbMilestones'
 import {
   readDailyListEntries,
@@ -293,55 +292,7 @@ const sanitizeSubtasks = (value: unknown): TaskSubtask[] => {
     .filter((item): item is TaskSubtask => Boolean(item))
 }
 
-const sanitizeTaskDetailsState = (value: unknown): TaskDetailsState => {
-  if (typeof value !== 'object' || value === null) {
-    return {}
-  }
-  const entries = Object.entries(value as Record<string, unknown>)
-  const next: TaskDetailsState = {}
-  entries.forEach(([taskId, details]) => {
-    if (typeof taskId !== 'string') {
-      return
-    }
-    if (typeof details !== 'object' || details === null) {
-      return
-    }
-    const candidate = details as Record<string, unknown>
-    const notes = typeof candidate.notes === 'string' ? candidate.notes : ''
-    const subtasks = sanitizeSubtasks(candidate.subtasks)
-    const expanded = Boolean(candidate.expanded)
-    const subtasksCollapsed = Boolean((candidate as any).subtasksCollapsed)
-    const notesCollapsed = Boolean((candidate as any).notesCollapsed)
-    next[taskId] = { notes, subtasks, expanded, subtasksCollapsed, notesCollapsed }
-  })
-  return next
-}
 
-const readStoredTaskDetails = (): TaskDetailsState => {
-  if (typeof window === 'undefined') {
-    return {}
-  }
-  try {
-    const parsed = storage.domain.taskDetails.get()
-    if (!parsed) {
-      return {}
-    }
-    return sanitizeTaskDetailsState(parsed)
-  } catch {
-    return {}
-  }
-}
-
-const readStoredQuickListExpanded = (): boolean => {
-  if (typeof window === 'undefined') {
-    return false
-  }
-  try {
-    return readPreferences(getCurrentUserId()).quickListExpanded
-  } catch {
-    return false
-  }
-}
 
 const areTaskDetailsEqual = (a: TaskDetails, b: TaskDetails): boolean => {
   if (
@@ -5950,7 +5901,7 @@ export default function GoalsPage(): ReactElement {
   }, [])
 
   // Quick List (simple tasks without buckets)
-  const [quickListExpanded, setQuickListExpanded] = useState(() => readStoredQuickListExpanded())
+  const [quickListExpanded, setQuickListExpanded] = useState(false)
   const [quickListItems, setQuickListItems] = useState<QuickItem[]>(() => readStoredQuickList())
   const [quickListOwnerSignal, setQuickListOwnerSignal] = useState(0)
   const [quickDraft, setQuickDraft] = useState('')
@@ -5970,14 +5921,6 @@ export default function GoalsPage(): ReactElement {
       return false
     }
   }, [])
-  useEffect(() => {
-    if (typeof window === 'undefined') {
-      return
-    }
-    try {
-      updatePreference(getCurrentUserId(), 'quickListExpanded', quickListExpanded)
-    } catch {}
-  }, [quickListExpanded])
   useEffect(() => {
     if (typeof window === 'undefined') {
       return
@@ -7416,7 +7359,7 @@ export default function GoalsPage(): ReactElement {
   const [customGradient, setCustomGradient] = useState({ start: '#6366f1', end: '#ec4899', angle: 135 })
   const goalModalInputRef = useRef<HTMLInputElement | null>(null)
   const [searchTerm, setSearchTerm] = useState('')
-  const [taskDetails, setTaskDetails] = useState<TaskDetailsState>(() => readStoredTaskDetails())
+  const [taskDetails, setTaskDetails] = useState<TaskDetailsState>({})
   const taskDetailsRef = useRef<TaskDetailsState>(taskDetails)
   const taskDetailsDragSnapshotRef = useRef<Map<string, { expanded: boolean; subtasksCollapsed: boolean; notesCollapsed: boolean }>>(new Map())
   const quickDetailsDragSnapshotRef = useRef<Map<string, { expanded: boolean; subtasksCollapsed: boolean; notesCollapsed: boolean }>>(new Map())
@@ -7434,25 +7377,6 @@ export default function GoalsPage(): ReactElement {
   const goalsRefreshInFlightRef = useRef(false)
   const goalsRefreshPendingRef = useRef(false)
 
-  const taskDetailsPersistTimerRef = useRef<number | null>(null)
-  const taskDetailsLatestPersistRef = useRef<TaskDetailsState>(taskDetails)
-  useEffect(() => {
-    taskDetailsLatestPersistRef.current = taskDetails
-    if (typeof window === 'undefined') {
-      return
-    }
-    if (taskDetailsPersistTimerRef.current) {
-      window.clearTimeout(taskDetailsPersistTimerRef.current)
-    }
-    taskDetailsPersistTimerRef.current = window.setTimeout(() => {
-      taskDetailsPersistTimerRef.current = null
-      try {
-        storage.domain.taskDetails.set(taskDetailsLatestPersistRef.current)
-      } catch {
-        // Ignore quota or storage errors silently
-      }
-    }, 300)
-  }, [taskDetails])
   useEffect(() => {
     taskDetailsRef.current = taskDetails
   }, [taskDetails])

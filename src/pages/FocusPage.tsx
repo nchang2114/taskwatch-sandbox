@@ -79,6 +79,7 @@ import {
   type HistoryEntry,
   areHistorySubtasksEqual,
   getCurrentTimezone,
+  gradientFromSurface,
 } from '../lib/sessionHistory'
 import { logDebug, logWarn } from '../lib/logging'
 import { isRecentlyFullSynced } from '../lib/bootstrap'
@@ -971,8 +972,8 @@ export function FocusPage({ viewportWidth: _viewportWidth, showMilliseconds = tr
   const lifeRoutineColorByBucket = useMemo(() => {
     const map = new Map<string, string>()
     lifeRoutineTasks.forEach((r) => {
-      if (r.bucketId && typeof r.surfaceColor === 'string' && r.surfaceColor.trim().length > 0) {
-        map.set(r.bucketId, r.surfaceColor.trim())
+      if (r.bucketId) {
+        map.set(r.bucketId, gradientFromSurface(r.surfaceStyle))
       }
     })
     return map

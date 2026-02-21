@@ -17,7 +17,6 @@ export type UserPreferencesRecord = {
   userId: string                                         // keyPath
   theme: 'light' | 'dark'
   timezone: string | null                                // IANA timezone or null (system default)
-  quickListExpanded: boolean
   use24HourTime: boolean
   weekStartDay: 0 | 1                                   // 0 = Sunday, 1 = Monday
   defaultCalendarView: 2 | 3 | 4 | 5 | 6 | 'week'
@@ -30,7 +29,6 @@ export type UserPreferencesRecord = {
 const DEFAULT_PREFERENCES: Omit<UserPreferencesRecord, 'userId'> = {
   theme: 'dark',
   timezone: null,
-  quickListExpanded: false,
   use24HourTime: false,
   weekStartDay: 0,
   defaultCalendarView: 6,
@@ -120,14 +118,11 @@ export async function hydrateUserPreferences(userId: string): Promise<void> {
     // IDB empty — migrate from localStorage
     const theme = storage.preferences.theme.get()
     const timezone = storage.preferences.timezone.get()
-    const quickListExpanded = storage.preferences.quickListExpanded.get()
 
     const prefs: UserPreferencesRecord = {
       userId,
       theme: theme === 'light' ? 'light' : 'dark',
       timezone: timezone ?? null,
-      quickListExpanded: quickListExpanded === 'true',
-      // These 5 were never persisted — use defaults
       use24HourTime: DEFAULT_PREFERENCES.use24HourTime,
       weekStartDay: DEFAULT_PREFERENCES.weekStartDay,
       defaultCalendarView: DEFAULT_PREFERENCES.defaultCalendarView,

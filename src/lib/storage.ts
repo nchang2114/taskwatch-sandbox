@@ -20,7 +20,6 @@ import type { QuickItem } from './quickList'
 import type { LifeRoutineConfig } from './lifeRoutines'
 import type { RepeatingSessionRule } from './repeatingSessions'
 import type { RepeatingException } from './repeatingExceptions'
-import type { TaskDetailSnapshot } from './taskDetailsSnapshot'
 import type { MigrationLock } from './authStorage'
 
 // ── Key constants ───────────────────────────────────────────────────────────
@@ -30,7 +29,6 @@ const KEYS = {
   // preferences
   theme: 'nc-taskwatch-theme',
   timezone: 'taskwatch_app_timezone',
-  quickListExpanded: 'nc-taskwatch-quick-list-expanded-v1',
   flags: 'nc-taskwatch-flags',
   reflectionUnlocked: 'taskwatch-reflection-unlocked',
   debugStopwatch: 'nc-debug-stopwatch',
@@ -50,8 +48,6 @@ const KEYS = {
   repeatingActivationMap: 'nc-taskwatch-repeating-activation-map',
   repeatingEndMap: 'nc-taskwatch-repeating-end-map',
   milestones: 'nc-taskwatch-milestones-state-v1',
-  taskDetails: 'nc-taskwatch-task-details-v1',
-
   // focus
   currentTask: 'nc-taskwatch-current-task',
   currentTaskSource: 'nc-taskwatch-current-task-source',
@@ -262,7 +258,6 @@ export const storage = {
   preferences: {
     theme: createStringAccessor(KEYS.theme),
     timezone: createStringAccessor(KEYS.timezone),
-    quickListExpanded: createStringAccessor(KEYS.quickListExpanded),
     flags: createAccessor<FeatureFlags>(KEYS.flags),
     reflectionUnlocked: createStringAccessor(KEYS.reflectionUnlocked),
     debugStopwatch: createStringAccessor(KEYS.debugStopwatch),
@@ -284,7 +279,6 @@ export const storage = {
     repeatingActivationMap: createAccessor<Record<string, number>>(KEYS.repeatingActivationMap),
     repeatingEndMap: createAccessor<Record<string, number>>(KEYS.repeatingEndMap),
     milestones: createAccessor<Record<string, Milestone[]>>(KEYS.milestones),
-    taskDetails: createAccessor<Record<string, TaskDetailSnapshot>>(KEYS.taskDetails),
   },
 
   focus: {

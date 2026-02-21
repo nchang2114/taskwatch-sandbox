@@ -19,7 +19,6 @@ export type LifeRoutineRecord = {
   title: string
   blurb: string
   surfaceStyle: SurfaceStyle
-  surfaceColor?: string | null
   sortIndex: number
   createdAt?: string
   updatedAt?: string
@@ -117,7 +116,6 @@ function toConfig(r: LifeRoutineRecord): LifeRoutineConfig {
     title: r.title,
     blurb: r.blurb,
     surfaceStyle: r.surfaceStyle,
-    surfaceColor: r.surfaceColor,
     sortIndex: r.sortIndex,
   }
 }
@@ -130,7 +128,6 @@ function toRecord(userId: string, c: LifeRoutineConfig): LifeRoutineRecord {
     title: c.title,
     blurb: c.blurb,
     surfaceStyle: c.surfaceStyle,
-    surfaceColor: c.surfaceColor,
     sortIndex: c.sortIndex,
   }
 }

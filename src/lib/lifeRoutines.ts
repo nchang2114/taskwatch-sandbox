@@ -7,7 +7,6 @@ export type LifeRoutineConfig = {
   title: string
   blurb: string
   surfaceStyle: SurfaceStyle
-  surfaceColor?: string | null
   sortIndex: number
 }
 
@@ -251,23 +250,6 @@ const storeLifeRoutinesLocal = (routines: LifeRoutineConfig[], userId?: string |
 
 
 
-const LIFE_ROUTINE_SYNC_LOCK_TTL_MS = 2 * 60 * 1000
-
-const acquireLifeRoutineSyncLock = (userId: string): boolean => {
-  const parsed = storage.locks.lifeRoutinesSyncLock.get(userId)
-  const now = Date.now()
-  if (parsed?.expiresAt && parsed.expiresAt > now) {
-    return false
-  }
-  const expiresAt = now + LIFE_ROUTINE_SYNC_LOCK_TTL_MS
-  storage.locks.lifeRoutinesSyncLock.set(userId, { expiresAt })
-  return true
-}
-
-const releaseLifeRoutineSyncLock = (userId: string): void => {
-  storage.locks.lifeRoutinesSyncLock.remove(userId)
-}
-
 export const readLifeRoutineOwnerId = (): string => getCurrentUserId()
 
 // Read raw local value without default seeding; returns empty array when absent
@@ -283,8 +265,6 @@ const mapDbRowToRoutine = (row: LifeRoutineDbRow): LifeRoutineConfig | null => {
   }
   const blurb = typeof row.blurb === 'string' ? row.blurb : ''
   const surfaceColourRaw = typeof (row as any).surface_colour === 'string' ? ((row as any).surface_colour as string) : null
-  const surfaceColor =
-    surfaceColourRaw && surfaceColourRaw.trim().length > 0 ? surfaceColourRaw.trim() : gradientFromSurface(DEFAULT_SURFACE_STYLE)
   const surfaceStyle = surfaceStyleFromColour(surfaceColourRaw)
   const sortIndex = typeof row.sort_index === 'number' && Number.isFinite(row.sort_index) ? row.sort_index : 0
   return {
@@ -293,7 +273,6 @@ const mapDbRowToRoutine = (row: LifeRoutineDbRow): LifeRoutineConfig | null => {
     title,
     blurb,
     surfaceStyle,
-    surfaceColor,
     sortIndex,
   }
 }
@@ -332,7 +311,7 @@ export const pushLifeRoutinesToSupabase = async (
     user_id: session.user.id,
     title: routine.title,
     blurb: routine.blurb,
-    surface_colour: routine.surfaceColor ?? gradientFromSurface(routine.surfaceStyle),
+    surface_colour: gradientFromSurface(routine.surfaceStyle),
     sort_index: index,
   }))
 
@@ -443,13 +422,17 @@ export const syncLifeRoutinesWithSupabase = async (): Promise<LifeRoutineConfig[
     return null
   }
   
-  // Default to preferring the remote snapshot. You can opt out by setting
-  // VITE_PREFER_REMOTE_LIFE_ROUTINES=false in .env.local.
-  const preferRemoteEnv = String((import.meta as any)?.env?.VITE_PREFER_REMOTE_LIFE_ROUTINES ?? 'true')
-    .trim()
-    .toLowerCase()
-  const PREFER_REMOTE = preferRemoteEnv === 'true' || preferRemoteEnv === '1' || preferRemoteEnv === 'yes'
-  // Fetch remote snapshot
+  const localRaw = readRawLifeRoutinesLocal(session.user.id)
+  const localSanitized = sanitizeLifeRoutineList(Array.isArray(localRaw) ? localRaw : [])
+
+  // Local always wins when it has data — push to remote so other devices converge.
+  if (localSanitized.length > 0) {
+    const stored = storeLifeRoutinesLocal(localSanitized, session.user.id)
+    void pushLifeRoutinesToSupabase(stored)
+    return stored
+  }
+
+  // Local empty — pull from remote.
   const { data, error } = await supabase
     .from('life_routines')
     .select('id, title, blurb, surface_colour, sort_index')
@@ -461,20 +444,6 @@ export const syncLifeRoutinesWithSupabase = async (): Promise<LifeRoutineConfig[
   }
 
   const remoteRows = data ?? []
-  const localRaw = readRawLifeRoutinesLocal(session.user.id)
-  const localSanitized = sanitizeLifeRoutineList(Array.isArray(localRaw) ? localRaw : [])
-
-  // Prefer local if the user already has any routines configured locally.
-  // This avoids surprising "random" routines appearing from a stale server snapshot
-  // (e.g., defaults or data from another device) overriding local choices.
-  if (!PREFER_REMOTE && localSanitized.length > 0) {
-    const stored = storeLifeRoutinesLocal(localSanitized, session.user.id)
-    // Best-effort push so other devices converge to local
-    void pushLifeRoutinesToSupabase(stored)
-    return stored
-  }
-
-  // Remote wins only when it actually has data; otherwise hold onto local snapshot.
   if (remoteRows.length > 0) {
     const mapped = remoteRows
       .map((row) => mapDbRowToRoutine(row as LifeRoutineDbRow))
@@ -483,24 +452,12 @@ export const syncLifeRoutinesWithSupabase = async (): Promise<LifeRoutineConfig[
     return storeLifeRoutinesLocal(sanitized, session.user.id)
   }
 
-  if (localSanitized.length > 0) {
-    // Only one tab should push local → remote when remote is empty
-    const acquired = acquireLifeRoutineSyncLock(session.user.id)
-    if (acquired) {
-      const stored = storeLifeRoutinesLocal(localSanitized, session.user.id)
-      void pushLifeRoutinesToSupabase(stored).finally(() => releaseLifeRoutineSyncLock(session.user.id))
-      return stored
-    }
-    // Another tab is handling the initial push; keep local for now
-    return storeLifeRoutinesLocal(localSanitized, session.user.id)
-  }
-
   // Both empty: check for guest data to migrate, otherwise use defaults
   const guestRoutines = readRawLifeRoutinesLocal(LIFE_ROUTINE_GUEST_USER_ID)
   const routinesToUse = Array.isArray(guestRoutines) && guestRoutines.length > 0
     ? sanitizeLifeRoutineList(guestRoutines)
     : getDefaultLifeRoutines()
-  
+
   const stored = storeLifeRoutinesLocal(routinesToUse, session.user.id)
   void pushLifeRoutinesToSupabase(stored)
   return stored
