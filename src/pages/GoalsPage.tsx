@@ -6044,7 +6044,7 @@ export default function GoalsPage(): ReactElement {
   )
   const [dailyTaskUiState, setDailyTaskUiState] = useState<Record<string, DailyTaskUiState>>({})
   const [dailyCompletedCollapsed, setDailyCompletedCollapsed] = useState(true)
-  type DailyListSortKey = 'addedAt' | 'name' | 'updatedAt'
+  type DailyListSortKey = 'addedAt' | 'name' | 'updatedAt' | 'priority'
   const [dailySortKey, setDailySortKey] = useState<DailyListSortKey>('addedAt')
   const [dailySortAsc, setDailySortAsc] = useState(true)
   const [dailyMenuOpen, setDailyMenuOpen] = useState(false)
@@ -6179,6 +6179,13 @@ export default function GoalsPage(): ReactElement {
         const au = (a.task as any).updatedAt ?? a.entry.addedAt
         const bu = (b.task as any).updatedAt ?? b.entry.addedAt
         result = au.localeCompare(bu)
+      } else if (dailySortKey === 'priority') {
+        const aPriority = Number(Boolean(a.task.priority))
+        const bPriority = Number(Boolean(b.task.priority))
+        result = bPriority - aPriority
+        if (result === 0) {
+          result = a.entry.addedAt.localeCompare(b.entry.addedAt)
+        }
       }
       return dailySortAsc ? result : -result
     })
@@ -13288,7 +13295,7 @@ const normalizedSearch = searchTerm.trim().toLowerCase()
               onMouseDown={(e) => e.stopPropagation()}
             >
               <div className="goal-menu__label">Sort by:</div>
-              {([['addedAt', 'Date Added'], ['name', 'Name'], ['updatedAt', 'Last Modified']] as [DailyListSortKey, string][]).map(([key, label]) => {
+              {([['addedAt', 'Date Added'], ['name', 'Name'], ['updatedAt', 'Last Modified'], ['priority', 'Priority']] as [DailyListSortKey, string][]).map(([key, label]) => {
                 const isActive = dailySortKey === key
                 return (
                   <button
