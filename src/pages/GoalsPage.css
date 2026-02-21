@@ -5464,36 +5464,22 @@ html[data-theme='light'] .daily-todo__source {
 }
 
 .daily-todo__remove {
-  flex-shrink: 0;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 24px;
-  height: 24px;
-  border-radius: 4px;
-  color: rgba(255,255,255,0.35);
-  background: transparent;
-  border: none;
-  cursor: pointer;
-  opacity: 0;
-  transition: opacity 0.15s, color 0.15s, background 0.15s;
-}
-
-.goal-task-row:hover .daily-todo__remove {
-  opacity: 1;
+  color: rgba(255, 255, 255, 0.72);
+  background: rgba(248, 113, 113, 0.16);
 }
 
 .daily-todo__remove:hover {
   color: #f87171;
-  background: rgba(248,113,113,0.12);
+  background: rgba(248, 113, 113, 0.22);
 }
 
 html[data-theme='light'] .daily-todo__remove {
-  color: rgba(0,0,0,0.3);
+  color: rgba(185, 28, 28, 0.78);
+  background: rgba(220, 38, 38, 0.11);
 }
 html[data-theme='light'] .daily-todo__remove:hover {
   color: #dc2626;
-  background: rgba(220,38,38,0.08);
+  background: rgba(220, 38, 38, 0.18);
 }
 
 /* Sort trigger button */
@@ -5849,4 +5835,34 @@ html[data-theme='light'] .goal-task-details__subtask-text {
 .goal-task-details__subtask--completed .goal-task-details__subtask-text {
   text-decoration: line-through;
   opacity: 0.55;
+}
+
+/* Daily read-only subtasks still use the inset checkbox; reserve leading room for text. */
+.goal-subtask-field .goal-task-details__subtask-text {
+  display: block;
+  width: 100%;
+  padding-left: 2.4rem;
+}
+
+/* Daily reveal: keep delete control inline to the right of difficulty toggle. */
+.daily-todo__row.goal-task-row--delete-revealed .goal-task-row__content {
+  transform: none;
+}
+
+.daily-todo__row .goal-task-row__delete.daily-todo__remove {
+  position: static;
+  transform: none;
+  width: 0;
+  margin-left: 0;
+  opacity: 0;
+  pointer-events: none;
+  overflow: hidden;
+  flex: 0 0 auto;
+}
+
+.daily-todo__row.goal-task-row--delete-revealed .goal-task-row__delete.daily-todo__remove {
+  width: 1.85rem;
+  margin-left: 0.2rem;
+  opacity: 1;
+  pointer-events: auto;
 }

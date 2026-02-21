@@ -5994,6 +5994,11 @@ export default function GoalsPage(): ReactElement {
   const [dailySortAsc, setDailySortAsc] = useState(true)
   const [dailySortDropdownOpen, setDailySortDropdownOpen] = useState(false)
   const dailySortDropdownRef = useRef<HTMLDivElement | null>(null)
+  const [dailyMenuOpen, setDailyMenuOpen] = useState(false)
+  const dailyMenuRef = useRef<HTMLDivElement | null>(null)
+  const dailyMenuButtonRef = useRef<HTMLButtonElement | null>(null)
+  const [dailyMenuPosition, setDailyMenuPosition] = useState<{ top: number; left: number }>({ top: 0, left: 0 })
+  const [dailyMenuPositionReady, setDailyMenuPositionReady] = useState(false)
   const [dailyAddModalOpen, setDailyAddModalOpen] = useState(false)
   const [dailyModalSearch, setDailyModalSearch] = useState('')
   const [dailyModalSelectedIds, setDailyModalSelectedIds] = useState<Set<string>>(new Set())
@@ -6011,9 +6016,48 @@ export default function GoalsPage(): ReactElement {
     else dailyTaskRowRefs.current.delete(taskId)
   }
 
-  // Daily To-Do: task details expansion
-  type DailyItemUIState = { expanded: boolean; subtasksCollapsed: boolean; notesCollapsed: boolean }
-  const [dailyExpandedMap, setDailyExpandedMap] = useState<Record<string, DailyItemUIState>>({})
+  // Daily To-Do: gesture state
+  const dailyDeleteSwipeRef = useRef<{ key: string; startX: number; startY: number } | null>(null)
+  const dailyTaskEditDoubleClickGuardRef = useRef<{ taskId: string; until: number } | null>(null)
+  const dailyTaskTogglePendingRef = useRef<{ taskId: string; timer: number } | null>(null)
+
+  const updateDailyMenuPosition = useCallback(() => {
+    const trigger = dailyMenuButtonRef.current
+    const menuEl = dailyMenuRef.current
+    if (!trigger || !menuEl) return
+    const spacing = 8
+    const rect = trigger.getBoundingClientRect()
+    const menuRect = menuEl.getBoundingClientRect()
+    let top = rect.bottom + spacing
+    let left = rect.right - menuRect.width
+    const vw = typeof window !== 'undefined' ? window.innerWidth : 0
+    const vh = typeof window !== 'undefined' ? window.innerHeight : 0
+    if (left + menuRect.width > vw - spacing) left = Math.max(spacing, vw - spacing - menuRect.width)
+    if (top + menuRect.height > vh - spacing) top = Math.max(spacing, rect.top - spacing - menuRect.height)
+    setDailyMenuPosition({ top, left })
+    setDailyMenuPositionReady(true)
+  }, [])
+  useEffect(() => {
+    if (!dailyMenuOpen) return
+    setDailyMenuPositionReady(false)
+    const id = window.requestAnimationFrame(() => updateDailyMenuPosition())
+    const onResize = () => updateDailyMenuPosition()
+    window.addEventListener('resize', onResize)
+    window.addEventListener('scroll', onResize, true)
+    const onDocDown = (e: MouseEvent) => {
+      const target = e.target as HTMLElement
+      if (dailyMenuRef.current && dailyMenuRef.current.contains(target)) return
+      if (dailyMenuButtonRef.current && dailyMenuButtonRef.current.contains(target)) return
+      setDailyMenuOpen(false)
+    }
+    document.addEventListener('mousedown', onDocDown)
+    return () => {
+      window.cancelAnimationFrame(id)
+      window.removeEventListener('resize', onResize)
+      window.removeEventListener('scroll', onResize, true)
+      document.removeEventListener('mousedown', onDocDown)
+    }
+  }, [dailyMenuOpen, updateDailyMenuPosition])
 
   // Close sort dropdown on outside click
   useEffect(() => {
@@ -6034,10 +6078,12 @@ export default function GoalsPage(): ReactElement {
     bucketName: string
     bucketId: string
     goalId: string
+    source: 'goals' | 'quick-list'
   }
 
   const resolvedDailyTasks = useMemo<ResolvedDailyTask[]>(() => {
     const out: ResolvedDailyTask[] = []
+    const quickListLookup = new Map(quickListItems.map((item) => [item.id, item]))
     for (const entry of dailyListEntries) {
       let found = false
       for (const goal of goals) {
@@ -6045,15 +6091,36 @@ export default function GoalsPage(): ReactElement {
         for (const bucket of goal.buckets) {
           const task = bucket.tasks.find((t) => t.id === entry.taskId)
           if (task) {
-            out.push({ entry, task, goalName: goal.name, bucketName: bucket.name, bucketId: bucket.id, goalId: goal.id })
+            out.push({
+              entry,
+              task,
+              goalName: goal.name,
+              bucketName: bucket.name,
+              bucketId: bucket.id,
+              goalId: goal.id,
+              source: 'goals',
+            })
             found = true
             break
           }
         }
       }
+      if (found) continue
+      const quickTask = quickListLookup.get(entry.taskId)
+      if (quickTask) {
+        out.push({
+          entry,
+          task: quickTask as TaskItem,
+          goalName: 'Quick List',
+          bucketName: 'Quick Tasks',
+          bucketId: 'quick-list',
+          goalId: 'quick-list',
+          source: 'quick-list',
+        })
+      }
     }
     return out
-  }, [dailyListEntries, goals])
+  }, [dailyListEntries, goals, quickListItems])
 
   const sortedActiveDailyTasks = useMemo<ResolvedDailyTask[]>(() => {
     const active = resolvedDailyTasks.filter((r) => !r.task.completed)
@@ -6076,6 +6143,20 @@ export default function GoalsPage(): ReactElement {
     () => resolvedDailyTasks.filter((r) => r.task.completed),
     [resolvedDailyTasks],
   )
+  const dailyDroppableTaskIds = useMemo(() => {
+    const ids = new Set<string>()
+    for (const goal of goals) {
+      for (const bucket of goal.buckets) {
+        for (const task of bucket.tasks) {
+          if (!task.completed) ids.add(task.id)
+        }
+      }
+    }
+    for (const item of quickListItems) {
+      if (!item.completed) ids.add(item.id)
+    }
+    return ids
+  }, [goals, quickListItems])
 
   // ── Daily To-Do: handlers ────────────────────────────────────────────────
   const handleDailySortSelect = useCallback((key: DailyListSortKey) => {
@@ -6129,13 +6210,39 @@ export default function GoalsPage(): ReactElement {
     setDailyAddModalOpen(false)
   }, [dailyListEntries, dailyModalSelectedIds])
 
+  const deleteAllCompletedDailyEntries = useCallback(() => {
+    if (completedDailyTasks.length === 0) return
+    const completedEntryIds = new Set(completedDailyTasks.map((resolved) => resolved.entry.id))
+    setDailyListEntries((current) => {
+      const next = current.filter((entry) => !completedEntryIds.has(entry.id))
+      writeDailyListEntries(getCurrentUserId(), next)
+      return next
+    })
+  }, [completedDailyTasks])
+
+  const getDailyDragTaskId = useCallback((e?: React.DragEvent) => {
+    const goalInfo = (window as any).__dragTaskInfo as { taskId?: string; section?: string } | null
+    if (goalInfo?.taskId && goalInfo.section === 'active' && dailyDroppableTaskIds.has(goalInfo.taskId)) {
+      return goalInfo.taskId
+    }
+    const quickInfo = (window as any).__quickDragInfo as { taskId?: string } | null
+    if (quickInfo?.taskId && dailyDroppableTaskIds.has(quickInfo.taskId)) {
+      return quickInfo.taskId
+    }
+    const plainId = (e?.dataTransfer?.getData('text/plain') ?? '').trim()
+    if (plainId && dailyDroppableTaskIds.has(plainId)) {
+      return plainId
+    }
+    return null
+  }, [dailyDroppableTaskIds])
+
   const handleDailyDragOver = useCallback((e: React.DragEvent) => {
-    const info = (window as any).__dragTaskInfo as { taskId?: string; section?: string } | null
-    if (!info?.taskId || info.section !== 'active') return
+    const taskId = getDailyDragTaskId(e)
+    if (!taskId) return
     e.preventDefault()
-    e.dataTransfer.dropEffect = 'copy'
+    e.dataTransfer.dropEffect = 'move'
     setDailyDragOver(true)
-  }, [])
+  }, [getDailyDragTaskId])
 
   const handleDailyDragLeave = useCallback((e: React.DragEvent) => {
     if (e.currentTarget.contains(e.relatedTarget as Node)) return
@@ -6144,10 +6251,9 @@ export default function GoalsPage(): ReactElement {
 
   const handleDailyDrop = useCallback((e: React.DragEvent) => {
     setDailyDragOver(false)
-    const info = (window as any).__dragTaskInfo as { taskId?: string; section?: string } | null
-    if (!info?.taskId || info.section !== 'active') return
+    const taskId = getDailyDragTaskId(e)
+    if (!taskId) return
     e.preventDefault()
-    const taskId = info.taskId
     const userId = getCurrentUserId()
     if (isDailyListTask(userId, taskId)) return
     const now = new Date().toISOString()
@@ -6167,7 +6273,33 @@ export default function GoalsPage(): ReactElement {
     writeDailyListEntries(userId, next)
     // Auto-expand to show the dropped task
     setDailyListExpanded(true)
-  }, [dailyListEntries])
+  }, [dailyListEntries, getDailyDragTaskId])
+
+  const handleDailyDeleteSwipeStart = useCallback((event: React.PointerEvent, deleteKey: string) => {
+    if (event.pointerType !== 'touch') return
+    dailyDeleteSwipeRef.current = { key: deleteKey, startX: event.clientX, startY: event.clientY }
+  }, [])
+
+  const handleDailyDeleteSwipeEnd = useCallback(
+    (event: React.PointerEvent, deleteKey: string) => {
+      const swipe = dailyDeleteSwipeRef.current
+      dailyDeleteSwipeRef.current = null
+      if (!swipe || swipe.key !== deleteKey || event.pointerType !== 'touch') return
+      const dx = event.clientX - swipe.startX
+      const dy = event.clientY - swipe.startY
+      if (Math.abs(dx) < 34 || Math.abs(dx) < Math.abs(dy)) return
+      if (dx < 0) {
+        setRevealedDeleteTaskKey(deleteKey)
+        return
+      }
+      setRevealedDeleteTaskKey((current) => (current === deleteKey ? null : current))
+    },
+    [],
+  )
+
+  const cancelDailyDeleteSwipe = useCallback(() => {
+    dailyDeleteSwipeRef.current = null
+  }, [])
 
   // Daily To-Do: completion with animation
   const toggleDailyCompleteWithAnimation = useCallback((resolved: ResolvedDailyTask) => {
@@ -6241,38 +6373,6 @@ export default function GoalsPage(): ReactElement {
       })
     }, Math.max(1200, rowTotalMs))
   }, [dailyCompletingMap])
-
-  // Daily To-Do: toggle task details expansion
-  const toggleDailyTaskDetails = useCallback((taskId: string, task: TaskItem) => {
-    setDailyExpandedMap((prev) => {
-      const current = prev[taskId]
-      if (current?.expanded) {
-        return { ...prev, [taskId]: { ...current, expanded: false } }
-      }
-      const hasSubtasks = Array.isArray(task.subtasks) && task.subtasks.length > 0
-      const hasNotes = typeof task.notes === 'string' && task.notes !== null && String(task.notes).trim().length > 0
-      return {
-        ...prev,
-        [taskId]: { expanded: true, subtasksCollapsed: !hasSubtasks, notesCollapsed: !hasNotes },
-      }
-    })
-  }, [])
-
-  const toggleDailySubtasksCollapsed = useCallback((taskId: string) => {
-    setDailyExpandedMap((prev) => {
-      const current = prev[taskId]
-      if (!current) return prev
-      return { ...prev, [taskId]: { ...current, subtasksCollapsed: !current.subtasksCollapsed } }
-    })
-  }, [])
-
-  const toggleDailyNotesCollapsed = useCallback((taskId: string) => {
-    setDailyExpandedMap((prev) => {
-      const current = prev[taskId]
-      if (!current) return prev
-      return { ...prev, [taskId]: { ...current, notesCollapsed: !current.notesCollapsed } }
-    })
-  }, [])
 
   const ensureQuickListBucketId = useCallback(async (): Promise<string | null> => {
     if (quickListBucketIdRef.current) {
@@ -6608,34 +6708,38 @@ export default function GoalsPage(): ReactElement {
     },
     [ensureQuickListBucketId, quickListItems, refreshQuickListFromSupabase],
   )
+  const toggleQuickCompleteImmediate = useCallback((id: string) => {
+    const targetItem = quickListItems.find((it) => it.id === id)
+    if (!targetItem) return
+    const nextCompletedState = !targetItem.completed
+    const stored = writeStoredQuickList(
+      quickListItems.map((it) =>
+        it.id === id ? { ...it, completed: nextCompletedState, updatedAt: new Date().toISOString() } : it,
+      ),
+    )
+    setQuickListItems(stored)
+    void (async () => {
+      const bucketId = await ensureQuickListBucketId()
+      if (!bucketId || !isUuid(id)) {
+        quickListWarn('skip remote completion immediate; missing bucket or invalid id', { bucketId, id })
+        return
+      }
+      quickListDebug('updating remote completion immediate', { bucketId, id, completed: nextCompletedState })
+      try {
+        await apiSetTaskCompletedAndResort(id, bucketId, nextCompletedState)
+      } catch (error) {
+        quickListWarn('failed remote completion immediate', error)
+        refreshQuickListFromSupabase('complete')
+      }
+    })()
+  }, [ensureQuickListBucketId, quickListItems, refreshQuickListFromSupabase])
   const toggleQuickCompleteWithAnimation = useCallback((id: string) => {
     const targetItem = quickListItems.find((it) => it.id === id)
     const nextCompletedState = targetItem ? !targetItem.completed : true
     const el = quickTaskRowRefs.current.get(id)
     if (!el) {
       // Fallback: simple toggle
-      const stored = writeStoredQuickList(
-        quickListItems.map((it) => (it.id === id ? { ...it, completed: nextCompletedState, updatedAt: new Date().toISOString() } : it)),
-      )
-      setQuickListItems(stored)
-      if (!isUuid(id)) {
-        quickListWarn('skip remote completion (no element, invalid id)', id)
-        return
-      }
-      void (async () => {
-        const bucketId = await ensureQuickListBucketId()
-        if (!bucketId) {
-          quickListWarn('skip remote completion (no element, missing bucket)', { id })
-          return
-        }
-        quickListDebug('updating remote completion (no element)', { bucketId, id, completed: nextCompletedState })
-        try {
-          await apiSetTaskCompletedAndResort(id, bucketId, nextCompletedState)
-        } catch (error) {
-          quickListWarn('failed remote completion (no element)', error)
-          refreshQuickListFromSupabase('complete')
-        }
-      })()
+      toggleQuickCompleteImmediate(id)
       return
     }
     // Prevent double-trigger while animating
@@ -6728,7 +6832,7 @@ export default function GoalsPage(): ReactElement {
         }
       })()
     }, Math.max(1200, rowTotalMs))
-  }, [ensureQuickListBucketId, quickCompletingMap, quickListItems, refreshQuickListFromSupabase])
+  }, [ensureQuickListBucketId, quickCompletingMap, quickListItems, refreshQuickListFromSupabase, toggleQuickCompleteImmediate])
   const reorderQuickItems = useCallback(
     (section: 'active' | 'completed', from: number, to: number) => {
       const active = quickListItems.filter((x) => !x.completed)
@@ -8025,6 +8129,48 @@ export default function GoalsPage(): ReactElement {
     },
     [scheduleTaskNotesPersist, syncGoalTaskNotes, updateTaskDetails],
   )
+
+  const shouldSuppressDailyToggle = useCallback((taskId: string) => {
+    const guard = dailyTaskEditDoubleClickGuardRef.current
+    if (!guard) return false
+    if (guard.taskId !== taskId) return false
+    if (Date.now() > guard.until) {
+      dailyTaskEditDoubleClickGuardRef.current = null
+      return false
+    }
+    return true
+  }, [])
+
+  const cancelDailyToggle = useCallback((taskId: string) => {
+    const pending = dailyTaskTogglePendingRef.current
+    if (!pending || pending.taskId !== taskId) return
+    if (typeof window !== 'undefined') {
+      window.clearTimeout(pending.timer)
+    }
+    dailyTaskTogglePendingRef.current = null
+  }, [])
+
+  const scheduleDailyToggle = useCallback((resolved: ResolvedDailyTask) => {
+    const taskId = resolved.task.id
+    const pending = dailyTaskTogglePendingRef.current
+    if (pending && typeof window !== 'undefined') {
+      window.clearTimeout(pending.timer)
+    }
+    if (typeof window === 'undefined') {
+      if (resolved.source === 'quick-list') toggleQuickItemDetails(taskId)
+      else handleToggleTaskDetails(taskId)
+      dailyTaskTogglePendingRef.current = null
+      return
+    }
+    const timer = window.setTimeout(() => {
+      if (resolved.source === 'quick-list') toggleQuickItemDetails(taskId)
+      else handleToggleTaskDetails(taskId)
+      if (dailyTaskTogglePendingRef.current && dailyTaskTogglePendingRef.current.taskId === taskId) {
+        dailyTaskTogglePendingRef.current = null
+      }
+    }, 160)
+    dailyTaskTogglePendingRef.current = { taskId, timer }
+  }, [handleToggleTaskDetails, toggleQuickItemDetails])
 
   const handleAddSubtask = useCallback(
     (taskId: string, options?: { focus?: boolean; afterId?: string }) => {
@@ -9747,25 +9893,55 @@ const normalizedSearch = searchTerm.trim().toLowerCase()
           <ul className="mt-2 space-y-2">
             {sortedActiveDailyTasks.map((resolved) => {
               const { entry, task, goalName, bucketName } = resolved
-              const uiState = dailyExpandedMap[task.id]
-              const isDetailsOpen = Boolean(uiState?.expanded)
-              const hasSubtasks = Array.isArray(task.subtasks) && task.subtasks.length > 0
-              const hasNotes = typeof task.notes === 'string' && task.notes !== null && String(task.notes).trim().length > 0
+              const isQuickTask = resolved.source === 'quick-list'
+              const isEditing = isQuickTask ? quickEdits[task.id] !== undefined : taskEdits[task.id] !== undefined
+              const goalDetails = isQuickTask
+                ? null
+                : (taskDetails[task.id] ?? createTaskDetails({
+                    notes: typeof task.notes === 'string' ? task.notes : '',
+                    subtasks: Array.isArray(task.subtasks) ? task.subtasks : [],
+                  }))
+              const notesValue = isQuickTask ? String((task as any).notes ?? '') : goalDetails?.notes ?? ''
+              const subtasks = isQuickTask
+                ? (((task as any).subtasks ?? []) as TaskSubtask[])
+                : goalDetails?.subtasks ?? []
+              const isDetailsOpen = isQuickTask ? Boolean((task as any).expanded) : Boolean(goalDetails?.expanded)
+              const isSubtasksCollapsed = isQuickTask ? Boolean((task as any).subtasksCollapsed) : Boolean(goalDetails?.subtasksCollapsed)
+              const isNotesCollapsed = isQuickTask ? Boolean((task as any).notesCollapsed) : Boolean(goalDetails?.notesCollapsed)
+              const hasSubtasks = subtasks.length > 0
+              const hasNotes = notesValue.trim().length > 0
               const hasDetailsContent = hasSubtasks || hasNotes
+              const subtaskListId = `goal-task-subtasks-${task.id}`
+              const notesBodyId = `goal-task-notes-${task.id}`
+              const notesFieldId = `task-notes-${task.id}`
+              const deleteKey = `daily__${entry.id}`
+              const isDeleteRevealed = revealedDeleteTaskKey === deleteKey
               return (
                 <li
                   key={entry.id}
                   ref={(el) => registerDailyTaskRowRef(task.id, el)}
+                  data-delete-key={deleteKey}
                   className={classNames(
                     'goal-task-row',
+                    'daily-todo__row',
                     task.difficulty === 'green' && 'goal-task-row--diff-green',
                     task.difficulty === 'yellow' && 'goal-task-row--diff-yellow',
                     task.difficulty === 'red' && 'goal-task-row--diff-red',
                     task.priority && 'goal-task-row--priority',
                     dailyCompletingMap[task.id] && 'goal-task-row--completing',
+                    isEditing && 'goal-task-row--draft',
                     isDetailsOpen && 'goal-task-row--expanded',
                     hasDetailsContent && 'goal-task-row--has-details',
+                    isDeleteRevealed && 'goal-task-row--delete-revealed',
                   )}
+                  onContextMenu={(event) => {
+                    event.preventDefault()
+                    event.stopPropagation()
+                    setRevealedDeleteTaskKey(isDeleteRevealed ? null : deleteKey)
+                  }}
+                  onPointerDown={(event) => handleDailyDeleteSwipeStart(event, deleteKey)}
+                  onPointerUp={(event) => handleDailyDeleteSwipeEnd(event, deleteKey)}
+                  onPointerCancel={cancelDailyDeleteSwipe}
                 >
                   <div className="goal-task-row__content">
                     <button
@@ -9773,25 +9949,132 @@ const normalizedSearch = searchTerm.trim().toLowerCase()
                       className="goal-task-marker goal-task-marker--action"
                       onClick={(e) => { e.stopPropagation(); toggleDailyCompleteWithAnimation(resolved) }}
                       aria-label="Mark task complete"
-                    />
-                    <button
-                      type="button"
-                      className="goal-task-text goal-task-text--button"
-                      onClick={() => toggleDailyTaskDetails(task.id, task)}
-                      aria-label="Toggle task details"
                     >
-                      <span className="goal-task-text__inner">{task.text}</span>
-                      <span className="daily-todo__source">{goalName} / {bucketName}</span>
+                      <svg viewBox="0 0 24 24" width="20" height="20" className="goal-task-check" aria-hidden="true">
+                        <path d="M20 6L9 17l-5-5" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+                      </svg>
                     </button>
-                    {task.difficulty && task.difficulty !== 'none' && (
-                      <span className={classNames('goal-task-diff', `goal-task-diff--${task.difficulty}`)} aria-label={`Difficulty: ${task.difficulty}`} />
+                    {isEditing ? (
+                      isQuickTask ? (
+                        <span
+                          className="goal-task-input"
+                          contentEditable
+                          suppressContentEditableWarning
+                          ref={(el) => registerQuickEditRef(task.id, el)}
+                          onInput={(event) => {
+                            const node = event.currentTarget as HTMLSpanElement
+                            const raw = node.textContent ?? ''
+                            const { value } = sanitizeEditableValue(node, raw, MAX_TASK_TEXT_LENGTH)
+                            handleQuickEditChange(task.id, value)
+                            queueQuickCaretSync(task.id, node)
+                          }}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter' || e.key === 'Escape') {
+                              e.preventDefault()
+                              ;(e.currentTarget as HTMLSpanElement).blur()
+                            }
+                          }}
+                          onBlur={() => commitQuickEdit(task.id)}
+                          role="textbox"
+                          tabIndex={0}
+                          aria-label="Edit task text"
+                          spellCheck={false}
+                        >
+                          {quickEdits[task.id]}
+                        </span>
+                      ) : (
+                        <span
+                          className="goal-task-input"
+                          contentEditable
+                          suppressContentEditableWarning
+                          ref={(el) => registerTaskEditRef(task.id, el)}
+                          onInput={(event) => {
+                            const node = event.currentTarget as HTMLSpanElement
+                            const raw = node.textContent ?? ''
+                            const { value } = sanitizeEditableValue(node, raw, MAX_TASK_TEXT_LENGTH)
+                            handleTaskEditChange(task.id, value)
+                          }}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter' || e.key === 'Escape') {
+                              e.preventDefault()
+                              ;(e.currentTarget as HTMLSpanElement).blur()
+                            }
+                          }}
+                          onBlur={() => handleTaskEditBlur(resolved.goalId, resolved.bucketId, task.id)}
+                          role="textbox"
+                          tabIndex={0}
+                          aria-label="Edit task text"
+                          spellCheck={false}
+                        >
+                          {taskEdits[task.id]}
+                        </span>
+                      )
+                    ) : (
+                      <button
+                        type="button"
+                        className="goal-task-text goal-task-text--button"
+                        onClick={(event) => {
+                          event.stopPropagation()
+                          if (shouldSuppressDailyToggle(task.id)) return
+                          scheduleDailyToggle(resolved)
+                        }}
+                        onDoubleClick={(event) => {
+                          event.preventDefault()
+                          event.stopPropagation()
+                          cancelDailyToggle(task.id)
+                          const container = event.currentTarget.querySelector('.goal-task-text__inner') as HTMLElement | null
+                          const caretOffset = findActivationCaretOffset(container, event.clientX, event.clientY)
+                          if (isQuickTask) {
+                            startQuickEdit(task.id, task.text, caretOffset !== null ? { caretOffset } : undefined)
+                          } else {
+                            startTaskEdit(
+                              resolved.goalId,
+                              resolved.bucketId,
+                              task.id,
+                              task.text,
+                              caretOffset !== null ? { caretOffset } : undefined,
+                            )
+                          }
+                          dailyTaskEditDoubleClickGuardRef.current = { taskId: task.id, until: Date.now() + 300 }
+                        }}
+                        aria-label="Toggle task details"
+                      >
+                        <span className="goal-task-text__inner">{task.text}</span>
+                        <span className="daily-todo__source">{goalName} / {bucketName}</span>
+                      </button>
                     )}
                     <button
                       type="button"
-                      className="daily-todo__remove"
-                      onClick={() => removeDailyListEntry(entry.id)}
+                      className={classNames(
+                        'goal-task-diff',
+                        task.difficulty === 'green' && 'goal-task-diff--green',
+                        task.difficulty === 'yellow' && 'goal-task-diff--yellow',
+                        task.difficulty === 'red' && 'goal-task-diff--red',
+                      )}
+                      onClick={(event) => {
+                        event.stopPropagation()
+                        if (isQuickTask) cycleQuickDifficulty(task.id)
+                        else cycleTaskDifficulty(resolved.goalId, resolved.bucketId, task.id)
+                      }}
+                      onPointerDown={(event) => event.stopPropagation()}
+                      onPointerUp={(event) => event.stopPropagation()}
+                      onKeyDown={(event) => {
+                        if (event.key === 'Enter' || event.key === ' ') {
+                          event.preventDefault()
+                          event.stopPropagation()
+                          if (isQuickTask) cycleQuickDifficulty(task.id)
+                          else cycleTaskDifficulty(resolved.goalId, resolved.bucketId, task.id)
+                        }
+                      }}
+                      aria-label="Set task difficulty"
+                    />
+                    <button
+                      type="button"
+                      className="goal-task-row__delete daily-todo__remove"
+                      onClick={() => { removeDailyListEntry(entry.id); setRevealedDeleteTaskKey(null) }}
                       aria-label="Remove from daily list"
                       title="Remove from daily list"
+                      tabIndex={isDeleteRevealed ? 0 : -1}
                     >
                       <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
                         <path d="M18 6L6 18M6 6l12 12" />
@@ -9800,85 +10083,196 @@ const normalizedSearch = searchTerm.trim().toLowerCase()
                   </div>
                   {/* Details panel: subtasks + notes */}
                   {isDetailsOpen && (
-                    <div className={classNames('goal-task-details', 'goal-task-details--open')} onPointerDown={(e) => e.stopPropagation()}>
+                    <div
+                      className={classNames('goal-task-details', 'goal-task-details--open')}
+                      onPointerDown={(e) => e.stopPropagation()}
+                      onDragStart={(event) => event.preventDefault()}
+                    >
                       {/* Subtasks */}
-                      <div className={classNames('goal-task-details__subtasks', uiState?.subtasksCollapsed && 'goal-task-details__subtasks--collapsed')}>
+                      <div className={classNames('goal-task-details__subtasks', isSubtasksCollapsed && 'goal-task-details__subtasks--collapsed')}>
                         <div className="goal-task-details__section-title">
                           <p
                             className="goal-task-details__heading"
                             role="button"
                             tabIndex={0}
-                            aria-expanded={!uiState?.subtasksCollapsed}
-                            onClick={() => toggleDailySubtasksCollapsed(task.id)}
+                            aria-expanded={!isSubtasksCollapsed}
+                            aria-controls={subtaskListId}
+                            onClick={() => {
+                              if (isQuickTask) toggleQuickSubtasksCollapsed(task.id)
+                              else handleToggleSubtaskSection(task.id)
+                            }}
                           >
                             Subtasks
                             <button
                               type="button"
                               className="goal-task-details__collapse"
-                              aria-expanded={!uiState?.subtasksCollapsed}
-                              aria-label={uiState?.subtasksCollapsed ? 'Expand subtasks' : 'Collapse subtasks'}
-                              onClick={(e) => { e.stopPropagation(); toggleDailySubtasksCollapsed(task.id) }}
+                              aria-expanded={!isSubtasksCollapsed}
+                              aria-controls={subtaskListId}
+                              aria-label={isSubtasksCollapsed ? 'Expand subtasks' : 'Collapse subtasks'}
+                              onClick={(e) => {
+                                e.stopPropagation()
+                                if (isQuickTask) toggleQuickSubtasksCollapsed(task.id)
+                                else handleToggleSubtaskSection(task.id)
+                              }}
                             />
                           </p>
+                          <button
+                            type="button"
+                            className="goal-task-details__add"
+                            onClick={(event) => {
+                              event.stopPropagation()
+                              if (isQuickTask) addQuickSubtask(task.id)
+                              else handleAddSubtask(task.id, { focus: true })
+                            }}
+                            onPointerDown={(event) => event.stopPropagation()}
+                          >
+                            + Subtask
+                          </button>
                         </div>
-                        <div className="goal-task-details__subtasks-body">
+                        <div className="goal-task-details__subtasks-body" id={subtaskListId}>
                           {hasSubtasks ? (
                             <ul className="goal-task-details__subtask-list">
-                              {(task.subtasks ?? []).map((subtask) => (
-                                <li
-                                  key={subtask.id}
-                                  className={classNames(
-                                    'goal-task-details__subtask',
-                                    subtask.completed && 'goal-task-details__subtask--completed',
-                                  )}
-                                >
-                                  <label className="goal-task-details__subtask-item">
-                                    <div className="goal-subtask-field">
-                                      <input
-                                        type="checkbox"
-                                        className="goal-task-details__checkbox"
-                                        checked={subtask.completed}
-                                        readOnly
-                                      />
-                                      <span className="goal-task-details__subtask-text">{subtask.text}</span>
-                                    </div>
-                                  </label>
-                                </li>
-                              ))}
+                              {subtasks.map((subtask) => {
+                                const subDeleteKey = `${deleteKey}__subtask__${subtask.id}`
+                                const isSubDeleteRevealed = revealedDeleteTaskKey === subDeleteKey
+                                return (
+                                  <li
+                                    key={subtask.id}
+                                    data-delete-key={subDeleteKey}
+                                    className={classNames(
+                                      'goal-task-details__subtask',
+                                      subtask.completed && 'goal-task-details__subtask--completed',
+                                      isSubDeleteRevealed && 'goal-task-details__subtask--delete-revealed',
+                                    )}
+                                    onContextMenu={(event) => {
+                                      event.preventDefault()
+                                      event.stopPropagation()
+                                      setRevealedDeleteTaskKey(isSubDeleteRevealed ? null : subDeleteKey)
+                                    }}
+                                  >
+                                    <label className="goal-task-details__subtask-item">
+                                      <div className="goal-subtask-field">
+                                        <input
+                                          type="checkbox"
+                                          className="goal-task-details__checkbox"
+                                          checked={subtask.completed}
+                                          onChange={(event) => {
+                                            event.stopPropagation()
+                                            if (isQuickTask) toggleQuickSubtaskCompleted(task.id, subtask.id)
+                                            else handleToggleSubtaskCompleted(task.id, subtask.id)
+                                          }}
+                                          onClick={(event) => event.stopPropagation()}
+                                          onPointerDown={(event) => event.stopPropagation()}
+                                        />
+                                        <textarea
+                                          id={makeGoalSubtaskInputId(task.id, subtask.id)}
+                                          className="goal-task-details__subtask-input"
+                                          rows={1}
+                                          ref={(el) => autosizeTextArea(el)}
+                                          value={subtask.text}
+                                          onChange={(event) => {
+                                            const el = event.currentTarget
+                                            el.style.height = 'auto'
+                                            el.style.height = `${el.scrollHeight}px`
+                                            if (isQuickTask) updateQuickSubtaskText(task.id, subtask.id, event.target.value)
+                                            else handleSubtaskTextChange(task.id, subtask.id, event.target.value)
+                                          }}
+                                          onClick={(event) => event.stopPropagation()}
+                                          onKeyDown={(event) => {
+                                            if (event.key === 'Enter' && !event.shiftKey) {
+                                              event.preventDefault()
+                                              const value = event.currentTarget.value.trim()
+                                              if (value.length === 0) return
+                                              if (isQuickTask) addQuickSubtask(task.id)
+                                              else handleAddSubtask(task.id, { focus: true })
+                                            }
+                                          }}
+                                          onBlur={() => {
+                                            if (!isQuickTask) handleSubtaskBlur(task.id, subtask.id)
+                                          }}
+                                          onPointerDown={(event) => event.stopPropagation()}
+                                          placeholder="Describe subtask"
+                                        />
+                                      </div>
+                                    </label>
+                                    <button
+                                      type="button"
+                                      className="goal-task-details__remove"
+                                      onClick={(event) => {
+                                        event.stopPropagation()
+                                        setRevealedDeleteTaskKey(null)
+                                        if (isQuickTask) deleteQuickSubtask(task.id, subtask.id)
+                                        else handleRemoveSubtask(task.id, subtask.id)
+                                      }}
+                                      onPointerDown={(event) => event.stopPropagation()}
+                                      aria-label="Delete subtask permanently"
+                                      title="Delete subtask"
+                                    >
+                                      <svg viewBox="0 0 24 24" aria-hidden="true" className="goal-task-details__remove-icon">
+                                        <path
+                                          d="M9 4h6l1 2h4v2H4V6h4l1-2Zm1 5v9m4-9v9m-6 0h8a1 1 0 0 0 1-1V8H7v9a1 1 0 0 0 1 1Z"
+                                          fill="none"
+                                          stroke="currentColor"
+                                          strokeWidth="1.6"
+                                          strokeLinecap="round"
+                                          strokeLinejoin="round"
+                                        />
+                                      </svg>
+                                    </button>
+                                  </li>
+                                )
+                              })}
                             </ul>
                           ) : (
                             <div className="goal-task-details__empty">
-                              <p className="goal-task-details__empty-text">No subtasks</p>
+                              <p className="goal-task-details__empty-text">No subtasks yet</p>
                             </div>
                           )}
                         </div>
                       </div>
                       {/* Notes */}
-                      <div className={classNames('goal-task-details__notes', uiState?.notesCollapsed && 'goal-task-details__notes--collapsed')}>
+                      <div className={classNames('goal-task-details__notes', isNotesCollapsed && 'goal-task-details__notes--collapsed')}>
                         <div className="goal-task-details__section-title goal-task-details__section-title--notes">
                           <p
                             className="goal-task-details__heading"
                             role="button"
                             tabIndex={0}
-                            aria-expanded={!uiState?.notesCollapsed}
-                            onClick={() => toggleDailyNotesCollapsed(task.id)}
+                            aria-expanded={!isNotesCollapsed}
+                            aria-controls={notesBodyId}
+                            onClick={() => {
+                              if (isQuickTask) toggleQuickNotesCollapsed(task.id)
+                              else handleToggleNotesSection(task.id)
+                            }}
                           >
                             Notes
                             <button
                               type="button"
                               className="goal-task-details__collapse"
-                              aria-expanded={!uiState?.notesCollapsed}
-                              aria-label={uiState?.notesCollapsed ? 'Expand notes' : 'Collapse notes'}
-                              onClick={(e) => { e.stopPropagation(); toggleDailyNotesCollapsed(task.id) }}
+                              aria-expanded={!isNotesCollapsed}
+                              aria-controls={notesBodyId}
+                              aria-label={isNotesCollapsed ? 'Expand notes' : 'Collapse notes'}
+                              onClick={(e) => {
+                                e.stopPropagation()
+                                if (isQuickTask) toggleQuickNotesCollapsed(task.id)
+                                else handleToggleNotesSection(task.id)
+                              }}
                             />
                           </p>
                         </div>
-                        <div className="goal-task-details__notes-body">
-                          {hasNotes ? (
-                            <p className="goal-task-details__notes-text daily-todo__notes-readonly">{String(task.notes ?? '')}</p>
-                          ) : (
-                            <p className="goal-task-details__empty-text">No notes</p>
-                          )}
+                        <div className="goal-task-details__notes-body" id={notesBodyId}>
+                          <textarea
+                            id={notesFieldId}
+                            className="goal-task-details__textarea"
+                            value={notesValue}
+                            onChange={(event) => {
+                              if (isQuickTask) updateQuickItemNotes(task.id, event.target.value)
+                              else handleTaskNotesChange(task.id, event.target.value)
+                            }}
+                            onPointerDown={(event) => event.stopPropagation()}
+                            placeholder="Add a quick note..."
+                            rows={3}
+                            aria-label="Task notes"
+                          />
                         </div>
                       </div>
                     </div>
@@ -9911,25 +10305,44 @@ const normalizedSearch = searchTerm.trim().toLowerCase()
               <ul className="goal-completed__list mt-2 space-y-2">
                 {completedDailyTasks.map((resolved) => {
                   const { entry, task, goalName, bucketName } = resolved
+                  const deleteKey = `daily__${entry.id}`
+                  const isDeleteRevealed = revealedDeleteTaskKey === deleteKey
                   return (
-                    <li key={entry.id} className="goal-task-row goal-task-row--completed">
+                    <li
+                      key={entry.id}
+                      data-delete-key={deleteKey}
+                      className={classNames('goal-task-row goal-task-row--completed', 'daily-todo__row', isDeleteRevealed && 'goal-task-row--delete-revealed')}
+                      onContextMenu={(event) => {
+                        event.preventDefault()
+                        event.stopPropagation()
+                        setRevealedDeleteTaskKey(isDeleteRevealed ? null : deleteKey)
+                      }}
+                      onPointerDown={(event) => handleDailyDeleteSwipeStart(event, deleteKey)}
+                      onPointerUp={(event) => handleDailyDeleteSwipeEnd(event, deleteKey)}
+                      onPointerCancel={cancelDailyDeleteSwipe}
+                    >
                       <div className="goal-task-row__content">
                         <button
                           type="button"
                           className="goal-task-marker goal-task-marker--completed goal-task-marker--action"
                           onClick={() => toggleDailyTaskCompletionRef.current(resolved)}
                           aria-label="Mark task incomplete"
-                        />
+                        >
+                          <svg viewBox="0 0 24 24" width="20" height="20" className="goal-task-check" aria-hidden="true">
+                            <path d="M20 6L9 17l-5-5" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+                          </svg>
+                        </button>
                         <span className="goal-task-text">
                           <span className="goal-task-text__inner">{task.text}</span>
                           <span className="daily-todo__source">{goalName} / {bucketName}</span>
                         </span>
                         <button
                           type="button"
-                          className="daily-todo__remove"
-                          onClick={() => removeDailyListEntry(entry.id)}
+                          className="goal-task-row__delete daily-todo__remove"
+                          onClick={() => { removeDailyListEntry(entry.id); setRevealedDeleteTaskKey(null) }}
                           aria-label="Remove from daily list"
                           title="Remove from daily list"
+                          tabIndex={isDeleteRevealed ? 0 : -1}
                         >
                           <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
                             <path d="M18 6L6 18M6 6l12 12" />
@@ -10203,7 +10616,7 @@ const normalizedSearch = searchTerm.trim().toLowerCase()
                                       }
                                       
                                       // Store whether this item was expanded for restoration
-                                      ;(window as any).__quickDragInfo = { section: 'active', index, wasExpanded }
+                                      ;(window as any).__quickDragInfo = { section: 'active', index, wasExpanded, taskId: item.id }
                                       
                                       // Defer visual collapse and other item collapses to avoid interfering with drag start
                                       window.requestAnimationFrame(() => {
@@ -10800,7 +11213,7 @@ const normalizedSearch = searchTerm.trim().toLowerCase()
                                           }
                                           
                                           // Store whether this item was expanded for restoration
-                                          ;(window as any).__quickDragInfo = { section: 'completed', index, wasExpanded }
+                                          ;(window as any).__quickDragInfo = { section: 'completed', index, wasExpanded, taskId: item.id }
                                           
                                           // Defer visual collapse and other item collapses to avoid interfering with drag start
                                           window.requestAnimationFrame(() => {
@@ -11756,6 +12169,10 @@ const normalizedSearch = searchTerm.trim().toLowerCase()
 
   // Wire up the daily list completion handler now that toggleTaskCompletion is defined
   toggleDailyTaskCompletionRef.current = (resolved: ResolvedDailyTask) => {
+    if (resolved.source === 'quick-list') {
+      toggleQuickCompleteImmediate(resolved.task.id)
+      return
+    }
     toggleTaskCompletion(resolved.goalId, resolved.bucketId, resolved.task.id)
   }
 
@@ -12652,6 +13069,34 @@ const normalizedSearch = searchTerm.trim().toLowerCase()
           document.body,
         )
       : null
+  const dailyMenuPortal =
+    dailyMenuOpen && typeof document !== 'undefined'
+      ? createPortal(
+          <div className="goal-menu-overlay" role="presentation" onMouseDown={() => setDailyMenuOpen(false)}>
+            <div
+              ref={dailyMenuRef}
+              className="goal-menu goal-menu--floating min-w-[180px] rounded-md border p-1 shadow-lg"
+              style={{ top: `${dailyMenuPosition.top}px`, left: `${dailyMenuPosition.left}px`, visibility: dailyMenuPositionReady ? 'visible' : 'hidden' }}
+              role="menu"
+              onMouseDown={(e) => e.stopPropagation()}
+            >
+              <button
+                type="button"
+                className={classNames('goal-menu__item goal-menu__item--danger', completedDailyTasks.length === 0 && 'opacity-50 cursor-not-allowed')}
+                disabled={completedDailyTasks.length === 0}
+                onClick={() => {
+                  if (completedDailyTasks.length === 0) return
+                  setDailyMenuOpen(false)
+                  deleteAllCompletedDailyEntries()
+                }}
+              >
+                Delete all completed tasks
+              </button>
+            </div>
+          </div>,
+          document.body,
+        )
+      : null
 
   // Daily To-Do: "Add Existing Tasks" modal
   const dailyAddModalPortal =
@@ -13343,6 +13788,21 @@ const normalizedSearch = searchTerm.trim().toLowerCase()
                       <path d="M6 9l6 6 6-6" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
                     </svg>
                   </button>
+                  <button
+                    ref={dailyMenuButtonRef}
+                    type="button"
+                    className="inline-flex items-center justify-center h-7 w-7 rounded-md hover:bg-white/10 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white/40 transition life-routines-card__task-menu-button"
+                    aria-haspopup="menu"
+                    aria-expanded={dailyMenuOpen}
+                    onClick={(e) => { e.stopPropagation(); setDailyMenuOpen((v) => !v) }}
+                    title="Daily To-Do menu"
+                  >
+                    <svg className="w-4.5 h-4.5 goal-kebab-icon" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+                      <circle cx="12" cy="6" r="1.6" />
+                      <circle cx="12" cy="12" r="1.6" />
+                      <circle cx="12" cy="18" r="1.6" />
+                    </svg>
+                  </button>
                 </div>
               </div>
               {renderDailyListBody()}
@@ -14023,6 +14483,7 @@ const normalizedSearch = searchTerm.trim().toLowerCase()
       {lifeRoutineCustomizerPortal}
       {customizerPortal}
       {quickListMenuPortal}
+      {dailyMenuPortal}
       {dailyAddModalPortal}
 
       {isSettingsOpen && (
