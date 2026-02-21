@@ -10,7 +10,6 @@ import { getCurrentUserId } from './namespaceManager'
 import {
   DAILY_LIST_ID,
   writeDailyListEntries,
-  readDailyListEntries,
   type DailyListEntryRecord,
 } from './idbDailyList'
 
