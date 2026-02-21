@@ -37,6 +37,7 @@ import {
   fetchGoalCreatedAt as apiFetchGoalCreatedAt,
   setGoalMilestonesShown as apiSetGoalMilestonesShown,
   sortBucketTasksByDate as apiSortBucketTasksByDate,
+  sortBucketTasksByUpdatedAt as apiSortBucketTasksByUpdatedAt,
   sortBucketTasksByPriority as apiSortBucketTasksByPriority,
   sortBucketTasksByName as apiSortBucketTasksByName,
   moveTaskToBucket as apiMoveTaskToBucket,
@@ -2480,6 +2481,7 @@ interface GoalRowProps {
   onManageArchivedBuckets: () => void
   onDeleteCompletedTasks: (bucketId: string) => void
   onSortBucketByDate: (bucketId: string, direction: 'oldest' | 'newest') => void
+  onSortBucketByUpdatedAt: (bucketId: string, direction: 'oldest' | 'newest') => void
   onSortBucketByPriority: (bucketId: string) => void
   onSortBucketByName: (bucketId: string, direction: 'asc' | 'desc') => void
   sortingBucketId: string | null
@@ -2778,6 +2780,7 @@ const GoalRow: React.FC<GoalRowProps> = ({
   onManageArchivedBuckets,
   onDeleteCompletedTasks,
   onSortBucketByDate,
+  onSortBucketByUpdatedAt,
   onSortBucketByPriority,
   onSortBucketByName,
   sortingBucketId,
@@ -2859,6 +2862,10 @@ const GoalRow: React.FC<GoalRowProps> = ({
   const [bucketHoverIndex, setBucketHoverIndex] = useState<number | null>(null)
   const [bucketLineTop, setBucketLineTop] = useState<number | null>(null)
   const bucketDragCloneRef = useRef<HTMLElement | null>(null)
+  type BucketSortMenuKey = 'createdAt' | 'name' | 'updatedAt' | 'priority'
+  const [bucketSortMenuState, setBucketSortMenuState] = useState<
+    Record<string, { key: BucketSortMenuKey; asc: boolean }>
+  >({})
   const activeBuckets = useMemo(() => goal.buckets.filter((bucket) => !bucket.archived), [goal.buckets])
   // Transient animation state for task completion (active → completed)
   const [completingMap, setCompletingMap] = useState<Record<string, boolean>>({})
@@ -3375,6 +3382,9 @@ const GoalRow: React.FC<GoalRowProps> = ({
   const activeBucketCompletedCount = activeBucketForMenu
     ? activeBucketForMenu.tasks.filter((task) => task.completed).length
     : 0
+  const activeBucketSort = activeBucketForMenu
+    ? (bucketSortMenuState[activeBucketForMenu.id] ?? { key: 'createdAt' as BucketSortMenuKey, asc: true })
+    : null
 
   const bucketMenuPortal =
     bucketMenuOpenId && activeBucketForMenu && typeof document !== 'undefined'
@@ -3449,61 +3459,60 @@ const GoalRow: React.FC<GoalRowProps> = ({
                 Delete all completed tasks
               </button>
               <div className="goal-menu__divider" />
-              <button
-                type="button"
-                className="goal-menu__item"
-                onClick={(event) => {
-                  event.stopPropagation()
-                  setBucketMenuOpenId(null)
-                  onSortBucketByDate(activeBucketForMenu.id, 'oldest')
-                }}
-              >
-                Sort by oldest first
-              </button>
-              <button
-                type="button"
-                className="goal-menu__item"
-                onClick={(event) => {
-                  event.stopPropagation()
-                  setBucketMenuOpenId(null)
-                  onSortBucketByDate(activeBucketForMenu.id, 'newest')
-                }}
-              >
-                Sort by newest first
-              </button>
-              <button
-                type="button"
-                className="goal-menu__item"
-                onClick={(event) => {
-                  event.stopPropagation()
-                  setBucketMenuOpenId(null)
-                  onSortBucketByPriority(activeBucketForMenu.id)
-                }}
-              >
-                Sort by priority
-              </button>
-              <button
-                type="button"
-                className="goal-menu__item"
-                onClick={(event) => {
-                  event.stopPropagation()
-                  setBucketMenuOpenId(null)
-                  onSortBucketByName(activeBucketForMenu.id, 'asc')
-                }}
-              >
-                Sort by name (A-Z)
-              </button>
-              <button
-                type="button"
-                className="goal-menu__item"
-                onClick={(event) => {
-                  event.stopPropagation()
-                  setBucketMenuOpenId(null)
-                  onSortBucketByName(activeBucketForMenu.id, 'desc')
-                }}
-              >
-                Sort by name (Z-A)
-              </button>
+              <div className="goal-menu__label">Sort by:</div>
+              {(
+                [
+                  ['createdAt', 'Date Created'],
+                  ['name', 'Name'],
+                  ['updatedAt', 'Last Modified'],
+                  ['priority', 'Priority'],
+                ] as [BucketSortMenuKey, string][]
+              ).map(([sortKey, label]) => {
+                const isActive = activeBucketSort?.key === sortKey
+                return (
+                  <button
+                    key={sortKey}
+                    type="button"
+                    className={classNames('goal-menu__item', isActive && 'goal-menu__item--active')}
+                    onClick={(event) => {
+                      event.stopPropagation()
+                      const current = bucketSortMenuState[activeBucketForMenu.id] ?? {
+                        key: 'createdAt' as BucketSortMenuKey,
+                        asc: true,
+                      }
+                      if (sortKey === 'priority') {
+                        setBucketSortMenuState((prev) => ({
+                          ...prev,
+                          [activeBucketForMenu.id]: { key: 'priority', asc: true },
+                        }))
+                        setBucketMenuOpenId(null)
+                        onSortBucketByPriority(activeBucketForMenu.id)
+                        return
+                      }
+                      const nextAsc = current.key === sortKey ? !current.asc : true
+                      setBucketSortMenuState((prev) => ({
+                        ...prev,
+                        [activeBucketForMenu.id]: { key: sortKey, asc: nextAsc },
+                      }))
+                      if (current.key !== sortKey) {
+                        setBucketMenuOpenId(null)
+                      }
+                      if (sortKey === 'createdAt') {
+                        onSortBucketByDate(activeBucketForMenu.id, nextAsc ? 'oldest' : 'newest')
+                      } else if (sortKey === 'updatedAt') {
+                        onSortBucketByUpdatedAt(activeBucketForMenu.id, nextAsc ? 'oldest' : 'newest')
+                      } else {
+                        onSortBucketByName(activeBucketForMenu.id, nextAsc ? 'asc' : 'desc')
+                      }
+                    }}
+                  >
+                    {label}
+                    {sortKey === 'priority'
+                      ? (isActive ? ' ✓' : '')
+                      : (isActive ? (activeBucketSort?.asc ? ' ↑' : ' ↓') : '')}
+                  </button>
+                )
+              })}
               <div className="goal-menu__divider" />
               <button
                 type="button"
@@ -9468,6 +9477,68 @@ export default function GoalsPage(): ReactElement {
     }
   }
 
+  const sortBucketByUpdatedAt = async (goalId: string, bucketId: string, direction: 'oldest' | 'newest') => {
+    const STEP = 1024
+    if (ENABLE_SORT_ANIMATION) {
+      setSortingBucketId(bucketId)
+      await new Promise((resolve) => setTimeout(resolve, 50))
+    }
+
+    const result = await apiSortBucketTasksByUpdatedAt(bucketId, direction)
+    if (result) {
+      setGoals((gs) =>
+        gs.map((g) =>
+          g.id === goalId
+            ? {
+                ...g,
+                buckets: g.buckets.map((b) => {
+                  if (b.id !== bucketId) return b
+                  const updatedTasks = b.tasks.map((t) => {
+                    const updatedIndex = result.find((r) => r.id === t.id)?.sort_index
+                    return updatedIndex !== undefined ? { ...t, sortIndex: updatedIndex } : t
+                  })
+                  const sorted = [...updatedTasks].sort((a, c) => {
+                    const priorityA = a.priority ? 1 : 0
+                    const priorityC = c.priority ? 1 : 0
+                    if (priorityA !== priorityC) return priorityC - priorityA
+                    return (a.sortIndex ?? 0) - (c.sortIndex ?? 0)
+                  })
+                  return { ...b, tasks: sorted }
+                }),
+              }
+            : g,
+        ),
+      )
+      if (ENABLE_SORT_ANIMATION) setTimeout(() => setSortingBucketId(null), 300)
+    } else {
+      setGoals((gs) =>
+        gs.map((g) =>
+          g.id === goalId
+            ? {
+                ...g,
+                buckets: g.buckets.map((b) => {
+                  if (b.id !== bucketId) return b
+                  const priorityTasks = b.tasks.filter((t) => t.priority)
+                  const nonPriorityTasks = b.tasks.filter((t) => !t.priority)
+                  const sortByUpdatedAt = (a: TaskItem, c: TaskItem) => {
+                    const stampA = new Date((a as any).updatedAt ?? a.createdAt ?? 0).getTime()
+                    const stampC = new Date((c as any).updatedAt ?? c.createdAt ?? 0).getTime()
+                    return direction === 'oldest' ? stampA - stampC : stampC - stampA
+                  }
+                  priorityTasks.sort(sortByUpdatedAt)
+                  nonPriorityTasks.sort(sortByUpdatedAt)
+                  const sorted = [...priorityTasks, ...nonPriorityTasks]
+                  const reindexed = sorted.map((t, idx) => ({ ...t, sortIndex: (idx + 1) * STEP }))
+                  return { ...b, tasks: reindexed }
+                }),
+              }
+            : g,
+        ),
+      )
+      if (ENABLE_SORT_ANIMATION) setTimeout(() => setSortingBucketId(null), 300)
+    }
+  }
+
   const sortBucketByPriority = async (goalId: string, bucketId: string) => {
     const STEP = 1024
     // Start sorting animation (if enabled)
@@ -14341,6 +14412,7 @@ const normalizedSearch = searchTerm.trim().toLowerCase()
                         onManageArchivedBuckets={() => openArchivedManager(dashboardSelectedGoal.id)}
                         onDeleteCompletedTasks={(bucketId) => deleteCompletedTasks(dashboardSelectedGoal.id, bucketId)}
                         onSortBucketByDate={(bucketId, direction) => sortBucketByDate(dashboardSelectedGoal.id, bucketId, direction)}
+                        onSortBucketByUpdatedAt={(bucketId, direction) => sortBucketByUpdatedAt(dashboardSelectedGoal.id, bucketId, direction)}
                         onSortBucketByPriority={(bucketId) => sortBucketByPriority(dashboardSelectedGoal.id, bucketId)}
                         onSortBucketByName={(bucketId, direction) => sortBucketByName(dashboardSelectedGoal.id, bucketId, direction)}
                         sortingBucketId={sortingBucketId}
@@ -14487,6 +14559,7 @@ const normalizedSearch = searchTerm.trim().toLowerCase()
                     onManageArchivedBuckets={() => openArchivedManager(g.id)}
                     onDeleteCompletedTasks={(bucketId) => deleteCompletedTasks(g.id, bucketId)}
                     onSortBucketByDate={(bucketId, direction) => sortBucketByDate(g.id, bucketId, direction)}
+                    onSortBucketByUpdatedAt={(bucketId, direction) => sortBucketByUpdatedAt(g.id, bucketId, direction)}
                     onSortBucketByPriority={(bucketId) => sortBucketByPriority(g.id, bucketId)}
                     onSortBucketByName={(bucketId, direction) => sortBucketByName(g.id, bucketId, direction)}
                     sortingBucketId={sortingBucketId}
@@ -14629,6 +14702,7 @@ const normalizedSearch = searchTerm.trim().toLowerCase()
                         onManageArchivedBuckets={() => openArchivedManager(g.id)}
                         onDeleteCompletedTasks={(bucketId) => deleteCompletedTasks(g.id, bucketId)}
                         onSortBucketByDate={(bucketId, direction) => sortBucketByDate(g.id, bucketId, direction)}
+                        onSortBucketByUpdatedAt={(bucketId, direction) => sortBucketByUpdatedAt(g.id, bucketId, direction)}
                         onSortBucketByPriority={(bucketId) => sortBucketByPriority(g.id, bucketId)}
                         onSortBucketByName={(bucketId, direction) => sortBucketByName(g.id, bucketId, direction)}
                         sortingBucketId={sortingBucketId}

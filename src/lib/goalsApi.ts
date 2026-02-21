@@ -1282,6 +1282,57 @@ export async function sortBucketTasksByDate(bucketId: string, direction: 'oldest
   return updates
 }
 
+/** Sort all tasks in a bucket by last modified timestamp (updated_at) and update sort_index.
+ * Priority tasks are sorted separately and remain at the top.
+ * Falls back to created_at when updated_at is missing. */
+export async function sortBucketTasksByUpdatedAt(
+  bucketId: string,
+  direction: 'oldest' | 'newest' = 'newest',
+): Promise<{ id: string; sort_index: number }[] | null> {
+  if (!supabase) return null
+  const userId = await getActiveUserId()
+  if (!userId) return null
+
+  const STEP = 1024
+  const { data: tasks, error } = await supabase
+    .from('tasks')
+    .select('id, updated_at, created_at, priority')
+    .eq('container_id', bucketId)
+    .eq('user_id', userId)
+
+  if (error || !tasks || tasks.length === 0) return null
+
+  const priorityTasks = tasks.filter((t) => t.priority)
+  const nonPriorityTasks = tasks.filter((t) => !t.priority)
+
+  const sortByUpdatedAt = (a: typeof tasks[0], b: typeof tasks[0]) => {
+    const stampA = new Date(a.updated_at ?? a.created_at ?? 0).getTime()
+    const stampB = new Date(b.updated_at ?? b.created_at ?? 0).getTime()
+    return direction === 'oldest' ? stampA - stampB : stampB - stampA
+  }
+
+  priorityTasks.sort(sortByUpdatedAt)
+  nonPriorityTasks.sort(sortByUpdatedAt)
+
+  const sorted = [...priorityTasks, ...nonPriorityTasks]
+  const updates = sorted.map((task, index) => ({
+    id: task.id,
+    sort_index: (index + 1) * STEP,
+  }))
+
+  await Promise.all(
+    updates.map(({ id, sort_index }) =>
+      supabase!
+        .from('tasks')
+        .update({ sort_index })
+        .eq('id', id)
+        .eq('user_id', userId),
+    ),
+  )
+
+  return updates
+}
+
 /** Sort all tasks in a bucket by priority (priority first) then by difficulty (green > yellow > red > none).
  * Tasks with the same priority+difficulty combination maintain their relative order (stable sort).
  * Returns the updated task IDs with their new sort_index values, or null on failure. */
