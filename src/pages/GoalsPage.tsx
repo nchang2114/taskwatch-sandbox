@@ -6073,6 +6073,9 @@ export default function GoalsPage(): ReactElement {
   const dailyDeleteSwipeRef = useRef<{ key: string; startX: number; startY: number } | null>(null)
   const dailyTaskEditDoubleClickGuardRef = useRef<{ taskId: string; until: number } | null>(null)
   const dailyTaskTogglePendingRef = useRef<{ taskId: string; timer: number } | null>(null)
+  const DAILY_PRIORITY_HOLD_MS = 300
+  const dailyLongPressTimersRef = useRef<Map<string, number>>(new Map())
+  const dailyLongPressTriggeredRef = useRef<Set<string>>(new Set())
 
   const updateDailyMenuPosition = useCallback(() => {
     const trigger = dailyMenuButtonRef.current
@@ -10124,13 +10127,53 @@ const normalizedSearch = searchTerm.trim().toLowerCase()
                         task.difficulty === 'yellow' && 'goal-task-diff--yellow',
                         task.difficulty === 'red' && 'goal-task-diff--red',
                       )}
-                      onClick={(event) => {
+                      onPointerDown={(event) => {
                         event.stopPropagation()
+                        const key = `${resolved.source}:${resolved.goalId}:${resolved.bucketId}:${task.id}`
+                        try {
+                          const timerId = window.setTimeout(() => {
+                            dailyLongPressTriggeredRef.current.add(key)
+                            if (isQuickTask) {
+                              toggleQuickPriority(task.id)
+                            } else {
+                              toggleTaskPriority(resolved.goalId, resolved.bucketId, task.id)
+                            }
+                          }, DAILY_PRIORITY_HOLD_MS)
+                          dailyLongPressTimersRef.current.set(key, timerId)
+                        } catch {}
+                      }}
+                      onPointerUp={(event) => {
+                        event.stopPropagation()
+                        const key = `${resolved.source}:${resolved.goalId}:${resolved.bucketId}:${task.id}`
+                        const timerId = dailyLongPressTimersRef.current.get(key)
+                        if (timerId) {
+                          window.clearTimeout(timerId)
+                          dailyLongPressTimersRef.current.delete(key)
+                        }
+                        if (dailyLongPressTriggeredRef.current.has(key)) {
+                          dailyLongPressTriggeredRef.current.delete(key)
+                          return
+                        }
                         if (isQuickTask) cycleQuickDifficulty(task.id)
                         else cycleTaskDifficulty(resolved.goalId, resolved.bucketId, task.id)
                       }}
-                      onPointerDown={(event) => event.stopPropagation()}
-                      onPointerUp={(event) => event.stopPropagation()}
+                      onPointerCancel={(event) => {
+                        event.stopPropagation()
+                        const key = `${resolved.source}:${resolved.goalId}:${resolved.bucketId}:${task.id}`
+                        const timerId = dailyLongPressTimersRef.current.get(key)
+                        if (timerId) {
+                          window.clearTimeout(timerId)
+                          dailyLongPressTimersRef.current.delete(key)
+                        }
+                      }}
+                      onPointerLeave={() => {
+                        const key = `${resolved.source}:${resolved.goalId}:${resolved.bucketId}:${task.id}`
+                        const timerId = dailyLongPressTimersRef.current.get(key)
+                        if (timerId) {
+                          window.clearTimeout(timerId)
+                          dailyLongPressTimersRef.current.delete(key)
+                        }
+                      }}
                       onKeyDown={(event) => {
                         if (event.key === 'Enter' || event.key === ' ') {
                           event.preventDefault()
@@ -10140,6 +10183,7 @@ const normalizedSearch = searchTerm.trim().toLowerCase()
                         }
                       }}
                       aria-label="Set task difficulty"
+                      title="Tap to cycle difficulty • Hold ~300ms for Priority"
                     />
                     <button
                       type="button"
