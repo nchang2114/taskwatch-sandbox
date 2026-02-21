@@ -5992,8 +5992,6 @@ export default function GoalsPage(): ReactElement {
   type DailyListSortKey = 'addedAt' | 'name' | 'updatedAt'
   const [dailySortKey, setDailySortKey] = useState<DailyListSortKey>('addedAt')
   const [dailySortAsc, setDailySortAsc] = useState(true)
-  const [dailySortDropdownOpen, setDailySortDropdownOpen] = useState(false)
-  const dailySortDropdownRef = useRef<HTMLDivElement | null>(null)
   const [dailyMenuOpen, setDailyMenuOpen] = useState(false)
   const dailyMenuRef = useRef<HTMLDivElement | null>(null)
   const dailyMenuButtonRef = useRef<HTMLButtonElement | null>(null)
@@ -6058,17 +6056,6 @@ export default function GoalsPage(): ReactElement {
       document.removeEventListener('mousedown', onDocDown)
     }
   }, [dailyMenuOpen, updateDailyMenuPosition])
-
-  // Close sort dropdown on outside click
-  useEffect(() => {
-    if (!dailySortDropdownOpen) return
-    const onDocDown = (e: MouseEvent) => {
-      if (dailySortDropdownRef.current && dailySortDropdownRef.current.contains(e.target as HTMLElement)) return
-      setDailySortDropdownOpen(false)
-    }
-    document.addEventListener('mousedown', onDocDown)
-    return () => document.removeEventListener('mousedown', onDocDown)
-  }, [dailySortDropdownOpen])
 
   // ── Daily To-Do: task resolution ─────────────────────────────────────────
   type ResolvedDailyTask = {
@@ -6159,18 +6146,6 @@ export default function GoalsPage(): ReactElement {
   }, [goals, quickListItems])
 
   // ── Daily To-Do: handlers ────────────────────────────────────────────────
-  const handleDailySortSelect = useCallback((key: DailyListSortKey) => {
-    setDailySortKey((prev) => {
-      if (key === prev) {
-        setDailySortAsc((v) => !v)
-        return prev
-      }
-      setDailySortAsc(true)
-      return key
-    })
-    setDailySortDropdownOpen(false)
-  }, [])
-
   const removeDailyListEntry = useCallback((entryId: string) => {
     setDailyListEntries((current) => {
       const next = current.filter((e) => e.id !== entryId)
@@ -9835,7 +9810,6 @@ const normalizedSearch = searchTerm.trim().toLowerCase()
   // ── Daily To-Do body ──────────────────────────────────────────────────────
   const renderDailyListBody = () => {
     if (!dailyListExpanded) return null
-    const sortLabel = dailySortKey === 'addedAt' ? 'Added' : dailySortKey === 'name' ? 'Name' : 'Modified'
     return (
       <div id="daily-todo-body" className="goal-bucket-body px-3 md:px-4 pb-3 md:pb-4">
         {/* Sub-header */}
@@ -9844,37 +9818,6 @@ const normalizedSearch = searchTerm.trim().toLowerCase()
             <p className="goal-section-title">Tasks ({sortedActiveDailyTasks.length})</p>
           </div>
           <div className="flex items-center gap-2">
-            {/* Sort dropdown */}
-            <div className="relative" ref={dailySortDropdownRef}>
-              <button
-                type="button"
-                className="goal-task-add daily-sort-trigger"
-                onClick={() => setDailySortDropdownOpen((v) => !v)}
-              >
-                <svg className="daily-sort-trigger__icon" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                  <path d="M4 6h16M4 12h10M4 18h6" />
-                </svg>
-                {sortLabel} {dailySortAsc ? '\u2191' : '\u2193'}
-              </button>
-              {dailySortDropdownOpen && (
-                <div className="daily-sort-dropdown">
-                  {([['addedAt', 'Date Added'], ['name', 'Name'], ['updatedAt', 'Last Modified']] as [DailyListSortKey, string][]).map(([key, label]) => {
-                    const isActive = dailySortKey === key
-                    return (
-                      <button
-                        key={key}
-                        type="button"
-                        className={classNames('daily-sort-dropdown__item', isActive && 'daily-sort-dropdown__item--active')}
-                        onClick={() => handleDailySortSelect(key)}
-                      >
-                        {label}
-                        {isActive ? (dailySortAsc ? ' \u2191' : ' \u2193') : ''}
-                      </button>
-                    )
-                  })}
-                </div>
-              )}
-            </div>
             {/* Add Existing button */}
             <button
               type="button"
@@ -13080,6 +13023,30 @@ const normalizedSearch = searchTerm.trim().toLowerCase()
               role="menu"
               onMouseDown={(e) => e.stopPropagation()}
             >
+              <div className="goal-menu__label">Sort by:</div>
+              {([['addedAt', 'Date Added'], ['name', 'Name'], ['updatedAt', 'Last Modified']] as [DailyListSortKey, string][]).map(([key, label]) => {
+                const isActive = dailySortKey === key
+                return (
+                  <button
+                    key={key}
+                    type="button"
+                    className={classNames('goal-menu__item', isActive && 'goal-menu__item--active')}
+                    onClick={() => {
+                      if (dailySortKey === key) {
+                        setDailySortAsc((v) => !v)
+                        return
+                      }
+                      setDailySortKey(key)
+                      setDailySortAsc(true)
+                      setDailyMenuOpen(false)
+                    }}
+                  >
+                    {label}
+                    {isActive ? (dailySortAsc ? ' \u2191' : ' \u2193') : ''}
+                  </button>
+                )
+              })}
+              <div className="goal-menu__divider" />
               <button
                 type="button"
                 className={classNames('goal-menu__item goal-menu__item--danger', completedDailyTasks.length === 0 && 'opacity-50 cursor-not-allowed')}

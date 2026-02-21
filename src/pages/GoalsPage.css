@@ -5122,6 +5122,19 @@ html[data-theme='light'] .goal-menu {
 html[data-theme='light'] .goal-menu__item:hover {
   background: rgba(92, 91, 255, 0.12);
 }
+.goal-menu__item--active {
+  font-weight: 600;
+}
+.goal-menu__label {
+  font-size: 0.74rem;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  padding: 0.3rem 0.75rem 0.2rem;
+  color: rgba(186, 202, 255, 0.72);
+}
+html[data-theme='light'] .goal-menu__label {
+  color: rgba(68, 76, 128, 0.72);
+}
 .goal-menu__item--danger {
   color: #fb7185; /* rose-400 */
 }
