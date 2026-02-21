@@ -949,7 +949,6 @@ export function FocusPage({ viewportWidth: _viewportWidth, showMilliseconds = tr
   const [quickListItems, setQuickListItems] = useState<QuickListEntry[]>(() => readStoredQuickList())
   const [quickListOwnerSignal, setQuickListOwnerSignal] = useState(0)
   const [quickListExpanded, setQuickListExpanded] = useState(false)
-  const [quickListRemoteIds, setQuickListRemoteIds] = useState<{ goalId: string; bucketId: string } | null>(null)
   const quickListRefreshInFlightRef = useRef(false)
   const quickListRefreshPendingRef = useRef(false)
   const [historyOwnerSignal, setHistoryOwnerSignal] = useState(0)
@@ -1075,9 +1074,6 @@ export function FocusPage({ viewportWidth: _viewportWidth, showMilliseconds = tr
       ;(async () => {
         try {
           const remote = await fetchQuickListRemoteItems()
-          if (remote?.goalId && remote?.bucketId) {
-            setQuickListRemoteIds({ goalId: remote.goalId, bucketId: remote.bucketId })
-          }
           if (remote?.tasks) {
             const subtasksByTask = new Map<string, SubtaskRecord[]>()
             for (const s of remote.subtasks) {
@@ -1857,8 +1853,8 @@ useEffect(() => {
     if (quickListItems.length === 0) {
       return []
     }
-    const goalId = quickListRemoteIds?.goalId ?? QUICK_LIST_GOAL_ID
-    const bucketId = quickListRemoteIds?.bucketId ?? QUICK_LIST_BUCKET_ID
+    const goalId = QUICK_LIST_GOAL_ID
+    const bucketId = QUICK_LIST_BUCKET_ID
     const quickGradient = goalGradientById.get(goalId) ?? null
     return quickListItems.map((item) => ({
       goalId,
@@ -1887,7 +1883,7 @@ useEffect(() => {
       repeatingOccurrenceDate: null,
       repeatingOriginalTime: null,
     }))
-  }, [goalGradientById, quickListItems, quickListRemoteIds])
+  }, [goalGradientById, quickListItems])
   const quickListActiveCandidates = useMemo(
     () => quickListFocusCandidates.filter((candidate) => !candidate.completed),
     [quickListFocusCandidates],
@@ -1904,12 +1900,9 @@ useEffect(() => {
       if (goalId === QUICK_LIST_GOAL_ID) {
         return true
       }
-      if (quickListRemoteIds?.goalId) {
-        return goalId === quickListRemoteIds.goalId
-      }
       return false
     },
-    [quickListRemoteIds],
+    [],
   )
 
   const priorityTasks = useMemo(
