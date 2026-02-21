@@ -2735,6 +2735,23 @@ const computeInsertMetrics = (listEl: HTMLElement, y: number) => {
   return { index, top }
 }
 
+const TASK_ROW_DRAG_BLOCK_SELECTOR = [
+  '.goal-task-focus__button',
+  '.goal-task-diff',
+  '.goal-task-row__delete',
+  '.goal-task-details',
+  'input',
+  'textarea',
+  '[contenteditable="true"]',
+].join(', ')
+
+const shouldPreventTaskRowDragStart = (target: EventTarget | null): boolean => {
+  if (!(target instanceof Element)) {
+    return false
+  }
+  return Boolean(target.closest(TASK_ROW_DRAG_BLOCK_SELECTOR))
+}
+
 const GoalRow: React.FC<GoalRowProps> = ({
   goal,
   isOpen,
@@ -4159,6 +4176,10 @@ const GoalRow: React.FC<GoalRowProps> = ({
                                       onRevealDeleteTask(isDeleteRevealed ? null : deleteKey)
                                     }}
                                   onDragStart={(e) => {
+                                    if (shouldPreventTaskRowDragStart(e.target)) {
+                                      e.preventDefault()
+                                      return
+                                    }
                                     onRevealDeleteTask(null)
                                     e.dataTransfer.setData('text/plain', task.id)
                                     e.dataTransfer.effectAllowed = 'move'
@@ -6012,10 +6033,16 @@ export default function GoalsPage(): ReactElement {
   }, [quickListMenuOpen, updateQuickListMenuPosition])
 
   // ── Daily To-Do state ────────────────────────────────────────────────────
+  type DailyTaskUiState = {
+    expanded: boolean
+    subtasksCollapsed: boolean
+    notesCollapsed: boolean
+  }
   const [dailyListExpanded, setDailyListExpanded] = useState(false)
   const [dailyListEntries, setDailyListEntries] = useState<DailyListEntryRecord[]>(
     () => readDailyListEntries(getCurrentUserId()),
   )
+  const [dailyTaskUiState, setDailyTaskUiState] = useState<Record<string, DailyTaskUiState>>({})
   const [dailyCompletedCollapsed, setDailyCompletedCollapsed] = useState(true)
   type DailyListSortKey = 'addedAt' | 'name' | 'updatedAt'
   const [dailySortKey, setDailySortKey] = useState<DailyListSortKey>('addedAt')
@@ -6172,6 +6199,22 @@ export default function GoalsPage(): ReactElement {
     }
     return ids
   }, [goals, quickListItems])
+
+  useEffect(() => {
+    const validTaskIds = new Set(dailyListEntries.map((entry) => entry.taskId))
+    setDailyTaskUiState((current) => {
+      let changed = false
+      const next: Record<string, DailyTaskUiState> = {}
+      Object.entries(current).forEach(([taskId, details]) => {
+        if (validTaskIds.has(taskId)) {
+          next[taskId] = details
+        } else {
+          changed = true
+        }
+      })
+      return changed ? next : current
+    })
+  }, [dailyListEntries])
 
   // ── Daily To-Do: handlers ────────────────────────────────────────────────
   const removeDailyListEntry = useCallback((entryId: string) => {
@@ -8159,6 +8202,60 @@ export default function GoalsPage(): ReactElement {
     dailyTaskTogglePendingRef.current = null
   }, [])
 
+  const toggleDailyTaskDetails = useCallback((resolved: ResolvedDailyTask) => {
+    const taskId = resolved.task.id
+    const hasAnySubtasks = Array.isArray(resolved.task.subtasks) && resolved.task.subtasks.length > 0
+    const notesText = typeof resolved.task.notes === 'string' ? resolved.task.notes : ''
+    const hasAnyNotes = notesText.trim().length > 0
+    setDailyTaskUiState((current) => {
+      const existing = current[taskId]
+      const willExpand = !Boolean(existing?.expanded)
+      return {
+        ...current,
+        [taskId]: {
+          expanded: willExpand,
+          subtasksCollapsed: willExpand ? !hasAnySubtasks : existing?.subtasksCollapsed ?? true,
+          notesCollapsed: willExpand ? !hasAnyNotes : existing?.notesCollapsed ?? true,
+        },
+      }
+    })
+  }, [])
+
+  const toggleDailySubtaskSection = useCallback((taskId: string) => {
+    setDailyTaskUiState((current) => {
+      const existing = current[taskId] ?? {
+        expanded: false,
+        subtasksCollapsed: true,
+        notesCollapsed: true,
+      }
+      return {
+        ...current,
+        [taskId]: {
+          ...existing,
+          subtasksCollapsed: !existing.subtasksCollapsed,
+        },
+      }
+    })
+  }, [])
+
+  const toggleDailyNotesSection = useCallback((taskId: string) => {
+    setDailyTaskUiState((current) => {
+      const existing = current[taskId] ?? {
+        expanded: false,
+        subtasksCollapsed: true,
+        notesCollapsed: true,
+      }
+      return {
+        ...current,
+        [taskId]: {
+          ...existing,
+          expanded: existing.expanded || existing.notesCollapsed,
+          notesCollapsed: !existing.notesCollapsed,
+        },
+      }
+    })
+  }, [])
+
   const scheduleDailyToggle = useCallback((resolved: ResolvedDailyTask) => {
     const taskId = resolved.task.id
     const pending = dailyTaskTogglePendingRef.current
@@ -8166,20 +8263,18 @@ export default function GoalsPage(): ReactElement {
       window.clearTimeout(pending.timer)
     }
     if (typeof window === 'undefined') {
-      if (resolved.source === 'quick-list') toggleQuickItemDetails(taskId)
-      else handleToggleTaskDetails(taskId)
+      toggleDailyTaskDetails(resolved)
       dailyTaskTogglePendingRef.current = null
       return
     }
     const timer = window.setTimeout(() => {
-      if (resolved.source === 'quick-list') toggleQuickItemDetails(taskId)
-      else handleToggleTaskDetails(taskId)
+      toggleDailyTaskDetails(resolved)
       if (dailyTaskTogglePendingRef.current && dailyTaskTogglePendingRef.current.taskId === taskId) {
         dailyTaskTogglePendingRef.current = null
       }
     }, 160)
     dailyTaskTogglePendingRef.current = { taskId, timer }
-  }, [handleToggleTaskDetails, toggleQuickItemDetails])
+  }, [toggleDailyTaskDetails])
 
   const handleAddSubtask = useCallback(
     (taskId: string, options?: { focus?: boolean; afterId?: string }) => {
@@ -9878,13 +9973,14 @@ const normalizedSearch = searchTerm.trim().toLowerCase()
                     notes: typeof task.notes === 'string' ? task.notes : '',
                     subtasks: Array.isArray(task.subtasks) ? task.subtasks : [],
                   }))
+              const dailyUi = dailyTaskUiState[task.id]
               const notesValue = isQuickTask ? String((task as any).notes ?? '') : goalDetails?.notes ?? ''
               const subtasks = isQuickTask
                 ? (((task as any).subtasks ?? []) as TaskSubtask[])
                 : goalDetails?.subtasks ?? []
-              const isDetailsOpen = isQuickTask ? Boolean((task as any).expanded) : Boolean(goalDetails?.expanded)
-              const isSubtasksCollapsed = isQuickTask ? Boolean((task as any).subtasksCollapsed) : Boolean(goalDetails?.subtasksCollapsed)
-              const isNotesCollapsed = isQuickTask ? Boolean((task as any).notesCollapsed) : Boolean(goalDetails?.notesCollapsed)
+              const isDetailsOpen = Boolean(dailyUi?.expanded)
+              const isSubtasksCollapsed = dailyUi?.subtasksCollapsed ?? true
+              const isNotesCollapsed = dailyUi?.notesCollapsed ?? true
               const hasSubtasks = subtasks.length > 0
               const hasNotes = notesValue.trim().length > 0
               const hasDetailsContent = hasSubtasks || hasNotes
@@ -10075,8 +10171,7 @@ const normalizedSearch = searchTerm.trim().toLowerCase()
                             aria-expanded={!isSubtasksCollapsed}
                             aria-controls={subtaskListId}
                             onClick={() => {
-                              if (isQuickTask) toggleQuickSubtasksCollapsed(task.id)
-                              else handleToggleSubtaskSection(task.id)
+                              toggleDailySubtaskSection(task.id)
                             }}
                           >
                             Subtasks
@@ -10088,8 +10183,7 @@ const normalizedSearch = searchTerm.trim().toLowerCase()
                               aria-label={isSubtasksCollapsed ? 'Expand subtasks' : 'Collapse subtasks'}
                               onClick={(e) => {
                                 e.stopPropagation()
-                                if (isQuickTask) toggleQuickSubtasksCollapsed(task.id)
-                                else handleToggleSubtaskSection(task.id)
+                                toggleDailySubtaskSection(task.id)
                               }}
                             />
                           </p>
@@ -10217,8 +10311,7 @@ const normalizedSearch = searchTerm.trim().toLowerCase()
                             aria-expanded={!isNotesCollapsed}
                             aria-controls={notesBodyId}
                             onClick={() => {
-                              if (isQuickTask) toggleQuickNotesCollapsed(task.id)
-                              else handleToggleNotesSection(task.id)
+                              toggleDailyNotesSection(task.id)
                             }}
                           >
                             Notes
@@ -10230,8 +10323,7 @@ const normalizedSearch = searchTerm.trim().toLowerCase()
                               aria-label={isNotesCollapsed ? 'Expand notes' : 'Collapse notes'}
                               onClick={(e) => {
                                 e.stopPropagation()
-                                if (isQuickTask) toggleQuickNotesCollapsed(task.id)
-                                else handleToggleNotesSection(task.id)
+                                toggleDailyNotesSection(task.id)
                               }}
                             />
                           </p>
@@ -10532,6 +10624,10 @@ const normalizedSearch = searchTerm.trim().toLowerCase()
                                       setRevealedDeleteTaskKey(isDeleteRevealed ? null : deleteKey)
                                     }}
                                     onDragStart={(e) => {
+                                      if (shouldPreventTaskRowDragStart(e.target)) {
+                                        e.preventDefault()
+                                        return
+                                      }
                                       setRevealedDeleteTaskKey(null)
                                       e.dataTransfer.setData('text/plain', item.id)
                                       e.dataTransfer.effectAllowed = 'move'
@@ -11129,6 +11225,10 @@ const normalizedSearch = searchTerm.trim().toLowerCase()
                                           setRevealedDeleteTaskKey(isDeleteRevealed ? null : deleteKey)
                                         }}
                                         onDragStart={(e) => {
+                                          if (shouldPreventTaskRowDragStart(e.target)) {
+                                            e.preventDefault()
+                                            return
+                                          }
                                           setRevealedDeleteTaskKey(null)
                                           e.dataTransfer.setData('text/plain', item.id)
                                           e.dataTransfer.effectAllowed = 'move'
