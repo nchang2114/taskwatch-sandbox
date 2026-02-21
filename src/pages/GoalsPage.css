@@ -5786,3 +5786,67 @@ html[data-theme='light'] .daily-modal__btn--cancel:hover {
   opacity: 0.4;
   cursor: not-allowed;
 }
+
+/* Collapsible goal/bucket headers in modal */
+.daily-modal__collapsible {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  width: 100%;
+  text-align: left;
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  padding: 0;
+  color: inherit;
+  font: inherit;
+}
+.daily-modal__collapsible:hover {
+  opacity: 0.85;
+}
+.daily-modal__chevron {
+  flex-shrink: 0;
+  transition: transform 0.15s ease;
+}
+.daily-modal__chevron--open {
+  transform: rotate(90deg);
+}
+
+/* Drag-over highlight for Daily To-Do section */
+.daily-todo-card--drag-over {
+  outline: 2px dashed rgba(99,102,241,0.6);
+  outline-offset: -2px;
+  background: rgba(99,102,241,0.06) !important;
+}
+html[data-theme='light'] .daily-todo-card--drag-over {
+  outline-color: rgba(99,102,241,0.5);
+  background: rgba(99,102,241,0.05) !important;
+}
+
+/* Read-only notes in Daily To-Do details */
+.daily-todo__notes-readonly {
+  font-size: 0.82rem;
+  line-height: 1.5;
+  color: rgba(255,255,255,0.65);
+  padding: 6px 8px;
+  margin: 0;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+html[data-theme='light'] .daily-todo__notes-readonly {
+  color: rgba(0,0,0,0.55);
+}
+
+/* Subtask text displayed inline (read-only in daily list) */
+.goal-task-details__subtask-text {
+  font-size: 0.82rem;
+  line-height: 1.4;
+  color: rgba(255,255,255,0.8);
+}
+html[data-theme='light'] .goal-task-details__subtask-text {
+  color: rgba(0,0,0,0.7);
+}
+.goal-task-details__subtask--completed .goal-task-details__subtask-text {
+  text-decoration: line-through;
+  opacity: 0.55;
+}

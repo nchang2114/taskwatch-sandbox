@@ -5997,6 +5997,23 @@ export default function GoalsPage(): ReactElement {
   const [dailyAddModalOpen, setDailyAddModalOpen] = useState(false)
   const [dailyModalSearch, setDailyModalSearch] = useState('')
   const [dailyModalSelectedIds, setDailyModalSelectedIds] = useState<Set<string>>(new Set())
+  const [dailyModalExpandedGoals, setDailyModalExpandedGoals] = useState<Set<string>>(new Set())
+  const [dailyModalExpandedBuckets, setDailyModalExpandedBuckets] = useState<Set<string>>(new Set())
+
+  // Daily To-Do: drag-and-drop state
+  const [dailyDragOver, setDailyDragOver] = useState(false)
+
+  // Daily To-Do: completion animation
+  const [dailyCompletingMap, setDailyCompletingMap] = useState<Record<string, boolean>>({})
+  const dailyTaskRowRefs = useRef(new Map<string, HTMLLIElement>())
+  const registerDailyTaskRowRef = (taskId: string, el: HTMLLIElement | null) => {
+    if (el) dailyTaskRowRefs.current.set(taskId, el)
+    else dailyTaskRowRefs.current.delete(taskId)
+  }
+
+  // Daily To-Do: task details expansion
+  type DailyItemUIState = { expanded: boolean; subtasksCollapsed: boolean; notesCollapsed: boolean }
+  const [dailyExpandedMap, setDailyExpandedMap] = useState<Record<string, DailyItemUIState>>({})
 
   // Close sort dropdown on outside click
   useEffect(() => {
@@ -6111,6 +6128,151 @@ export default function GoalsPage(): ReactElement {
     setDailyModalSearch('')
     setDailyAddModalOpen(false)
   }, [dailyListEntries, dailyModalSelectedIds])
+
+  const handleDailyDragOver = useCallback((e: React.DragEvent) => {
+    const info = (window as any).__dragTaskInfo as { taskId?: string; section?: string } | null
+    if (!info?.taskId || info.section !== 'active') return
+    e.preventDefault()
+    e.dataTransfer.dropEffect = 'copy'
+    setDailyDragOver(true)
+  }, [])
+
+  const handleDailyDragLeave = useCallback((e: React.DragEvent) => {
+    if (e.currentTarget.contains(e.relatedTarget as Node)) return
+    setDailyDragOver(false)
+  }, [])
+
+  const handleDailyDrop = useCallback((e: React.DragEvent) => {
+    setDailyDragOver(false)
+    const info = (window as any).__dragTaskInfo as { taskId?: string; section?: string } | null
+    if (!info?.taskId || info.section !== 'active') return
+    e.preventDefault()
+    const taskId = info.taskId
+    const userId = getCurrentUserId()
+    if (isDailyListTask(userId, taskId)) return
+    const now = new Date().toISOString()
+    const sortIndex = dailyListEntries.length > 0
+      ? Math.max(...dailyListEntries.map((en) => en.sortIndex)) + 1024
+      : 1024
+    const newEntry: DailyListEntryRecord = {
+      id: generateUuid(),
+      userId,
+      dailyListId: DAILY_LIST_ID,
+      taskId,
+      sortIndex,
+      addedAt: now,
+    }
+    const next = [...dailyListEntries, newEntry]
+    setDailyListEntries(next)
+    writeDailyListEntries(userId, next)
+    // Auto-expand to show the dropped task
+    setDailyListExpanded(true)
+  }, [dailyListEntries])
+
+  // Daily To-Do: completion with animation
+  const toggleDailyCompleteWithAnimation = useCallback((resolved: ResolvedDailyTask) => {
+    const taskId = resolved.task.id
+    if (dailyCompletingMap[taskId]) return
+    const el = dailyTaskRowRefs.current.get(taskId)
+    let rowTotalMs = 1600
+    if (el) {
+      try {
+        const textHost = (el.querySelector('.goal-task-text') as HTMLElement | null) ?? null
+        const textInner = (el.querySelector('.goal-task-text__inner') as HTMLElement | null) ?? textHost
+        if (textHost && textInner) {
+          const range = document.createRange()
+          range.selectNodeContents(textInner)
+          const rects = Array.from(range.getClientRects())
+          const containerRect = textHost.getBoundingClientRect()
+          const merged: Array<{ left: number; right: number; top: number; height: number }> = []
+          const byTop = rects.filter((r) => r.width > 2 && r.height > 0).sort((a, b) => a.top - b.top)
+          byTop.forEach((r) => {
+            const last = merged[merged.length - 1]
+            if (!last || Math.abs(r.top - last.top) > 4) {
+              merged.push({ left: r.left, right: r.right, top: r.top, height: r.height })
+            } else {
+              last.left = Math.min(last.left, r.left)
+              last.right = Math.max(last.right, r.right)
+              last.top = Math.min(last.top, r.top)
+              last.height = Math.max(last.height, r.height)
+            }
+          })
+          const lineDur = 520
+          const lineStagger = 220
+          const thickness = 2
+          const lineCount = Math.max(1, merged.length)
+          const overlay = document.createElement('div')
+          overlay.className = 'goal-strike-overlay'
+          const hostStyle = window.getComputedStyle(textHost)
+          const patchPosition = hostStyle.position === 'static'
+          if (patchPosition) textHost.style.position = 'relative'
+          merged.forEach((m, i) => {
+            const top = Math.round((m.top - containerRect.top) + (m.height - thickness) / 2)
+            const left = Math.max(0, Math.round(m.left - containerRect.left))
+            const width = Math.max(0, Math.round(m.right - m.left))
+            const seg = document.createElement('div')
+            seg.className = 'goal-strike-line'
+            seg.style.top = `${top}px`
+            seg.style.left = `${left}px`
+            seg.style.height = `${thickness}px`
+            seg.style.setProperty('--target-w', `${width}px`)
+            seg.style.setProperty('--line-dur', `${lineDur}ms`)
+            seg.style.setProperty('--line-delay', `${i * lineStagger}ms`)
+            overlay.appendChild(seg)
+          })
+          textHost.appendChild(overlay)
+          const overlayTotal = lineDur + (lineCount - 1) * lineStagger + 100
+          rowTotalMs = Math.max(Math.ceil(overlayTotal / 0.7), overlayTotal + 400)
+          el.style.setProperty('--row-complete-dur', `${rowTotalMs}ms`)
+          window.setTimeout(() => {
+            if (overlay.parentNode) overlay.parentNode.removeChild(overlay)
+            if (patchPosition) textHost.style.position = ''
+          }, rowTotalMs + 80)
+        }
+      } catch {}
+    }
+    setDailyCompletingMap((cur) => ({ ...cur, [taskId]: true }))
+    window.setTimeout(() => {
+      toggleDailyTaskCompletionRef.current(resolved)
+      setDailyCompletingMap((cur) => {
+        const next = { ...cur }
+        delete next[taskId]
+        return next
+      })
+    }, Math.max(1200, rowTotalMs))
+  }, [dailyCompletingMap])
+
+  // Daily To-Do: toggle task details expansion
+  const toggleDailyTaskDetails = useCallback((taskId: string, task: TaskItem) => {
+    setDailyExpandedMap((prev) => {
+      const current = prev[taskId]
+      if (current?.expanded) {
+        return { ...prev, [taskId]: { ...current, expanded: false } }
+      }
+      const hasSubtasks = Array.isArray(task.subtasks) && task.subtasks.length > 0
+      const hasNotes = typeof task.notes === 'string' && task.notes !== null && String(task.notes).trim().length > 0
+      return {
+        ...prev,
+        [taskId]: { expanded: true, subtasksCollapsed: !hasSubtasks, notesCollapsed: !hasNotes },
+      }
+    })
+  }, [])
+
+  const toggleDailySubtasksCollapsed = useCallback((taskId: string) => {
+    setDailyExpandedMap((prev) => {
+      const current = prev[taskId]
+      if (!current) return prev
+      return { ...prev, [taskId]: { ...current, subtasksCollapsed: !current.subtasksCollapsed } }
+    })
+  }, [])
+
+  const toggleDailyNotesCollapsed = useCallback((taskId: string) => {
+    setDailyExpandedMap((prev) => {
+      const current = prev[taskId]
+      if (!current) return prev
+      return { ...prev, [taskId]: { ...current, notesCollapsed: !current.notesCollapsed } }
+    })
+  }, [])
 
   const ensureQuickListBucketId = useCallback(async (): Promise<string | null> => {
     if (quickListBucketIdRef.current) {
@@ -9583,42 +9745,147 @@ const normalizedSearch = searchTerm.trim().toLowerCase()
           <p className="goal-task-empty">No tasks yet. Add tasks from your goals.</p>
         ) : (
           <ul className="mt-2 space-y-2">
-            {sortedActiveDailyTasks.map(({ entry, task, goalName, bucketName, bucketId, goalId }) => (
-              <li key={entry.id} className={classNames(
-                'goal-task-row',
-                task.difficulty === 'green' && 'goal-task-row--diff-green',
-                task.difficulty === 'yellow' && 'goal-task-row--diff-yellow',
-                task.difficulty === 'red' && 'goal-task-row--diff-red',
-                task.priority && 'goal-task-row--priority',
-              )}>
-                <div className="goal-task-row__content">
-                  <button
-                    type="button"
-                    className="goal-task-marker goal-task-marker--action"
-                    onClick={() => toggleDailyTaskCompletionRef.current({ entry, task, goalName, bucketName, bucketId, goalId })}
-                    aria-label="Mark task complete"
-                  />
-                  <span className="goal-task-text">
-                    <span className="goal-task-text__inner">{task.text}</span>
-                    <span className="daily-todo__source">{goalName} / {bucketName}</span>
-                  </span>
-                  {task.difficulty && task.difficulty !== 'none' && (
-                    <span className={classNames('goal-task-diff', `goal-task-diff--${task.difficulty}`)} aria-label={`Difficulty: ${task.difficulty}`} />
+            {sortedActiveDailyTasks.map((resolved) => {
+              const { entry, task, goalName, bucketName } = resolved
+              const uiState = dailyExpandedMap[task.id]
+              const isDetailsOpen = Boolean(uiState?.expanded)
+              const hasSubtasks = Array.isArray(task.subtasks) && task.subtasks.length > 0
+              const hasNotes = typeof task.notes === 'string' && task.notes !== null && String(task.notes).trim().length > 0
+              const hasDetailsContent = hasSubtasks || hasNotes
+              return (
+                <li
+                  key={entry.id}
+                  ref={(el) => registerDailyTaskRowRef(task.id, el)}
+                  className={classNames(
+                    'goal-task-row',
+                    task.difficulty === 'green' && 'goal-task-row--diff-green',
+                    task.difficulty === 'yellow' && 'goal-task-row--diff-yellow',
+                    task.difficulty === 'red' && 'goal-task-row--diff-red',
+                    task.priority && 'goal-task-row--priority',
+                    dailyCompletingMap[task.id] && 'goal-task-row--completing',
+                    isDetailsOpen && 'goal-task-row--expanded',
+                    hasDetailsContent && 'goal-task-row--has-details',
                   )}
-                  <button
-                    type="button"
-                    className="daily-todo__remove"
-                    onClick={() => removeDailyListEntry(entry.id)}
-                    aria-label="Remove from daily list"
-                    title="Remove from daily list"
-                  >
-                    <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                      <path d="M18 6L6 18M6 6l12 12" />
-                    </svg>
-                  </button>
-                </div>
-              </li>
-            ))}
+                >
+                  <div className="goal-task-row__content">
+                    <button
+                      type="button"
+                      className="goal-task-marker goal-task-marker--action"
+                      onClick={(e) => { e.stopPropagation(); toggleDailyCompleteWithAnimation(resolved) }}
+                      aria-label="Mark task complete"
+                    />
+                    <button
+                      type="button"
+                      className="goal-task-text goal-task-text--button"
+                      onClick={() => toggleDailyTaskDetails(task.id, task)}
+                      aria-label="Toggle task details"
+                    >
+                      <span className="goal-task-text__inner">{task.text}</span>
+                      <span className="daily-todo__source">{goalName} / {bucketName}</span>
+                    </button>
+                    {task.difficulty && task.difficulty !== 'none' && (
+                      <span className={classNames('goal-task-diff', `goal-task-diff--${task.difficulty}`)} aria-label={`Difficulty: ${task.difficulty}`} />
+                    )}
+                    <button
+                      type="button"
+                      className="daily-todo__remove"
+                      onClick={() => removeDailyListEntry(entry.id)}
+                      aria-label="Remove from daily list"
+                      title="Remove from daily list"
+                    >
+                      <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                        <path d="M18 6L6 18M6 6l12 12" />
+                      </svg>
+                    </button>
+                  </div>
+                  {/* Details panel: subtasks + notes */}
+                  {isDetailsOpen && (
+                    <div className={classNames('goal-task-details', 'goal-task-details--open')} onPointerDown={(e) => e.stopPropagation()}>
+                      {/* Subtasks */}
+                      <div className={classNames('goal-task-details__subtasks', uiState?.subtasksCollapsed && 'goal-task-details__subtasks--collapsed')}>
+                        <div className="goal-task-details__section-title">
+                          <p
+                            className="goal-task-details__heading"
+                            role="button"
+                            tabIndex={0}
+                            aria-expanded={!uiState?.subtasksCollapsed}
+                            onClick={() => toggleDailySubtasksCollapsed(task.id)}
+                          >
+                            Subtasks
+                            <button
+                              type="button"
+                              className="goal-task-details__collapse"
+                              aria-expanded={!uiState?.subtasksCollapsed}
+                              aria-label={uiState?.subtasksCollapsed ? 'Expand subtasks' : 'Collapse subtasks'}
+                              onClick={(e) => { e.stopPropagation(); toggleDailySubtasksCollapsed(task.id) }}
+                            />
+                          </p>
+                        </div>
+                        <div className="goal-task-details__subtasks-body">
+                          {hasSubtasks ? (
+                            <ul className="goal-task-details__subtask-list">
+                              {(task.subtasks ?? []).map((subtask) => (
+                                <li
+                                  key={subtask.id}
+                                  className={classNames(
+                                    'goal-task-details__subtask',
+                                    subtask.completed && 'goal-task-details__subtask--completed',
+                                  )}
+                                >
+                                  <label className="goal-task-details__subtask-item">
+                                    <div className="goal-subtask-field">
+                                      <input
+                                        type="checkbox"
+                                        className="goal-task-details__checkbox"
+                                        checked={subtask.completed}
+                                        readOnly
+                                      />
+                                      <span className="goal-task-details__subtask-text">{subtask.text}</span>
+                                    </div>
+                                  </label>
+                                </li>
+                              ))}
+                            </ul>
+                          ) : (
+                            <div className="goal-task-details__empty">
+                              <p className="goal-task-details__empty-text">No subtasks</p>
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                      {/* Notes */}
+                      <div className={classNames('goal-task-details__notes', uiState?.notesCollapsed && 'goal-task-details__notes--collapsed')}>
+                        <div className="goal-task-details__section-title goal-task-details__section-title--notes">
+                          <p
+                            className="goal-task-details__heading"
+                            role="button"
+                            tabIndex={0}
+                            aria-expanded={!uiState?.notesCollapsed}
+                            onClick={() => toggleDailyNotesCollapsed(task.id)}
+                          >
+                            Notes
+                            <button
+                              type="button"
+                              className="goal-task-details__collapse"
+                              aria-expanded={!uiState?.notesCollapsed}
+                              aria-label={uiState?.notesCollapsed ? 'Expand notes' : 'Collapse notes'}
+                              onClick={(e) => { e.stopPropagation(); toggleDailyNotesCollapsed(task.id) }}
+                            />
+                          </p>
+                        </div>
+                        <div className="goal-task-details__notes-body">
+                          {hasNotes ? (
+                            <p className="goal-task-details__notes-text daily-todo__notes-readonly">{String(task.notes ?? '')}</p>
+                          ) : (
+                            <p className="goal-task-details__empty-text">No notes</p>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                </li>
+              )
+            })}
           </ul>
         )}
 
@@ -9642,33 +9909,36 @@ const normalizedSearch = searchTerm.trim().toLowerCase()
             </button>
             {!dailyCompletedCollapsed && (
               <ul className="goal-completed__list mt-2 space-y-2">
-                {completedDailyTasks.map(({ entry, task, goalName, bucketName, bucketId, goalId }) => (
-                  <li key={entry.id} className="goal-task-row goal-task-row--completed">
-                    <div className="goal-task-row__content">
-                      <button
-                        type="button"
-                        className="goal-task-marker goal-task-marker--completed goal-task-marker--action"
-                        onClick={() => toggleDailyTaskCompletionRef.current({ entry, task, goalName, bucketName, bucketId, goalId })}
-                        aria-label="Mark task incomplete"
-                      />
-                      <span className="goal-task-text">
-                        <span className="goal-task-text__inner">{task.text}</span>
-                        <span className="daily-todo__source">{goalName} / {bucketName}</span>
-                      </span>
-                      <button
-                        type="button"
-                        className="daily-todo__remove"
-                        onClick={() => removeDailyListEntry(entry.id)}
-                        aria-label="Remove from daily list"
-                        title="Remove from daily list"
-                      >
-                        <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                          <path d="M18 6L6 18M6 6l12 12" />
-                        </svg>
-                      </button>
-                    </div>
-                  </li>
-                ))}
+                {completedDailyTasks.map((resolved) => {
+                  const { entry, task, goalName, bucketName } = resolved
+                  return (
+                    <li key={entry.id} className="goal-task-row goal-task-row--completed">
+                      <div className="goal-task-row__content">
+                        <button
+                          type="button"
+                          className="goal-task-marker goal-task-marker--completed goal-task-marker--action"
+                          onClick={() => toggleDailyTaskCompletionRef.current(resolved)}
+                          aria-label="Mark task incomplete"
+                        />
+                        <span className="goal-task-text">
+                          <span className="goal-task-text__inner">{task.text}</span>
+                          <span className="daily-todo__source">{goalName} / {bucketName}</span>
+                        </span>
+                        <button
+                          type="button"
+                          className="daily-todo__remove"
+                          onClick={() => removeDailyListEntry(entry.id)}
+                          aria-label="Remove from daily list"
+                          title="Remove from daily list"
+                        >
+                          <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                            <path d="M18 6L6 18M6 6l12 12" />
+                          </svg>
+                        </button>
+                      </div>
+                    </li>
+                  )
+                })}
               </ul>
             )}
           </div>
@@ -12407,46 +12677,79 @@ const normalizedSearch = searchTerm.trim().toLowerCase()
               <div className="daily-modal__list">
                 {goals.filter((g) => !g.archived).map((goal) => {
                   const searchLower = dailyModalSearch.trim().toLowerCase()
+                  const isSearching = searchLower.length > 0
                   const matchingBuckets = goal.buckets.filter((b) =>
                     !b.archived && b.tasks.some((t) => !t.completed && (!searchLower || t.text.toLowerCase().includes(searchLower))),
                   )
                   if (matchingBuckets.length === 0) return null
+                  const goalOpen = isSearching || dailyModalExpandedGoals.has(goal.id)
                   return (
                     <div key={goal.id} className="daily-modal__goal-section">
-                      <p className="daily-modal__goal-name">{goal.name}</p>
-                      {matchingBuckets.map((bucket) => (
-                        <div key={bucket.id} className="daily-modal__bucket-section">
-                          <p className="daily-modal__bucket-name">{bucket.name}</p>
-                          {bucket.tasks
-                            .filter((t) => !t.completed && (!searchLower || t.text.toLowerCase().includes(searchLower)))
-                            .map((task) => {
-                              const alreadyAdded = isDailyListTask(getCurrentUserId(), task.id)
-                              const isSelected = dailyModalSelectedIds.has(task.id)
-                              return (
-                                <label
-                                  key={task.id}
-                                  className={classNames('daily-modal__task', alreadyAdded && 'daily-modal__task--added')}
-                                >
-                                  <input
-                                    type="checkbox"
-                                    checked={alreadyAdded || isSelected}
-                                    disabled={alreadyAdded}
-                                    onChange={() => {
-                                      setDailyModalSelectedIds((prev) => {
-                                        const next = new Set(prev)
-                                        if (isSelected) next.delete(task.id)
-                                        else next.add(task.id)
-                                        return next
-                                      })
-                                    }}
-                                  />
-                                  <span className="daily-modal__task-text">{task.text}</span>
-                                  {alreadyAdded && <span className="daily-modal__task-badge">Added</span>}
-                                </label>
-                              )
-                            })}
-                        </div>
-                      ))}
+                      <button
+                        type="button"
+                        className="daily-modal__goal-name daily-modal__collapsible"
+                        onClick={() => setDailyModalExpandedGoals((prev) => {
+                          const next = new Set(prev)
+                          if (next.has(goal.id)) next.delete(goal.id)
+                          else next.add(goal.id)
+                          return next
+                        })}
+                      >
+                        <svg className={classNames('daily-modal__chevron', goalOpen && 'daily-modal__chevron--open')} viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                          <path d="M9 6l6 6-6 6" />
+                        </svg>
+                        {goal.name}
+                      </button>
+                      {goalOpen && matchingBuckets.map((bucket) => {
+                        const bucketOpen = isSearching || dailyModalExpandedBuckets.has(bucket.id)
+                        return (
+                          <div key={bucket.id} className="daily-modal__bucket-section">
+                            <button
+                              type="button"
+                              className="daily-modal__bucket-name daily-modal__collapsible"
+                              onClick={() => setDailyModalExpandedBuckets((prev) => {
+                                const next = new Set(prev)
+                                if (next.has(bucket.id)) next.delete(bucket.id)
+                                else next.add(bucket.id)
+                                return next
+                              })}
+                            >
+                              <svg className={classNames('daily-modal__chevron', bucketOpen && 'daily-modal__chevron--open')} viewBox="0 0 24 24" width="10" height="10" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                                <path d="M9 6l6 6-6 6" />
+                              </svg>
+                              {bucket.name}
+                            </button>
+                            {bucketOpen && bucket.tasks
+                              .filter((t) => !t.completed && (!searchLower || t.text.toLowerCase().includes(searchLower)))
+                              .map((task) => {
+                                const alreadyAdded = isDailyListTask(getCurrentUserId(), task.id)
+                                const isSelected = dailyModalSelectedIds.has(task.id)
+                                return (
+                                  <label
+                                    key={task.id}
+                                    className={classNames('daily-modal__task', alreadyAdded && 'daily-modal__task--added')}
+                                  >
+                                    <input
+                                      type="checkbox"
+                                      checked={alreadyAdded || isSelected}
+                                      disabled={alreadyAdded}
+                                      onChange={() => {
+                                        setDailyModalSelectedIds((prev) => {
+                                          const next = new Set(prev)
+                                          if (isSelected) next.delete(task.id)
+                                          else next.add(task.id)
+                                          return next
+                                        })
+                                      }}
+                                    />
+                                    <span className="daily-modal__task-text">{task.text}</span>
+                                    {alreadyAdded && <span className="daily-modal__task-badge">Added</span>}
+                                  </label>
+                                )
+                              })}
+                          </div>
+                        )
+                      })}
                     </div>
                   )
                 })}
@@ -13004,8 +13307,11 @@ const normalizedSearch = searchTerm.trim().toLowerCase()
           {/* Daily To-Do: system layer between Daily Life and Quick List */}
           {!dashboardLayout ? (
             <section
-              className={classNames('quick-list-card daily-todo-card', dailyListExpanded && 'quick-list-card--open')}
+              className={classNames('quick-list-card daily-todo-card', dailyListExpanded && 'quick-list-card--open', dailyDragOver && 'daily-todo-card--drag-over')}
               aria-label="Daily To-Do"
+              onDragOver={handleDailyDragOver}
+              onDragLeave={handleDailyDragLeave}
+              onDrop={handleDailyDrop}
             >
               <div className="life-routines-card__header-wrapper">
                 <div className="life-routines-card__header-left">
