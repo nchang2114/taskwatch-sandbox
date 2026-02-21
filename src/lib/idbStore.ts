@@ -11,7 +11,7 @@
  */
 
 const DB_NAME = 'taskwatch'
-const DB_VERSION = 2
+const DB_VERSION = 3
 
 export const STORE = {
   goals: 'goals',
@@ -21,6 +21,7 @@ export const STORE = {
   milestones: 'milestones',
   lifeRoutines: 'lifeRoutines',
   userPreferences: 'userPreferences',
+  dailyListEntries: 'dailyListEntries',
 } as const
 
 export type StoreName = (typeof STORE)[keyof typeof STORE]
@@ -77,6 +78,12 @@ export function openDB(): Promise<IDBDatabase> {
       // userPreferences: userId as keyPath (one record per user)
       if (!db.objectStoreNames.contains(STORE.userPreferences)) {
         db.createObjectStore(STORE.userPreferences, { keyPath: 'userId' })
+      }
+
+      // dailyListEntries: id (keyPath), userId index
+      if (!db.objectStoreNames.contains(STORE.dailyListEntries)) {
+        const store = db.createObjectStore(STORE.dailyListEntries, { keyPath: 'id' })
+        store.createIndex('userId', 'userId', { unique: false })
       }
     }
     request.onsuccess = () => resolve(request.result)

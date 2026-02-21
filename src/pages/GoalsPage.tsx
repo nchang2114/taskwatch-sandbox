@@ -93,6 +93,14 @@ import { storage, STORAGE_KEYS } from '../lib/storage'
 import { getCurrentUserId, GUEST_USER_ID } from '../lib/namespaceManager'
 import { readPreferences, updatePreference } from '../lib/idbUserPreferences'
 import { readMilestones as readMilestonesFromCache, writeMilestones as writeMilestonesToCache } from '../lib/idbMilestones'
+import {
+  readDailyListEntries,
+  writeDailyListEntries,
+  isDailyListTask,
+  DAILY_LIST_ID,
+  type DailyListEntryRecord,
+} from '../lib/idbDailyList'
+import { generateUuid } from '../lib/quickListRemote'
 
 // Minimal sync instrumentation disabled by default
 const DEBUG_SYNC = false
@@ -5974,6 +5982,136 @@ export default function GoalsPage(): ReactElement {
       document.removeEventListener('mousedown', onDocDown)
     }
   }, [quickListMenuOpen, updateQuickListMenuPosition])
+
+  // ── Daily To-Do state ────────────────────────────────────────────────────
+  const [dailyListExpanded, setDailyListExpanded] = useState(false)
+  const [dailyListEntries, setDailyListEntries] = useState<DailyListEntryRecord[]>(
+    () => readDailyListEntries(getCurrentUserId()),
+  )
+  const [dailyCompletedCollapsed, setDailyCompletedCollapsed] = useState(true)
+  type DailyListSortKey = 'addedAt' | 'name' | 'updatedAt'
+  const [dailySortKey, setDailySortKey] = useState<DailyListSortKey>('addedAt')
+  const [dailySortAsc, setDailySortAsc] = useState(true)
+  const [dailySortDropdownOpen, setDailySortDropdownOpen] = useState(false)
+  const dailySortDropdownRef = useRef<HTMLDivElement | null>(null)
+  const [dailyAddModalOpen, setDailyAddModalOpen] = useState(false)
+  const [dailyModalSearch, setDailyModalSearch] = useState('')
+  const [dailyModalSelectedIds, setDailyModalSelectedIds] = useState<Set<string>>(new Set())
+
+  // Close sort dropdown on outside click
+  useEffect(() => {
+    if (!dailySortDropdownOpen) return
+    const onDocDown = (e: MouseEvent) => {
+      if (dailySortDropdownRef.current && dailySortDropdownRef.current.contains(e.target as HTMLElement)) return
+      setDailySortDropdownOpen(false)
+    }
+    document.addEventListener('mousedown', onDocDown)
+    return () => document.removeEventListener('mousedown', onDocDown)
+  }, [dailySortDropdownOpen])
+
+  // ── Daily To-Do: task resolution ─────────────────────────────────────────
+  type ResolvedDailyTask = {
+    entry: DailyListEntryRecord
+    task: TaskItem
+    goalName: string
+    bucketName: string
+    bucketId: string
+    goalId: string
+  }
+
+  const resolvedDailyTasks = useMemo<ResolvedDailyTask[]>(() => {
+    const out: ResolvedDailyTask[] = []
+    for (const entry of dailyListEntries) {
+      let found = false
+      for (const goal of goals) {
+        if (found) break
+        for (const bucket of goal.buckets) {
+          const task = bucket.tasks.find((t) => t.id === entry.taskId)
+          if (task) {
+            out.push({ entry, task, goalName: goal.name, bucketName: bucket.name, bucketId: bucket.id, goalId: goal.id })
+            found = true
+            break
+          }
+        }
+      }
+    }
+    return out
+  }, [dailyListEntries, goals])
+
+  const sortedActiveDailyTasks = useMemo<ResolvedDailyTask[]>(() => {
+    const active = resolvedDailyTasks.filter((r) => !r.task.completed)
+    return active.slice().sort((a, b) => {
+      let result = 0
+      if (dailySortKey === 'addedAt') {
+        result = a.entry.addedAt.localeCompare(b.entry.addedAt)
+      } else if (dailySortKey === 'name') {
+        result = a.task.text.toLowerCase().localeCompare(b.task.text.toLowerCase())
+      } else if (dailySortKey === 'updatedAt') {
+        const au = (a.task as any).updatedAt ?? a.entry.addedAt
+        const bu = (b.task as any).updatedAt ?? b.entry.addedAt
+        result = au.localeCompare(bu)
+      }
+      return dailySortAsc ? result : -result
+    })
+  }, [resolvedDailyTasks, dailySortKey, dailySortAsc])
+
+  const completedDailyTasks = useMemo<ResolvedDailyTask[]>(
+    () => resolvedDailyTasks.filter((r) => r.task.completed),
+    [resolvedDailyTasks],
+  )
+
+  // ── Daily To-Do: handlers ────────────────────────────────────────────────
+  const handleDailySortSelect = useCallback((key: DailyListSortKey) => {
+    setDailySortKey((prev) => {
+      if (key === prev) {
+        setDailySortAsc((v) => !v)
+        return prev
+      }
+      setDailySortAsc(true)
+      return key
+    })
+    setDailySortDropdownOpen(false)
+  }, [])
+
+  const removeDailyListEntry = useCallback((entryId: string) => {
+    setDailyListEntries((current) => {
+      const next = current.filter((e) => e.id !== entryId)
+      writeDailyListEntries(getCurrentUserId(), next)
+      return next
+    })
+  }, [])
+
+  // toggleDailyTaskCompletion is defined later (after toggleTaskCompletion)
+  const toggleDailyTaskCompletionRef = useRef<(resolved: ResolvedDailyTask) => void>(() => {})
+
+  const handleDailyAddSelected = useCallback(() => {
+    const userId = getCurrentUserId()
+    const existingTaskIds = new Set(dailyListEntries.map((e) => e.taskId))
+    const now = new Date().toISOString()
+    const newEntries: DailyListEntryRecord[] = []
+    let sortIndex = dailyListEntries.length > 0
+      ? Math.max(...dailyListEntries.map((e) => e.sortIndex)) + 1024
+      : 1024
+    for (const taskId of dailyModalSelectedIds) {
+      if (existingTaskIds.has(taskId)) continue
+      newEntries.push({
+        id: generateUuid(),
+        userId,
+        dailyListId: DAILY_LIST_ID,
+        taskId,
+        sortIndex,
+        addedAt: now,
+      })
+      sortIndex += 1024
+    }
+    const next = [...dailyListEntries, ...newEntries]
+    setDailyListEntries(next)
+    writeDailyListEntries(userId, next)
+    setDailyModalSelectedIds(new Set())
+    setDailyModalSearch('')
+    setDailyAddModalOpen(false)
+  }, [dailyListEntries, dailyModalSelectedIds])
+
   const ensureQuickListBucketId = useCallback(async (): Promise<string | null> => {
     if (quickListBucketIdRef.current) {
       quickListDebug('bucket cached', quickListBucketIdRef.current)
@@ -9386,6 +9524,159 @@ const normalizedSearch = searchTerm.trim().toLowerCase()
       : null
   let dashboardGridInsertCursor = 0
 
+  // ── Daily To-Do body ──────────────────────────────────────────────────────
+  const renderDailyListBody = () => {
+    if (!dailyListExpanded) return null
+    const sortLabel = dailySortKey === 'addedAt' ? 'Added' : dailySortKey === 'name' ? 'Name' : 'Modified'
+    return (
+      <div id="daily-todo-body" className="goal-bucket-body px-3 md:px-4 pb-3 md:pb-4">
+        {/* Sub-header */}
+        <div className="goal-bucket-body-header">
+          <div className="goal-section-header">
+            <p className="goal-section-title">Tasks ({sortedActiveDailyTasks.length})</p>
+          </div>
+          <div className="flex items-center gap-2">
+            {/* Sort dropdown */}
+            <div className="relative" ref={dailySortDropdownRef}>
+              <button
+                type="button"
+                className="goal-task-add daily-sort-trigger"
+                onClick={() => setDailySortDropdownOpen((v) => !v)}
+              >
+                <svg className="daily-sort-trigger__icon" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                  <path d="M4 6h16M4 12h10M4 18h6" />
+                </svg>
+                {sortLabel} {dailySortAsc ? '\u2191' : '\u2193'}
+              </button>
+              {dailySortDropdownOpen && (
+                <div className="daily-sort-dropdown">
+                  {([['addedAt', 'Date Added'], ['name', 'Name'], ['updatedAt', 'Last Modified']] as [DailyListSortKey, string][]).map(([key, label]) => {
+                    const isActive = dailySortKey === key
+                    return (
+                      <button
+                        key={key}
+                        type="button"
+                        className={classNames('daily-sort-dropdown__item', isActive && 'daily-sort-dropdown__item--active')}
+                        onClick={() => handleDailySortSelect(key)}
+                      >
+                        {label}
+                        {isActive ? (dailySortAsc ? ' \u2191' : ' \u2193') : ''}
+                      </button>
+                    )
+                  })}
+                </div>
+              )}
+            </div>
+            {/* Add Existing button */}
+            <button
+              type="button"
+              className="goal-task-add"
+              onClick={() => setDailyAddModalOpen(true)}
+            >
+              + Add Existing
+            </button>
+          </div>
+        </div>
+
+        {/* Active tasks */}
+        {sortedActiveDailyTasks.length === 0 ? (
+          <p className="goal-task-empty">No tasks yet. Add tasks from your goals.</p>
+        ) : (
+          <ul className="mt-2 space-y-2">
+            {sortedActiveDailyTasks.map(({ entry, task, goalName, bucketName, bucketId, goalId }) => (
+              <li key={entry.id} className={classNames(
+                'goal-task-row',
+                task.difficulty === 'green' && 'goal-task-row--diff-green',
+                task.difficulty === 'yellow' && 'goal-task-row--diff-yellow',
+                task.difficulty === 'red' && 'goal-task-row--diff-red',
+                task.priority && 'goal-task-row--priority',
+              )}>
+                <div className="goal-task-row__content">
+                  <button
+                    type="button"
+                    className="goal-task-marker goal-task-marker--action"
+                    onClick={() => toggleDailyTaskCompletionRef.current({ entry, task, goalName, bucketName, bucketId, goalId })}
+                    aria-label="Mark task complete"
+                  />
+                  <span className="goal-task-text">
+                    <span className="goal-task-text__inner">{task.text}</span>
+                    <span className="daily-todo__source">{goalName} / {bucketName}</span>
+                  </span>
+                  {task.difficulty && task.difficulty !== 'none' && (
+                    <span className={classNames('goal-task-diff', `goal-task-diff--${task.difficulty}`)} aria-label={`Difficulty: ${task.difficulty}`} />
+                  )}
+                  <button
+                    type="button"
+                    className="daily-todo__remove"
+                    onClick={() => removeDailyListEntry(entry.id)}
+                    aria-label="Remove from daily list"
+                    title="Remove from daily list"
+                  >
+                    <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                      <path d="M18 6L6 18M6 6l12 12" />
+                    </svg>
+                  </button>
+                </div>
+              </li>
+            ))}
+          </ul>
+        )}
+
+        {/* Completed section */}
+        {completedDailyTasks.length > 0 && (
+          <div className="goal-completed">
+            <button
+              type="button"
+              className="goal-completed__title"
+              onClick={() => setDailyCompletedCollapsed((v) => !v)}
+              aria-expanded={!dailyCompletedCollapsed}
+            >
+              <span>Completed ({completedDailyTasks.length})</span>
+              <svg
+                className={classNames('goal-completed__chevron', !dailyCompletedCollapsed && 'goal-completed__chevron--open')}
+                viewBox="0 0 24 24"
+                aria-hidden="true"
+              >
+                <path d="M8.12 9.29a1 1 0 011.41-.17L12 11.18l2.47-2.06a1 1 0 111.24 1.58l-3.07 2.56a1 1 0 01-1.24 0l-3.07-2.56a1 1 0 01-.17-1.41z" fill="currentColor" />
+              </svg>
+            </button>
+            {!dailyCompletedCollapsed && (
+              <ul className="goal-completed__list mt-2 space-y-2">
+                {completedDailyTasks.map(({ entry, task, goalName, bucketName, bucketId, goalId }) => (
+                  <li key={entry.id} className="goal-task-row goal-task-row--completed">
+                    <div className="goal-task-row__content">
+                      <button
+                        type="button"
+                        className="goal-task-marker goal-task-marker--completed goal-task-marker--action"
+                        onClick={() => toggleDailyTaskCompletionRef.current({ entry, task, goalName, bucketName, bucketId, goalId })}
+                        aria-label="Mark task incomplete"
+                      />
+                      <span className="goal-task-text">
+                        <span className="goal-task-text__inner">{task.text}</span>
+                        <span className="daily-todo__source">{goalName} / {bucketName}</span>
+                      </span>
+                      <button
+                        type="button"
+                        className="daily-todo__remove"
+                        onClick={() => removeDailyListEntry(entry.id)}
+                        aria-label="Remove from daily list"
+                        title="Remove from daily list"
+                      >
+                        <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                          <path d="M18 6L6 18M6 6l12 12" />
+                        </svg>
+                      </button>
+                    </div>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+        )}
+      </div>
+    )
+  }
+
   const renderQuickListBody = () => {
     if (!quickListExpanded) {
       return null
@@ -11193,6 +11484,11 @@ const normalizedSearch = searchTerm.trim().toLowerCase()
     }
   }
 
+  // Wire up the daily list completion handler now that toggleTaskCompletion is defined
+  toggleDailyTaskCompletionRef.current = (resolved: ResolvedDailyTask) => {
+    toggleTaskCompletion(resolved.goalId, resolved.bucketId, resolved.task.id)
+  }
+
   const cycleTaskDifficulty = (goalId: string, bucketId: string, taskId: string) => {
     const nextOf = (d?: 'none' | 'green' | 'yellow' | 'red') => {
       switch (d) {
@@ -12086,6 +12382,98 @@ const normalizedSearch = searchTerm.trim().toLowerCase()
           document.body,
         )
       : null
+
+  // Daily To-Do: "Add Existing Tasks" modal
+  const dailyAddModalPortal =
+    dailyAddModalOpen && typeof document !== 'undefined'
+      ? createPortal(
+          <div className="daily-modal-backdrop" onClick={() => { setDailyAddModalOpen(false); setDailyModalSearch(''); setDailyModalSelectedIds(new Set()) }}>
+            <div className="daily-modal" onClick={(e) => e.stopPropagation()}>
+              <div className="daily-modal__header">
+                <h2 className="daily-modal__title">Add Existing Tasks</h2>
+                <button type="button" className="daily-modal__close" onClick={() => { setDailyAddModalOpen(false); setDailyModalSearch(''); setDailyModalSelectedIds(new Set()) }} aria-label="Close">
+                  <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                    <path d="M18 6L6 18M6 6l12 12" />
+                  </svg>
+                </button>
+              </div>
+              <input
+                className="daily-modal__search"
+                placeholder="Search tasks..."
+                value={dailyModalSearch}
+                onChange={(e) => setDailyModalSearch(e.target.value)}
+                autoFocus
+              />
+              <div className="daily-modal__list">
+                {goals.filter((g) => !g.archived).map((goal) => {
+                  const searchLower = dailyModalSearch.trim().toLowerCase()
+                  const matchingBuckets = goal.buckets.filter((b) =>
+                    !b.archived && b.tasks.some((t) => !t.completed && (!searchLower || t.text.toLowerCase().includes(searchLower))),
+                  )
+                  if (matchingBuckets.length === 0) return null
+                  return (
+                    <div key={goal.id} className="daily-modal__goal-section">
+                      <p className="daily-modal__goal-name">{goal.name}</p>
+                      {matchingBuckets.map((bucket) => (
+                        <div key={bucket.id} className="daily-modal__bucket-section">
+                          <p className="daily-modal__bucket-name">{bucket.name}</p>
+                          {bucket.tasks
+                            .filter((t) => !t.completed && (!searchLower || t.text.toLowerCase().includes(searchLower)))
+                            .map((task) => {
+                              const alreadyAdded = isDailyListTask(getCurrentUserId(), task.id)
+                              const isSelected = dailyModalSelectedIds.has(task.id)
+                              return (
+                                <label
+                                  key={task.id}
+                                  className={classNames('daily-modal__task', alreadyAdded && 'daily-modal__task--added')}
+                                >
+                                  <input
+                                    type="checkbox"
+                                    checked={alreadyAdded || isSelected}
+                                    disabled={alreadyAdded}
+                                    onChange={() => {
+                                      setDailyModalSelectedIds((prev) => {
+                                        const next = new Set(prev)
+                                        if (isSelected) next.delete(task.id)
+                                        else next.add(task.id)
+                                        return next
+                                      })
+                                    }}
+                                  />
+                                  <span className="daily-modal__task-text">{task.text}</span>
+                                  {alreadyAdded && <span className="daily-modal__task-badge">Added</span>}
+                                </label>
+                              )
+                            })}
+                        </div>
+                      ))}
+                    </div>
+                  )
+                })}
+              </div>
+              <div className="daily-modal__footer">
+                <button
+                  type="button"
+                  className="daily-modal__btn daily-modal__btn--cancel"
+                  onClick={() => { setDailyAddModalOpen(false); setDailyModalSearch(''); setDailyModalSelectedIds(new Set()) }}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  className="daily-modal__btn daily-modal__btn--add"
+                  onClick={handleDailyAddSelected}
+                  disabled={dailyModalSelectedIds.size === 0}
+                >
+                  Add Selected ({dailyModalSelectedIds.size})
+                </button>
+              </div>
+            </div>
+          </div>,
+          document.body,
+        )
+      : null
+
   return (
     <div className={classNames('goals-layer text-white', dashboardLayout && 'goals-layer--dashboard')}>
       <div className="goals-content site-main__inner">
@@ -12610,6 +12998,48 @@ const normalizedSearch = searchTerm.trim().toLowerCase()
                 </ul>
                 </>
               ) : null}
+            </section>
+          ) : null}
+
+          {/* Daily To-Do: system layer between Daily Life and Quick List */}
+          {!dashboardLayout ? (
+            <section
+              className={classNames('quick-list-card daily-todo-card', dailyListExpanded && 'quick-list-card--open')}
+              aria-label="Daily To-Do"
+            >
+              <div className="life-routines-card__header-wrapper">
+                <div className="life-routines-card__header-left">
+                  <button
+                    type="button"
+                    className="life-routines-card__header"
+                    onClick={() => setDailyListExpanded((v) => !v)}
+                    aria-expanded={dailyListExpanded}
+                    aria-controls="daily-todo-body"
+                  >
+                    <div className="life-routines-card__header-content">
+                      <div className="life-routines-card__meta">
+                        <p className="life-routines-card__eyebrow">System Layer</p>
+                        <h2 className="life-routines-card__title">Daily To-Do</h2>
+                      </div>
+                    </div>
+                  </button>
+                </div>
+                <div className="relative flex items-center gap-2 flex-none whitespace-nowrap">
+                  <button
+                    type="button"
+                    className="life-routines-card__toggle"
+                    onClick={() => setDailyListExpanded((v) => !v)}
+                    aria-expanded={dailyListExpanded}
+                    aria-controls="daily-todo-body"
+                    aria-label={`${dailyListExpanded ? 'Collapse' : 'Expand'} daily to-do list`}
+                  >
+                    <svg className="life-routines-card__chevron" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                      <path d="M6 9l6 6 6-6" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
+                    </svg>
+                  </button>
+                </div>
+              </div>
+              {renderDailyListBody()}
             </section>
           ) : null}
 
@@ -13287,6 +13717,7 @@ const normalizedSearch = searchTerm.trim().toLowerCase()
       {lifeRoutineCustomizerPortal}
       {customizerPortal}
       {quickListMenuPortal}
+      {dailyAddModalPortal}
 
       {isSettingsOpen && (
         <div

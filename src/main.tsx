@@ -6,6 +6,7 @@ import { hydrateGoalsData } from './lib/idbGoals'
 import { hydrateMilestones } from './lib/idbMilestones'
 import { hydrateLifeRoutines } from './lib/idbLifeRoutines'
 import { hydrateUserPreferences } from './lib/idbUserPreferences'
+import { hydrateDailyList } from './lib/idbDailyList'
 import { getCurrentUserId } from './lib/namespaceManager'
 
 // Some third-party instrumentation assumes document.classList exists; provide a no-op shim to prevent runtime errors.
@@ -41,6 +42,7 @@ async function boot() {
     hydrateMilestones(userId),
     hydrateLifeRoutines(userId),
     hydrateUserPreferences(userId),
+    hydrateDailyList(userId),
   ])
   createRoot(document.getElementById('root')!).render(
     <StrictMode>

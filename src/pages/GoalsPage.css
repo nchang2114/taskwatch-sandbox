@@ -5448,3 +5448,341 @@ html[data-theme='light'] .goal-card--favorite::after {
   filter: blur(10px);
   opacity: 0.45;
 }
+
+/* ── Daily To-Do ────────────────────────────────────────────────────────── */
+
+.daily-todo__source {
+  display: block;
+  font-size: 0.7rem;
+  opacity: 0.45;
+  margin-top: 1px;
+  line-height: 1.2;
+}
+
+html[data-theme='light'] .daily-todo__source {
+  opacity: 0.55;
+}
+
+.daily-todo__remove {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border-radius: 4px;
+  color: rgba(255,255,255,0.35);
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.15s, color 0.15s, background 0.15s;
+}
+
+.goal-task-row:hover .daily-todo__remove {
+  opacity: 1;
+}
+
+.daily-todo__remove:hover {
+  color: #f87171;
+  background: rgba(248,113,113,0.12);
+}
+
+html[data-theme='light'] .daily-todo__remove {
+  color: rgba(0,0,0,0.3);
+}
+html[data-theme='light'] .daily-todo__remove:hover {
+  color: #dc2626;
+  background: rgba(220,38,38,0.08);
+}
+
+/* Sort trigger button */
+.daily-sort-trigger {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.daily-sort-trigger__icon {
+  flex-shrink: 0;
+}
+
+/* Sort dropdown */
+.daily-sort-dropdown {
+  position: absolute;
+  top: calc(100% + 4px);
+  right: 0;
+  background: rgba(30,30,40,0.96);
+  border: 1px solid rgba(255,255,255,0.12);
+  border-radius: 10px;
+  padding: 4px;
+  z-index: 200;
+  min-width: 160px;
+  box-shadow: 0 4px 20px rgba(0,0,0,0.4);
+}
+
+html[data-theme='light'] .daily-sort-dropdown {
+  background: #fff;
+  border-color: rgba(0,0,0,0.1);
+  box-shadow: 0 4px 20px rgba(0,0,0,0.12);
+}
+
+.daily-sort-dropdown__item {
+  display: block;
+  width: 100%;
+  padding: 7px 12px;
+  font-size: 0.82rem;
+  text-align: left;
+  border-radius: 6px;
+  color: rgba(255,255,255,0.75);
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  transition: background 0.1s;
+}
+
+.daily-sort-dropdown__item:hover {
+  background: rgba(255,255,255,0.08);
+}
+
+.daily-sort-dropdown__item--active {
+  color: #fff;
+  font-weight: 600;
+}
+
+html[data-theme='light'] .daily-sort-dropdown__item {
+  color: rgba(0,0,0,0.65);
+}
+html[data-theme='light'] .daily-sort-dropdown__item:hover {
+  background: rgba(0,0,0,0.05);
+}
+html[data-theme='light'] .daily-sort-dropdown__item--active {
+  color: #111;
+}
+
+/* ── Daily Add Modal ────────────────────────────────────────────────────── */
+
+.daily-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,0.55);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+}
+
+html[data-theme='light'] .daily-modal-backdrop {
+  background: rgba(0,0,0,0.25);
+}
+
+.daily-modal {
+  background: #1c1c2a;
+  border: 1px solid rgba(255,255,255,0.1);
+  border-radius: 14px;
+  width: min(560px, 90vw);
+  max-height: 80vh;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+html[data-theme='light'] .daily-modal {
+  background: #fff;
+  border-color: rgba(0,0,0,0.1);
+  box-shadow: 0 8px 32px rgba(0,0,0,0.15);
+}
+
+.daily-modal__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 16px 20px 12px;
+  border-bottom: 1px solid rgba(255,255,255,0.08);
+}
+
+html[data-theme='light'] .daily-modal__header {
+  border-bottom-color: rgba(0,0,0,0.08);
+}
+
+.daily-modal__title {
+  font-size: 1rem;
+  font-weight: 600;
+  color: #fff;
+  margin: 0;
+}
+
+html[data-theme='light'] .daily-modal__title {
+  color: #111;
+}
+
+.daily-modal__close {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 6px;
+  background: transparent;
+  border: none;
+  color: rgba(255,255,255,0.5);
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+}
+.daily-modal__close:hover {
+  background: rgba(255,255,255,0.1);
+  color: #fff;
+}
+html[data-theme='light'] .daily-modal__close {
+  color: rgba(0,0,0,0.4);
+}
+html[data-theme='light'] .daily-modal__close:hover {
+  background: rgba(0,0,0,0.06);
+  color: #111;
+}
+
+.daily-modal__search {
+  margin: 12px 16px;
+  padding: 8px 12px;
+  background: rgba(255,255,255,0.06);
+  border: 1px solid rgba(255,255,255,0.1);
+  border-radius: 8px;
+  color: #fff;
+  font-size: 0.875rem;
+  outline: none;
+}
+
+.daily-modal__search:focus {
+  border-color: rgba(255,255,255,0.25);
+}
+
+html[data-theme='light'] .daily-modal__search {
+  background: rgba(0,0,0,0.03);
+  border-color: rgba(0,0,0,0.12);
+  color: #111;
+}
+html[data-theme='light'] .daily-modal__search:focus {
+  border-color: rgba(0,0,0,0.3);
+}
+
+.daily-modal__list {
+  flex: 1;
+  overflow-y: auto;
+  padding: 0 16px 8px;
+}
+
+.daily-modal__goal-section {
+  margin-bottom: 8px;
+}
+
+.daily-modal__goal-name {
+  font-size: 0.72rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  opacity: 0.5;
+  margin: 14px 0 4px;
+}
+
+.daily-modal__bucket-name {
+  font-size: 0.8rem;
+  opacity: 0.65;
+  margin: 8px 0 2px 4px;
+}
+
+.daily-modal__task {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 0.875rem;
+  color: rgba(255,255,255,0.85);
+  transition: background 0.1s;
+}
+
+.daily-modal__task:hover {
+  background: rgba(255,255,255,0.06);
+}
+
+.daily-modal__task--added {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.daily-modal__task--added:hover {
+  background: transparent;
+}
+
+html[data-theme='light'] .daily-modal__task {
+  color: #222;
+}
+html[data-theme='light'] .daily-modal__task:hover {
+  background: rgba(0,0,0,0.04);
+}
+
+.daily-modal__task input[type='checkbox'] {
+  flex-shrink: 0;
+  accent-color: #6366f1;
+}
+
+.daily-modal__task-text {
+  flex: 1;
+  min-width: 0;
+}
+
+.daily-modal__task-badge {
+  font-size: 0.68rem;
+  opacity: 0.5;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+.daily-modal__footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  padding: 12px 16px;
+  border-top: 1px solid rgba(255,255,255,0.08);
+}
+
+html[data-theme='light'] .daily-modal__footer {
+  border-top-color: rgba(0,0,0,0.08);
+}
+
+.daily-modal__btn {
+  padding: 6px 16px;
+  border-radius: 8px;
+  font-size: 0.82rem;
+  font-weight: 500;
+  border: none;
+  cursor: pointer;
+  transition: background 0.15s, opacity 0.15s;
+}
+
+.daily-modal__btn--cancel {
+  background: rgba(255,255,255,0.08);
+  color: rgba(255,255,255,0.7);
+}
+.daily-modal__btn--cancel:hover {
+  background: rgba(255,255,255,0.12);
+}
+html[data-theme='light'] .daily-modal__btn--cancel {
+  background: rgba(0,0,0,0.06);
+  color: #333;
+}
+html[data-theme='light'] .daily-modal__btn--cancel:hover {
+  background: rgba(0,0,0,0.1);
+}
+
+.daily-modal__btn--add {
+  background: #6366f1;
+  color: #fff;
+}
+.daily-modal__btn--add:hover {
+  background: #5558e6;
+}
+.daily-modal__btn--add:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
