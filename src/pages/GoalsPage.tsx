@@ -2538,6 +2538,7 @@ interface GoalRowProps {
   onTaskEditBlur: (goalId: string, bucketId: string, taskId: string) => void
   onTaskEditCancel: (taskId: string) => void
   registerTaskEditRef: (taskId: string, element: HTMLSpanElement | null) => void
+  onToggleDailyList: (taskId: string) => void
   onDismissFocusPrompt: () => void
   onStartFocusTask: (goal: Goal, bucket: Bucket, task: TaskItem) => void
   scheduledTaskIds: Set<string>
@@ -2810,6 +2811,7 @@ const GoalRow: React.FC<GoalRowProps> = ({
   onTaskEditChange,
   onTaskEditBlur,
   registerTaskEditRef,
+  onToggleDailyList,
   onDismissFocusPrompt,
   onStartFocusTask,
   scheduledTaskIds,
@@ -4829,6 +4831,19 @@ const GoalRow: React.FC<GoalRowProps> = ({
                                             type="button"
                                             className={classNames(
                                               'goal-task-focus__button',
+                                              isDailyListTask(getCurrentUserId(), task.id) && 'goal-task-focus__button--scheduled',
+                                            )}
+                                            onClick={(event) => {
+                                              event.stopPropagation()
+                                              onToggleDailyList(task.id)
+                                            }}
+                                          >
+                                            {isDailyListTask(getCurrentUserId(), task.id) ? 'In Daily List' : 'Add to Daily List'}
+                                          </button>
+                                          <button
+                                            type="button"
+                                            className={classNames(
+                                              'goal-task-focus__button',
                                               scheduledTaskIds.has(task.id) && 'goal-task-focus__button--scheduled',
                                             )}
                                             onClick={(event) => {
@@ -5387,6 +5402,19 @@ const GoalRow: React.FC<GoalRowProps> = ({
                                         </div>
                                       {
                                         <div className="goal-task-focus">
+                                          <button
+                                            type="button"
+                                            className={classNames(
+                                              'goal-task-focus__button',
+                                              isDailyListTask(getCurrentUserId(), task.id) && 'goal-task-focus__button--scheduled',
+                                            )}
+                                            onClick={(event) => {
+                                              event.stopPropagation()
+                                              onToggleDailyList(task.id)
+                                            }}
+                                          >
+                                            {isDailyListTask(getCurrentUserId(), task.id) ? 'In Daily List' : 'Add to Daily List'}
+                                          </button>
                                           <button
                                             type="button"
                                             className={classNames(
@@ -6253,6 +6281,33 @@ export default function GoalsPage(): ReactElement {
     // Auto-expand to show the dropped task
     setDailyListExpanded(true)
   }, [dailyListEntries, getDailyDragTaskId])
+
+  const handleToggleDailyList = useCallback((taskId: string) => {
+    const userId = getCurrentUserId()
+    if (isDailyListTask(userId, taskId)) {
+      // Remove from daily list
+      const next = dailyListEntries.filter((e) => e.taskId !== taskId)
+      setDailyListEntries(next)
+      writeDailyListEntries(userId, next)
+      void pushDailyListToSupabase(next)
+      return
+    }
+    const sortIndex = dailyListEntries.length > 0
+      ? Math.max(...dailyListEntries.map((e) => e.sortIndex)) + 1024
+      : 1024
+    const newEntry: DailyListEntryRecord = {
+      id: generateUuid(),
+      userId,
+      dailyListId: DAILY_LIST_ID,
+      taskId,
+      sortIndex,
+      addedAt: new Date().toISOString(),
+    }
+    const next = [...dailyListEntries, newEntry]
+    setDailyListEntries(next)
+    writeDailyListEntries(userId, next)
+    void pushDailyListToSupabase(next)
+  }, [dailyListEntries])
 
   const handleDailyDeleteSwipeStart = useCallback((event: React.PointerEvent, deleteKey: string) => {
     if (event.pointerType !== 'touch') return
@@ -11542,6 +11597,19 @@ const normalizedSearch = searchTerm.trim().toLowerCase()
                                           type="button"
                                           className={classNames(
                                             'goal-task-focus__button',
+                                            isDailyListTask(getCurrentUserId(), item.id) && 'goal-task-focus__button--scheduled',
+                                          )}
+                                          onClick={(event) => {
+                                            event.stopPropagation()
+                                            handleToggleDailyList(item.id)
+                                          }}
+                                        >
+                                          {isDailyListTask(getCurrentUserId(), item.id) ? 'In Daily List' : 'Add to Daily List'}
+                                        </button>
+                                        <button
+                                          type="button"
+                                          className={classNames(
+                                            'goal-task-focus__button',
                                             scheduledTaskIds.has(item.id) && 'goal-task-focus__button--scheduled',
                                           )}
                                           onClick={(event) => {
@@ -14102,6 +14170,7 @@ const normalizedSearch = searchTerm.trim().toLowerCase()
                         onTaskEditBlur={(goalId, bucketId, taskId) => handleTaskEditBlur(goalId, bucketId, taskId)}
                         onTaskEditCancel={(taskId) => handleTaskEditCancel(taskId)}
                         registerTaskEditRef={registerTaskEditRef}
+                        onToggleDailyList={handleToggleDailyList}
                         onDismissFocusPrompt={dismissFocusPrompt}
                         onStartFocusTask={handleStartFocusTask}
                         scheduledTaskIds={scheduledTaskIds}
@@ -14247,8 +14316,7 @@ const normalizedSearch = searchTerm.trim().toLowerCase()
                     onTaskEditBlur={(goalId, bucketId, taskId) => handleTaskEditBlur(goalId, bucketId, taskId)}
                     onTaskEditCancel={(taskId) => handleTaskEditCancel(taskId)}
                     registerTaskEditRef={registerTaskEditRef}
-                    
-                    
+                    onToggleDailyList={handleToggleDailyList}
                     onDismissFocusPrompt={dismissFocusPrompt}
                     onStartFocusTask={handleStartFocusTask}
                     scheduledTaskIds={scheduledTaskIds}
@@ -14390,8 +14458,7 @@ const normalizedSearch = searchTerm.trim().toLowerCase()
                         onTaskEditBlur={(goalId, bucketId, taskId) => handleTaskEditBlur(goalId, bucketId, taskId)}
                         onTaskEditCancel={(taskId) => handleTaskEditCancel(taskId)}
                         registerTaskEditRef={registerTaskEditRef}
-                        
-                        
+                        onToggleDailyList={handleToggleDailyList}
                         onDismissFocusPrompt={dismissFocusPrompt}
                         onStartFocusTask={handleStartFocusTask}
                         scheduledTaskIds={scheduledTaskIds}
