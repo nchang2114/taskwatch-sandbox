@@ -22,6 +22,8 @@ import { DEFAULT_SURFACE_STYLE, ensureServerBucketStyle } from './surfaceStyles'
 import { pushSnapbackTriggersToSupabase, syncSnapbackTriggersFromSupabase, type SnapbackTriggerPayload } from './snapbackApi'
 import { pushRepeatingRulesToSupabase, syncRepeatingRulesFromSupabase } from './repeatingSessions'
 import { pushAllHistoryToSupabase, syncHistoryWithSupabase, sanitizeHistoryRecords } from './sessionHistory'
+import { pushDailyListToSupabase, syncDailyListFromSupabase } from './dailyListRemote'
+import { readDailyListEntries, clearDailyListEntries } from './idbDailyList'
 import { storage } from './storage'
 
 // Type for ID mappings returned from migrations
@@ -63,6 +65,7 @@ export const runAllSyncs = async (): Promise<void> => {
     syncRepeatingRulesFromSupabase(),
     syncSnapbackTriggersFromSupabase(),
     syncQuickListFromSupabase(),
+    syncDailyListFromSupabase(),
   ])
   setLastFullSyncTimestamp()
   console.log('[bootstrap] All syncs complete')
@@ -513,7 +516,14 @@ const migrateGuestData = async (): Promise<void> => {
   if (qlTasks.length > 0) {
     await pushQuickListToSupabase(qlTasks, qlSubtasks)
   }
-  
+
+  // Migrate Daily List entries
+  const guestDailyEntries = readDailyListEntries(GUEST_USER_ID)
+  if (guestDailyEntries.length > 0) {
+    console.log('[bootstrap] Migrating', guestDailyEntries.length, 'daily list entries')
+    await pushDailyListToSupabase(guestDailyEntries)
+  }
+
   // Migrate Snapback triggers and plans
   type LocalTrigger = { id: string; label: string; cue: string; deconstruction: string; plan: string }
   type LocalPlan = { cue: string; deconstruction: string; plan: string }
@@ -575,6 +585,7 @@ const migrateGuestData = async (): Promise<void> => {
   clearLifeRoutinesCache('__guest__')
   clearMilestonesCache('__guest__')
   clearQuickListCache('__guest__')
+  clearDailyListEntries('__guest__')
   storage.domain.history.remove('__guest__')
   storage.domain.repeatingRules.remove('__guest__')
   clearGoalsCache('__guest__')

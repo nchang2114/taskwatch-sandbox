@@ -100,6 +100,7 @@ import {
   DAILY_LIST_ID,
   type DailyListEntryRecord,
 } from '../lib/idbDailyList'
+import { pushDailyListToSupabase } from '../lib/dailyListRemote'
 import { generateUuid } from '../lib/quickListRemote'
 
 // Minimal sync instrumentation disabled by default
@@ -6149,6 +6150,7 @@ export default function GoalsPage(): ReactElement {
     setDailyListEntries((current) => {
       const next = current.filter((e) => e.id !== entryId)
       writeDailyListEntries(getCurrentUserId(), next)
+      void pushDailyListToSupabase(next)
       return next
     })
   }, [])
@@ -6179,6 +6181,7 @@ export default function GoalsPage(): ReactElement {
     const next = [...dailyListEntries, ...newEntries]
     setDailyListEntries(next)
     writeDailyListEntries(userId, next)
+    void pushDailyListToSupabase(next)
     setDailyModalSelectedIds(new Set())
     setDailyModalSearch('')
     setDailyAddModalOpen(false)
@@ -6190,6 +6193,7 @@ export default function GoalsPage(): ReactElement {
     setDailyListEntries((current) => {
       const next = current.filter((entry) => !completedEntryIds.has(entry.id))
       writeDailyListEntries(getCurrentUserId(), next)
+      void pushDailyListToSupabase(next)
       return next
     })
   }, [completedDailyTasks])
@@ -6245,6 +6249,7 @@ export default function GoalsPage(): ReactElement {
     const next = [...dailyListEntries, newEntry]
     setDailyListEntries(next)
     writeDailyListEntries(userId, next)
+    void pushDailyListToSupabase(next)
     // Auto-expand to show the dropped task
     setDailyListExpanded(true)
   }, [dailyListEntries, getDailyDragTaskId])
