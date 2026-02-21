@@ -81,7 +81,7 @@ type QuickItemState = QuickListEntry & { expanded?: boolean; subtasksCollapsed?:
 // Backwards-compat aliases
 type QuickItem = QuickItemState
 type QuickSubtask = SubtaskRecord
-import { fetchQuickListRemoteItems, ensureQuickListRemoteStructures, QUICK_LIST_GOAL_NAME } from '../lib/quickListRemote'
+import { fetchQuickListRemoteItems, QUICK_LIST_GOAL_NAME } from '../lib/quickListRemote'
 import {
   HISTORY_EVENT_NAME,
   readStoredHistory,
@@ -5898,7 +5898,6 @@ export default function GoalsPage(): ReactElement {
   const [quickDraftActive, setQuickDraftActive] = useState(false)
   const quickDraftInputRef = useRef<HTMLInputElement | null>(null)
   const [quickCompletedCollapsed, setQuickCompletedCollapsed] = useState(true)
-  const quickListBucketIdRef = useRef<string | null>(null)
   const quickListRefreshInFlightRef = useRef(false)
   const quickListRefreshPendingRef = useRef(false)
   const shouldSkipQuickListRemote = useCallback(() => {
@@ -6349,20 +6348,8 @@ export default function GoalsPage(): ReactElement {
     }, Math.max(1200, rowTotalMs))
   }, [dailyCompletingMap])
 
-  const ensureQuickListBucketId = useCallback(async (): Promise<string | null> => {
-    if (quickListBucketIdRef.current) {
-      quickListDebug('bucket cached', quickListBucketIdRef.current)
-      return quickListBucketIdRef.current
-    }
-    quickListDebug('ensuring remote goal/bucket')
-    const ensured = await ensureQuickListRemoteStructures()
-    if (ensured?.bucketId) {
-      quickListBucketIdRef.current = ensured.bucketId
-      quickListDebug('ensured bucket', ensured.bucketId)
-      return ensured.bucketId
-    }
-    quickListWarn('unable to resolve bucket id')
-    return null
+  const getQuickListContainerId = useCallback((): string => {
+    return QUICK_LIST_CONTAINER_ID
   }, [])
   const refreshQuickListFromSupabase = useCallback(
     (reason?: string) => {
@@ -6375,10 +6362,6 @@ export default function GoalsPage(): ReactElement {
       ;(async () => {
         try {
           const remote = await fetchQuickListRemoteItems()
-          if (remote?.bucketId) {
-            quickListBucketIdRef.current = remote.bucketId
-            quickListDebug('hydrated bucket id', remote.bucketId)
-          }
           if (!remote) {
             quickListWarn('Supabase quick list refresh failed; keeping local snapshot', { reason })
             return
@@ -6607,14 +6590,10 @@ export default function GoalsPage(): ReactElement {
         return
       }
       void (async () => {
-        const bucketId = await ensureQuickListBucketId()
-        if (!bucketId) {
-          quickListWarn('missing bucket id; cannot create remote task', { id })
-          return
-        }
-        quickListDebug('creating remote task', { bucketId, id })
+        const containerId = getQuickListContainerId()
+        quickListDebug('creating remote task', { containerId, id })
         try {
-          await apiCreateTask(bucketId, text, { clientId: id, insertAtTop: true })
+          await apiCreateTask(containerId, text, { clientId: id, insertAtTop: true })
           quickListDebug('remote task created', { id })
         } catch (error) {
           quickListWarn('failed to create remote task', error)
@@ -6622,7 +6601,7 @@ export default function GoalsPage(): ReactElement {
         }
       })()
     },
-    [ensureQuickListBucketId, quickDraft, quickListItems, refreshQuickListFromSupabase],
+    [getQuickListContainerId, quickDraft, quickListItems, refreshQuickListFromSupabase],
   )
   const cycleQuickDifficulty = useCallback((id: string) => {
     const order: Array<QuickItem['difficulty']> = ['none', 'green', 'yellow', 'red']
@@ -6667,21 +6646,21 @@ export default function GoalsPage(): ReactElement {
       stored = writeStoredQuickList(stored.map((it, i) => ({ ...it, sortIndex: i })))
       setQuickListItems(stored)
       void (async () => {
-        const bucketId = await ensureQuickListBucketId()
-        if (!bucketId || !isUuid(id)) {
-          quickListWarn('skip remote priority update; missing bucket or invalid id', { bucketId, id })
+        const containerId = getQuickListContainerId()
+        if (!isUuid(id)) {
+          quickListWarn('skip remote priority update; invalid id', { id })
           return
         }
-        quickListDebug('updating remote priority', { bucketId, id, nextPriority })
+        quickListDebug('updating remote priority', { containerId, id, nextPriority })
         try {
-          await apiSetTaskPriorityAndResort(id, bucketId, item.completed, nextPriority)
+          await apiSetTaskPriorityAndResort(id, containerId, item.completed, nextPriority)
         } catch (error) {
           quickListWarn('failed remote priority update', error)
           refreshQuickListFromSupabase('priority')
         }
       })()
     },
-    [ensureQuickListBucketId, quickListItems, refreshQuickListFromSupabase],
+    [getQuickListContainerId, quickListItems, refreshQuickListFromSupabase],
   )
   const toggleQuickCompleteImmediate = useCallback((id: string) => {
     const targetItem = quickListItems.find((it) => it.id === id)
@@ -6694,20 +6673,20 @@ export default function GoalsPage(): ReactElement {
     )
     setQuickListItems(stored)
     void (async () => {
-      const bucketId = await ensureQuickListBucketId()
-      if (!bucketId || !isUuid(id)) {
-        quickListWarn('skip remote completion immediate; missing bucket or invalid id', { bucketId, id })
+      const containerId = getQuickListContainerId()
+      if (!isUuid(id)) {
+        quickListWarn('skip remote completion immediate; invalid id', { id })
         return
       }
-      quickListDebug('updating remote completion immediate', { bucketId, id, completed: nextCompletedState })
+      quickListDebug('updating remote completion immediate', { containerId, id, completed: nextCompletedState })
       try {
-        await apiSetTaskCompletedAndResort(id, bucketId, nextCompletedState)
+        await apiSetTaskCompletedAndResort(id, containerId, nextCompletedState)
       } catch (error) {
         quickListWarn('failed remote completion immediate', error)
         refreshQuickListFromSupabase('complete')
       }
     })()
-  }, [ensureQuickListBucketId, quickListItems, refreshQuickListFromSupabase])
+  }, [getQuickListContainerId, quickListItems, refreshQuickListFromSupabase])
   const toggleQuickCompleteWithAnimation = useCallback((id: string) => {
     const targetItem = quickListItems.find((it) => it.id === id)
     const nextCompletedState = targetItem ? !targetItem.completed : true
@@ -6793,21 +6772,21 @@ export default function GoalsPage(): ReactElement {
         return next
       })
       void (async () => {
-        const bucketId = await ensureQuickListBucketId()
-        if (!bucketId || !isUuid(id)) {
-          quickListWarn('skip remote completion after animation; missing bucket or invalid id', { bucketId, id })
+        const containerId = getQuickListContainerId()
+        if (!isUuid(id)) {
+          quickListWarn('skip remote completion after animation; invalid id', { id })
           return
         }
-        quickListDebug('updating remote completion after animation', { bucketId, id, completed: nextCompletedState })
+        quickListDebug('updating remote completion after animation', { containerId, id, completed: nextCompletedState })
         try {
-          await apiSetTaskCompletedAndResort(id, bucketId, nextCompletedState)
+          await apiSetTaskCompletedAndResort(id, containerId, nextCompletedState)
         } catch (error) {
           quickListWarn('failed remote completion after animation', error)
           refreshQuickListFromSupabase('complete')
         }
       })()
     }, Math.max(1200, rowTotalMs))
-  }, [ensureQuickListBucketId, quickCompletingMap, quickListItems, refreshQuickListFromSupabase, toggleQuickCompleteImmediate])
+  }, [getQuickListContainerId, quickCompletingMap, quickListItems, refreshQuickListFromSupabase, toggleQuickCompleteImmediate])
   const reorderQuickItems = useCallback(
     (section: 'active' | 'completed', from: number, to: number) => {
       const active = quickListItems.filter((x) => !x.completed)
@@ -6825,21 +6804,17 @@ export default function GoalsPage(): ReactElement {
         return
       }
       void (async () => {
-        const bucketId = await ensureQuickListBucketId()
-        if (!bucketId) {
-          quickListWarn('skip remote reorder; missing bucket id')
-          return
-        }
-        quickListDebug('updating remote sort index', { bucketId, moved: moved.id, clamped, section })
+        const containerId = getQuickListContainerId()
+        quickListDebug('updating remote sort index', { containerId, moved: moved.id, clamped, section })
         try {
-          await apiSetTaskSortIndex(bucketId, section, clamped, moved.id)
+          await apiSetTaskSortIndex(containerId, section, clamped, moved.id)
         } catch (error) {
           quickListWarn('failed remote reorder', error)
           refreshQuickListFromSupabase('reorder')
         }
       })()
     },
-    [ensureQuickListBucketId, quickListItems, refreshQuickListFromSupabase],
+    [getQuickListContainerId, quickListItems, refreshQuickListFromSupabase],
   )
   // removed immediate toggle in favor of animation parity
   const deleteQuickItem = useCallback(
@@ -6847,21 +6822,21 @@ export default function GoalsPage(): ReactElement {
       const stored = writeStoredQuickList(quickListItems.filter((it) => it.id !== id).map((it, i) => ({ ...it, sortIndex: i })))
       setQuickListItems(stored)
       void (async () => {
-        const bucketId = await ensureQuickListBucketId()
-        if (!bucketId || !isUuid(id)) {
-          quickListWarn('skip remote delete; missing bucket or invalid id', { bucketId, id })
+        const containerId = getQuickListContainerId()
+        if (!isUuid(id)) {
+          quickListWarn('skip remote delete; invalid id', { id })
           return
         }
-        quickListDebug('deleting remote task', { bucketId, id })
+        quickListDebug('deleting remote task', { containerId, id })
         try {
-          await apiDeleteTaskById(id, bucketId)
+          await apiDeleteTaskById(id, containerId)
         } catch (error) {
           quickListWarn('failed remote task delete', error)
           refreshQuickListFromSupabase('delete')
         }
       })()
     },
-    [ensureQuickListBucketId, quickListItems, refreshQuickListFromSupabase],
+    [getQuickListContainerId, quickListItems, refreshQuickListFromSupabase],
   )
   const toggleQuickItemDetails = useCallback((id: string) => {
     const stored = writeStoredQuickList(
@@ -7067,12 +7042,11 @@ export default function GoalsPage(): ReactElement {
     const stored = writeStoredQuickList(kept)
     setQuickListItems(stored)
     void (async () => {
-      const bucketId = await ensureQuickListBucketId()
-      if (!bucketId) return
-      quickListDebug('bulk deleting remote completed tasks', { bucketId, count: removable.length })
+      const containerId = getQuickListContainerId()
+      quickListDebug('bulk deleting remote completed tasks', { containerId, count: removable.length })
       try {
         const remoteIds = removable.filter((it) => isUuid(it.id)).map((it) => it.id as string)
-        await Promise.allSettled(remoteIds.map((taskId) => apiDeleteTaskById(taskId, bucketId)))
+        await Promise.allSettled(remoteIds.map((taskId) => apiDeleteTaskById(taskId, containerId)))
         const localIds = removable.filter((it) => !isUuid(it.id)).map((it) => it.id)
         if (localIds.length > 0) {
           try {
@@ -7088,7 +7062,7 @@ export default function GoalsPage(): ReactElement {
         refreshQuickListFromSupabase('delete-completed')
       }
     })()
-  }, [ensureQuickListBucketId, quickListItems, refreshQuickListFromSupabase])
+  }, [getQuickListContainerId, quickListItems, refreshQuickListFromSupabase])
 
   const [activeLifeRoutineCustomizerId, setActiveLifeRoutineCustomizerId] = useState<string | null>(null)
   const lifeRoutineCustomizerDialogRef = useRef<HTMLDivElement | null>(null)

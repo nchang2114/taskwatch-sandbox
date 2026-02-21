@@ -84,7 +84,7 @@ import { broadcastSnapbackUpdate, subscribeToSnapbackSync } from '../lib/snapbac
 import { supabase } from '../lib/supabaseClient'
 import { logWarn } from '../lib/logging'
 import { isRecentlyFullSynced } from '../lib/bootstrap'
-import { ensureQuickListRemoteStructures, QUICK_LIST_GOAL_NAME } from '../lib/quickListRemote'
+import { QUICK_LIST_GOAL_NAME } from '../lib/quickListRemote'
 import { readStoredQuickList, subscribeQuickList, type QuickListEntry } from '../lib/quickList'
 
 type ReflectionRangeKey = '24h' | '48h' | '7d' | 'all'
@@ -4430,8 +4430,6 @@ export default function ReflectionPage({ use24HourTime = false, weekStartDay = 0
   const initialLifeRoutineCountRef = useRef(lifeRoutineTasks.length)
   // Quick List state
   const [quickListItems, setQuickListItems] = useState<QuickListEntry[]>(() => readStoredQuickList())
-  // Quick List remote IDs (goalId, bucketId) for Supabase - fetched on mount
-  const [_quickListRemoteIds, setQuickListRemoteIds] = useState<{ goalId: string; bucketId: string } | null>(null)
   const [activeSession, setActiveSession] = useState<ActiveSessionState | null>(() => readStoredActiveSession())
   const [nowTick, setNowTick] = useState(() => Date.now())
   const [selectedHistoryId, setSelectedHistoryId] = useState<string | null>(null)
@@ -4718,20 +4716,6 @@ const [showInlineExtras, setShowInlineExtras] = useState(false)
         setLifeRoutineTasks((current) =>
           JSON.stringify(current) === JSON.stringify(synced) ? current : synced,
         )
-      }
-    })()
-    return () => {
-      cancelled = true
-    }
-  }, [])
-
-  // Fetch Quick List remote IDs on mount
-  useEffect(() => {
-    let cancelled = false
-    void (async () => {
-      const ids = await ensureQuickListRemoteStructures()
-      if (!cancelled && ids) {
-        setQuickListRemoteIds(ids)
       }
     })()
     return () => {

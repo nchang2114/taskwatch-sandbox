@@ -1,5 +1,5 @@
 import { supabase, ensureSingleUserSession } from './supabaseClient'
-import { ensureQuickListRemoteStructures, generateUuid, syncQuickListFromSupabase } from './quickListRemote'
+import { generateUuid, syncQuickListFromSupabase } from './quickListRemote'
 import {
   createTask,
   updateTaskNotes,
@@ -14,7 +14,7 @@ import {
 import { pushLifeRoutinesToSupabase, syncLifeRoutinesWithSupabase, type LifeRoutineConfig } from './lifeRoutines'
 import { GUEST_USER_ID } from './namespaceManager'
 import { createGoalsSnapshot, syncGoalsSnapshotFromSupabase } from './goalsSync'
-import { assembleSnapshot as assembleGoalsFromCache, clearGoalsCache, readQuickListTasks, readQuickListSubtasks, clearQuickListCache, type TaskRecord, type SubtaskRecord } from './idbGoals'
+import { assembleSnapshot as assembleGoalsFromCache, clearGoalsCache, readQuickListTasks, readQuickListSubtasks, clearQuickListCache, QUICK_LIST_CONTAINER_ID, type TaskRecord, type SubtaskRecord } from './idbGoals'
 import { readAllMilestones, clearMilestonesCache } from './idbMilestones'
 import { readLifeRoutinesFromCache, clearLifeRoutinesCache } from './idbLifeRoutines'
 import { QUICK_LIST_GOAL_NAME } from './quickListRemote'
@@ -145,15 +145,10 @@ const pushQuickListToSupabase = async (tasks: TaskRecord[], subtaskRecords: Subt
   if (!supabase || tasks.length === 0) {
     return
   }
-  const remote = await ensureQuickListRemoteStructures()
-  if (!remote) {
-    throw new Error('Quick List remote structures unavailable')
-  }
   const session = await ensureSingleUserSession()
   if (!session?.user?.id) {
     throw new Error('Missing Supabase session for Quick List migration')
   }
-  const { bucketId } = remote
 
   // Group subtasks by taskId
   const subtasksByTask = new Map<string, SubtaskRecord[]>()
@@ -170,7 +165,7 @@ const pushQuickListToSupabase = async (tasks: TaskRecord[], subtaskRecords: Subt
   for (const item of ordered) {
     try {
       const baseText = item.text?.trim().length ? item.text.trim() : 'Quick task'
-      const created = await createTask(bucketId, baseText)
+      const created = await createTask(QUICK_LIST_CONTAINER_ID, baseText)
       const taskId = created?.id
       if (!taskId) {
         throw new Error('Failed to create Quick List task during migration')
@@ -193,12 +188,12 @@ const pushQuickListToSupabase = async (tasks: TaskRecord[], subtaskRecords: Subt
         await setTaskDifficulty(taskId, item.difficulty)
       }
       if (item.priority) {
-        await setTaskPriorityAndResort(taskId, bucketId, false, true)
+        await setTaskPriorityAndResort(taskId, QUICK_LIST_CONTAINER_ID, false, true)
       }
       if (item.completed) {
-        await setTaskCompletedAndResort(taskId, bucketId, true)
+        await setTaskCompletedAndResort(taskId, QUICK_LIST_CONTAINER_ID, true)
         if (item.priority) {
-          await setTaskPriorityAndResort(taskId, bucketId, true, true)
+          await setTaskPriorityAndResort(taskId, QUICK_LIST_CONTAINER_ID, true, true)
         }
       }
     } catch (err) {
@@ -305,7 +300,7 @@ const pushGoalsToSupabase = async (): Promise<IdMaps> => {
         taskRows.push({
           id: taskId,
           user_id: userId,
-          bucket_id: bucketId,
+          container_id: bucketId,
           text,
           completed: Boolean(task.completed),
           difficulty: sanitizeDifficulty(task.difficulty),

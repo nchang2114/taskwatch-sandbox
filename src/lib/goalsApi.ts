@@ -72,7 +72,7 @@ export type DbBucket = {
 export type DbTask = {
   id: string
   user_id: string
-  bucket_id: string
+  container_id: string
   text: string
   completed: boolean
   difficulty: 'none' | 'green' | 'yellow' | 'red'
@@ -255,8 +255,8 @@ export async function fetchGoalsHierarchy(): Promise<
   const { data: tasks, error: tErr } = bucketIds.length
     ? await supabase
         .from('tasks')
-        .select('id, user_id, bucket_id, text, completed, difficulty, priority, sort_index, notes, created_at')
-        .in('bucket_id', bucketIds)
+        .select('id, user_id, container_id, text, completed, difficulty, priority, sort_index, notes, created_at')
+        .in('container_id', bucketIds)
         .order('completed', { ascending: true })
         .order('priority', { ascending: false })
         .order('sort_index', { ascending: true })
@@ -309,7 +309,7 @@ export async function fetchGoalsHierarchy(): Promise<
   })
 
   ;(tasks ?? []).forEach((t) => {
-    const bucket = bucketMap.get(t.bucket_id)
+    const bucket = bucketMap.get(t.container_id)
     if (bucket) {
       const subtasks = subtasksByTaskId.get(t.id) ?? []
       bucket.tasks.push({
@@ -527,7 +527,7 @@ async function prependSortIndexForTasks(bucketId: string, completed: boolean) {
   const { data } = await supabase
     .from('tasks')
     .select('sort_index')
-    .eq('bucket_id', bucketId)
+    .eq('container_id', bucketId)
     .eq('completed', completed)
     .order('sort_index', { ascending: true })
     .limit(1)
@@ -553,7 +553,7 @@ async function updateTaskWithGuard(
     .from('tasks')
     .update(updates)
     .eq('id', taskId)
-    .eq('bucket_id', bucketId)
+    .eq('container_id', bucketId)
     .eq('user_id', session.user.id)
   let data: any[] | null = null
   let error: any = null
@@ -572,7 +572,7 @@ async function updateTaskWithGuard(
     return data as any[]
   }
   // Fallback path for legacy rows that may not have a user_id populated.
-  const fallback = supabase.from('tasks').update(updates).eq('id', taskId).eq('bucket_id', bucketId)
+  const fallback = supabase.from('tasks').update(updates).eq('id', taskId).eq('container_id', bucketId)
   if (selectColumns) {
     const { data: fallbackData, error: fallbackError } = await fallback.select(selectColumns)
     if (fallbackError) {
@@ -706,7 +706,7 @@ export async function deleteGoalById(goalId: string) {
   const bucketIds = (buckets ?? []).map((b: any) => b.id as string)
   if (bucketIds.length > 0) {
     // Delete tasks in those buckets
-    await supabase.from('tasks').delete().in('bucket_id', bucketIds)
+    await supabase.from('tasks').delete().in('container_id', bucketIds)
     // Delete the buckets
     await supabase.from('buckets').delete().in('id', bucketIds)
   }
@@ -932,7 +932,7 @@ export async function deleteCompletedTasksInBucket(bucketId: string) {
   if (!supabase) return
   const userId = await getActiveUserId()
   if (!userId) return
-  await supabase.from('tasks').delete().eq('bucket_id', bucketId).eq('completed', true).eq('user_id', userId)
+  await supabase.from('tasks').delete().eq('container_id', bucketId).eq('completed', true).eq('user_id', userId)
 }
 
 export async function deleteTaskById(taskId: string, bucketId: string) {
@@ -945,7 +945,7 @@ export async function deleteTaskById(taskId: string, bucketId: string) {
     .from('tasks')
     .delete()
     .eq('id', taskId)
-    .eq('bucket_id', bucketId)
+    .eq('container_id', bucketId)
     .eq('user_id', session.user.id)
 }
 
@@ -963,14 +963,14 @@ export async function createTask(
   const insertAtTop = Boolean(options?.insertAtTop)
   const sort_index = insertAtTop
     ? await prependSortIndexForTasks(bucketId, false)
-    : await nextSortIndex('tasks', { bucket_id: bucketId, completed: false })
+    : await nextSortIndex('tasks', { container_id: bucketId, completed: false })
   const { data, error } = await supabase
     .from('tasks')
     .insert([
       {
         ...(options?.clientId ? { id: options.clientId } : null),
         user_id: session.user.id,
-        bucket_id: bucketId,
+        container_id: bucketId,
         text,
         completed: false,
         difficulty: 'none',
@@ -1046,7 +1046,7 @@ export async function setTaskPriorityAndResort(
   const { data } = await supabase
     .from('tasks')
     .select('sort_index')
-    .eq('bucket_id', bucketId)
+    .eq('container_id', bucketId)
     .eq('completed', completed)
     .eq('priority', false)
     .eq('user_id', userId)
@@ -1057,7 +1057,7 @@ export async function setTaskPriorityAndResort(
     const minIdx = (data[0] as any).sort_index ?? 0
     sort_index = Math.floor(minIdx) - STEP
   } else {
-    sort_index = await nextSortIndex('tasks', { bucket_id: bucketId, completed, priority: false })
+    sort_index = await nextSortIndex('tasks', { container_id: bucketId, completed, priority: false })
   }
   await updateTaskWithGuard(taskId, bucketId, { priority: false, sort_index }, 'id')
 }
@@ -1091,7 +1091,7 @@ export async function setTaskCompletedAndResort(
   const userId = await getActiveUserId()
   if (!userId) return null
 
-  const sort_index = await nextSortIndex('tasks', { bucket_id: bucketId, completed })
+  const sort_index = await nextSortIndex('tasks', { container_id: bucketId, completed })
   const updates: Partial<DbTask> = { completed, sort_index }
 
   const completionRows = await updateTaskWithGuard(taskId, bucketId, updates, 'id, completed')
@@ -1105,7 +1105,7 @@ export async function setTaskCompletedAndResort(
       .from('tasks')
       .select('id, completed')
       .eq('id', taskId)
-      .eq('bucket_id', bucketId)
+      .eq('container_id', bucketId)
       .eq('user_id', userId)
       .maybeSingle()
     if (error) {
@@ -1137,7 +1137,7 @@ export async function setTaskSortIndex(bucketId: string, section: 'active' | 'co
   const { data: rows } = await supabase
     .from('tasks')
     .select('id, sort_index')
-    .eq('bucket_id', bucketId)
+    .eq('container_id', bucketId)
     .eq('completed', section === 'completed')
     .eq('user_id', userId)
     .order('sort_index', { ascending: true })
@@ -1166,7 +1166,7 @@ export async function setTaskSortIndex(bucketId: string, section: 'active' | 'co
 }
 
 /** Move a task from one bucket to another within the same goal.
- * Updates the bucket_id and assigns a new sort_index for the destination bucket.
+ * Updates the container_id and assigns a new sort_index for the destination bucket.
  * If toIndex is omitted, the task is appended to the end of the active tasks. */
 export async function moveTaskToBucket(
   taskId: string,
@@ -1182,7 +1182,7 @@ export async function moveTaskToBucket(
   const { data: rows } = await supabase
     .from('tasks')
     .select('id, sort_index')
-    .eq('bucket_id', toBucketId)
+    .eq('container_id', toBucketId)
     .eq('completed', false)
     .eq('user_id', userId)
     .order('sort_index', { ascending: true })
@@ -1211,12 +1211,12 @@ export async function moveTaskToBucket(
     newSort = STEP
   }
 
-  // Update the task's bucket_id and sort_index
+  // Update the task's container_id and sort_index
   const { error } = await supabase
     .from('tasks')
-    .update({ bucket_id: toBucketId, sort_index: newSort })
+    .update({ container_id: toBucketId, sort_index: newSort })
     .eq('id', taskId)
-    .eq('bucket_id', fromBucketId)
+    .eq('container_id', fromBucketId)
     .eq('user_id', userId)
 
   if (error) {
@@ -1239,7 +1239,7 @@ export async function sortBucketTasksByDate(bucketId: string, direction: 'oldest
   const { data: tasks, error } = await supabase
     .from('tasks')
     .select('id, created_at, priority')
-    .eq('bucket_id', bucketId)
+    .eq('container_id', bucketId)
     .eq('user_id', userId)
   
   if (error || !tasks || tasks.length === 0) return null
@@ -1296,7 +1296,7 @@ export async function sortBucketTasksByPriority(bucketId: string): Promise<{ id:
   const { data: tasks, error } = await supabase
     .from('tasks')
     .select('id, priority, difficulty, sort_index')
-    .eq('bucket_id', bucketId)
+    .eq('container_id', bucketId)
     .eq('user_id', userId)
     .order('sort_index', { ascending: true }) // Preserve relative order for stable sort
   
@@ -1360,7 +1360,7 @@ export async function sortBucketTasksByName(bucketId: string, direction: 'asc' |
   const { data: tasks, error } = await supabase
     .from('tasks')
     .select('id, text, priority')
-    .eq('bucket_id', bucketId)
+    .eq('container_id', bucketId)
     .eq('user_id', userId)
   
   if (error || !tasks || tasks.length === 0) return null
@@ -1606,7 +1606,7 @@ export async function seedGoalsIfEmpty(seeds: GoalSeed[]): Promise<boolean> {
     const taskInserts: Array<{
       id: string
       user_id: string
-      bucket_id: string
+      container_id: string
       text: string
       completed: boolean
       difficulty: DbTask['difficulty']
@@ -1641,7 +1641,7 @@ export async function seedGoalsIfEmpty(seeds: GoalSeed[]): Promise<boolean> {
           taskInserts.push({
             id: taskId,
             user_id: userId,
-            bucket_id: bucketId,
+            container_id: bucketId,
             text: task.text,
             completed: Boolean(task.completed),
             difficulty: task.difficulty ?? 'none',
