@@ -10344,6 +10344,79 @@ const normalizedSearch = searchTerm.trim().toLowerCase()
                           />
                         </div>
                       </div>
+                      <div className="goal-task-focus">
+                        <button
+                          type="button"
+                          className={classNames(
+                            'goal-task-focus__button',
+                            scheduledTaskIds.has(task.id) && 'goal-task-focus__button--scheduled',
+                          )}
+                          onClick={(event) => {
+                            event.stopPropagation()
+                            if (isQuickTask) {
+                              broadcastScheduleTask({
+                                goalId: 'quick-list',
+                                goalName: 'Quick List',
+                                bucketId: 'quick-list',
+                                bucketName: 'Quick List',
+                                taskId: task.id,
+                                taskName: task.text,
+                              })
+                              return
+                            }
+                            broadcastScheduleTask({
+                              goalId: resolved.goalId,
+                              goalName,
+                              bucketId: resolved.bucketId,
+                              bucketName,
+                              taskId: task.id,
+                              taskName: task.text,
+                            })
+                          }}
+                        >
+                          Schedule Task
+                        </button>
+                        <button
+                          type="button"
+                          className="goal-task-focus__button"
+                          onClick={(event) => {
+                            event.stopPropagation()
+                            if (isQuickTask) {
+                              const quickSubtasks = (subtasks ?? []).map((s) => ({
+                                id: s.id,
+                                text: s.text,
+                                completed: s.completed,
+                                sortIndex: s.sortIndex,
+                              }))
+                              broadcastFocusTask({
+                                goalId: 'quick-list',
+                                goalName: 'Quick List',
+                                bucketId: 'quick-list',
+                                bucketName: 'Quick List',
+                                taskId: task.id,
+                                taskName: task.text,
+                                taskDifficulty: task.difficulty ?? null,
+                                priority: task.priority ?? null,
+                                goalSurface: DEFAULT_SURFACE_STYLE,
+                                bucketSurface: DEFAULT_SURFACE_STYLE,
+                                autoStart: true,
+                                notes: notesValue,
+                                subtasks: quickSubtasks,
+                              })
+                              return
+                            }
+                            const goal = goals.find((g) => g.id === resolved.goalId)
+                            const bucket = goal?.buckets.find((b) => b.id === resolved.bucketId)
+                            if (!goal || !bucket) {
+                              return
+                            }
+                            const currentTask = bucket.tasks.find((item) => item.id === task.id) ?? task
+                            handleStartFocusTask(goal, bucket, currentTask)
+                          }}
+                        >
+                          Start Focus
+                        </button>
+                      </div>
                     </div>
                   )}
                 </li>
