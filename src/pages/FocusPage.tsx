@@ -84,6 +84,12 @@ import {
 import { logDebug, logWarn } from '../lib/logging'
 import { isRecentlyFullSynced } from '../lib/bootstrap'
 import { storage, STORAGE_KEYS } from '../lib/storage'
+import {
+  hydrateSnapbackOverview,
+  readSnapbackOverviewRows,
+  writeSnapbackOverviewRows,
+} from '../lib/idbSnapbackOverview'
+import { broadcastSnapbackUpdate, subscribeToSnapbackSync } from '../lib/snapbackChannel'
 
 // Minimal sync instrumentation disabled by default
 const DEBUG_SYNC = false
@@ -801,7 +807,7 @@ export function FocusPage({ viewportWidth: _viewportWidth, showMilliseconds = tr
   const [snapbackCustomReason, setSnapbackCustomReason] = useState('')
   const [snapbackCustomDuration, setSnapbackCustomDuration] = useState<string>('')
   const [snapbackReasonSelect, setSnapbackReasonSelect] = useState('')
-  const [overviewTriggersVersion, setOverviewTriggersVersion] = useState(0)
+  const [snapbackOverviewSignal, setSnapbackOverviewSignal] = useState(0)
   const [timeMode, setTimeMode] = useState<TimeMode>('focus')
 
   useEffect(() => {
@@ -1220,30 +1226,41 @@ useEffect(() => {
     }
   }, [])
 
-  // Compute most common Snapback reasons from history and include any saved custom triggers
+  const refreshSnapbackOverview = useCallback(async () => {
+    const userId = getCurrentUserId()
+    try {
+      await hydrateSnapbackOverview(userId)
+    } catch {
+      // best-effort hydrate
+    }
+    setSnapbackOverviewSignal((value) => value + 1)
+  }, [])
+
+  useEffect(() => {
+    void refreshSnapbackOverview()
+  }, [refreshSnapbackOverview])
+
+  useEffect(() => {
+    void refreshSnapbackOverview()
+  }, [historyOwnerSignal, refreshSnapbackOverview])
+
+  useEffect(() => {
+    const unsubscribe = subscribeToSnapbackSync(() => {
+      void refreshSnapbackOverview()
+    })
+    return unsubscribe
+  }, [refreshSnapbackOverview])
+
+  // Compute most common Snapback reasons from the snapback overview rows.
   const snapbackReasonStats = useMemo(() => {
-    const labels: string[] = (() => {
-      if (typeof window === 'undefined') return []
-      const parsed = storage.focus.overviewTriggers.get()
-      return Array.isArray(parsed) ? (parsed as string[]).filter((s) => typeof s === 'string' && s.trim().length > 0) : []
-    })()
-    const ordered = labels.map((s) => s.trim())
+    const userId = getCurrentUserId()
+    const ordered = readSnapbackOverviewRows(userId)
+      .map((row) => (typeof row.trigger_name === 'string' ? row.trigger_name.trim() : ''))
+      .filter((label) => label.length > 0)
     const topTwo = ordered.slice(0, 2)
     const others = ordered.slice(2)
     return { topTwo, others, all: ordered }
-  }, [overviewTriggersVersion])
-
-  // Keep panel in sync with overview changes via storage events
-  useEffect(() => {
-    if (typeof window === 'undefined') return
-    const handler = (e: StorageEvent) => {
-      if (e.key === STORAGE_KEYS.overviewTriggers) {
-        setOverviewTriggersVersion((v) => v + 1)
-      }
-    }
-    window.addEventListener('storage', handler)
-    return () => window.removeEventListener('storage', handler)
-  }, [])
+  }, [snapbackOverviewSignal])
 
   useEffect(() => {
     if (typeof window === 'undefined') {
@@ -5654,13 +5671,30 @@ useEffect(() => {
     // Persist new custom reason as a trigger for the overview
     if (snapbackReasonMode === 'custom') {
       const label = reasonLabel.trim()
-      if (label.length > 0 && typeof window !== 'undefined') {
-        const parsed = storage.focus.snapbackCustomTriggers.get()
-        const list = Array.isArray(parsed) ? parsed : []
-        const exists = list.some((it: any) => typeof it?.label === 'string' && it.label.trim().toLowerCase() === label.toLowerCase())
+      if (label.length > 0) {
+        const userId = getCurrentUserId()
+        const existingRows = readSnapbackOverviewRows(userId)
+        const exists = existingRows.some(
+          (row) => (row.trigger_name ?? '').trim().toLowerCase() === label.toLowerCase(),
+        )
         if (!exists) {
-          list.push({ id: `snap-custom-${Date.now()}`, label })
-          storage.focus.snapbackCustomTriggers.set(list)
+          const nowIso = new Date().toISOString()
+          writeSnapbackOverviewRows(userId, [
+            ...existingRows,
+            {
+              id: `snap-custom-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+              user_id: userId,
+              trigger_name: label,
+              cue_text: '',
+              deconstruction_text: '',
+              plan_text: '',
+              sort_index: existingRows.length,
+              created_at: nowIso,
+              updated_at: nowIso,
+            },
+          ])
+          setSnapbackOverviewSignal((value) => value + 1)
+          broadcastSnapbackUpdate()
         }
       }
     }

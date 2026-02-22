@@ -81,6 +81,12 @@ import {
   type DbSnapbackOverview,
 } from '../lib/snapbackApi'
 import { broadcastSnapbackUpdate, subscribeToSnapbackSync } from '../lib/snapbackChannel'
+import {
+  hydrateSnapbackOverview,
+  readSnapbackOverviewRows,
+  writeSnapbackOverviewRows,
+  type SnapbackOverviewRecord,
+} from '../lib/idbSnapbackOverview'
 import { supabase } from '../lib/supabaseClient'
 import { logWarn } from '../lib/logging'
 import { isRecentlyFullSynced } from '../lib/bootstrap'
@@ -111,6 +117,102 @@ const SNAP_RANGE_DEFS: Record<SnapRangeKey, RangeDefinition> = {
   all: { label: 'All Time', shortLabel: 'All', durationMs: Number.POSITIVE_INFINITY },
 }
 // snap-tabs removed; keep range fixed to 'all'
+
+type LocalTrigger = { id: string; label: string; cue: string; deconstruction: string; plan: string }
+type LocalSnapPlan = { cue: string; deconstruction: string; plan: string }
+type LocalSnapPlanMap = Record<string, LocalSnapPlan>
+
+const toGuestLocalTriggers = (rows: SnapbackOverviewRecord[]): LocalTrigger[] =>
+  rows.map((row) => ({
+    id: row.id,
+    label: row.trigger_name,
+    cue: row.cue_text ?? '',
+    deconstruction: row.deconstruction_text ?? '',
+    plan: row.plan_text ?? '',
+  }))
+
+const toGuestLocalPlans = (rows: SnapbackOverviewRecord[]): LocalSnapPlanMap => {
+  const out: LocalSnapPlanMap = {}
+  rows.forEach((row) => {
+    out[row.id] = {
+      cue: row.cue_text ?? '',
+      deconstruction: row.deconstruction_text ?? '',
+      plan: row.plan_text ?? '',
+    }
+  })
+  return out
+}
+
+const toOverviewRowsForUser = (
+  userId: string,
+  localTriggers: LocalTrigger[],
+  localPlans: LocalSnapPlanMap,
+): SnapbackOverviewRecord[] => {
+  const byId = new Map<string, SnapbackOverviewRecord>()
+  const order: string[] = []
+  const nowIso = new Date().toISOString()
+
+  localTriggers.forEach((trigger, index) => {
+    const id = typeof trigger.id === 'string' && trigger.id.trim().length > 0 ? trigger.id : `local-${index}`
+    const name = typeof trigger.label === 'string' ? trigger.label.trim() : ''
+    if (!name) {
+      return
+    }
+    byId.set(id, {
+      id,
+      user_id: userId,
+      trigger_name: name,
+      cue_text: trigger.cue ?? '',
+      deconstruction_text: trigger.deconstruction ?? '',
+      plan_text: trigger.plan ?? '',
+      sort_index: order.length,
+      created_at: nowIso,
+      updated_at: nowIso,
+    })
+    order.push(id)
+  })
+
+  Object.entries(localPlans).forEach(([id, plan]) => {
+    const existing = byId.get(id)
+    if (existing) {
+      byId.set(id, {
+        ...existing,
+        cue_text: plan.cue ?? '',
+        deconstruction_text: plan.deconstruction ?? '',
+        plan_text: plan.plan ?? '',
+        updated_at: nowIso,
+      })
+      return
+    }
+    const derivedName = id.startsWith('trigger-') ? id.slice('trigger-'.length) : id
+    const triggerName = derivedName.trim()
+    if (!triggerName) {
+      return
+    }
+    byId.set(id, {
+      id,
+      user_id: userId,
+      trigger_name: triggerName,
+      cue_text: plan.cue ?? '',
+      deconstruction_text: plan.deconstruction ?? '',
+      plan_text: plan.plan ?? '',
+      sort_index: order.length,
+      created_at: nowIso,
+      updated_at: nowIso,
+    })
+    order.push(id)
+  })
+
+  return order
+    .map((id, sortIndex) => {
+      const row = byId.get(id)
+      if (!row) {
+        return null
+      }
+      return { ...row, sort_index: sortIndex, updated_at: nowIso }
+    })
+    .filter((row): row is SnapbackOverviewRecord => Boolean(row))
+}
 
 const PAN_MIN_ANIMATION_MS = 220
 const PAN_MAX_ANIMATION_MS = 450
@@ -4910,20 +5012,34 @@ const [showInlineExtras, setShowInlineExtras] = useState(false)
     return unsubscribe
   }, [refetchSnapDbRows])
 
-  // Local triggers for guest users (stored in localStorage) - defined early for snapbackTriggerOptions
-  type LocalTrigger = { id: string; label: string; cue: string; deconstruction: string; plan: string }
-  const [localTriggers, setLocalTriggers] = useState<LocalTrigger[]>(() => {
-    const parsed = storage.guest.snapbackTriggers.get()
-    if (Array.isArray(parsed)) return parsed as LocalTrigger[]
-    return []
-  })
-  // Persist local triggers to localStorage and broadcast for cross-tab sync
   useEffect(() => {
-    storage.guest.snapbackTriggers.set(localTriggers as any)
-    broadcastSnapbackUpdate()
-  }, [localTriggers])
-  
-  // Storage listener for localTriggers moved to after snapPlans is defined (for proper sync)
+    if (!historyOwnerId || historyOwnerId === GUEST_USER_ID) {
+      return
+    }
+    const rows: SnapbackOverviewRecord[] = snapDbRows
+      .map((row, index) => {
+        const triggerName = typeof row.trigger_name === 'string' ? row.trigger_name.trim() : ''
+        if (!triggerName) {
+          return null
+        }
+        return {
+          id: row.id,
+          user_id: historyOwnerId,
+          trigger_name: triggerName,
+          cue_text: row.cue_text ?? '',
+          deconstruction_text: row.deconstruction_text ?? '',
+          plan_text: row.plan_text ?? '',
+          sort_index: Number.isFinite(row.sort_index) ? row.sort_index : index,
+          created_at: typeof row.created_at === 'string' ? row.created_at : new Date().toISOString(),
+          updated_at: typeof row.updated_at === 'string' ? row.updated_at : new Date().toISOString(),
+        }
+      })
+      .filter((row): row is SnapbackOverviewRecord => Boolean(row))
+    writeSnapbackOverviewRows(historyOwnerId, rows)
+  }, [historyOwnerId, snapDbRows])
+
+  // Guest-only local triggers/plans now live in IndexedDB (snapbackOverview store).
+  const [localTriggers, setLocalTriggers] = useState<LocalTrigger[]>([])
   
   const isGuestUser = !historyOwnerId || historyOwnerId === GUEST_USER_ID
 
@@ -7628,7 +7744,7 @@ useEffect(() => {
   // Auto-create DB rows for orphaned triggers (history has sessions but no DB row)
   const autoCreatedTriggersRef = useRef<Set<string>>(new Set())
   useEffect(() => {
-    if (isGuestUser) return // Guests use localStorage, not DB
+    if (isGuestUser) return // Guests are IDB-only and do not write remote DB rows
     const orphanedItems = snapbackOverview.legend.filter(
       (item) => item.id.startsWith('trigger-') && !autoCreatedTriggersRef.current.has(item.label)
     )
@@ -7823,50 +7939,10 @@ useEffect(() => {
   const snapActiveRangeConfig = SNAP_RANGE_DEFS[snapActiveRange]
 
   // Local plans for guest users (history-derived snap-* triggers)
-  const [localSnapPlans, setLocalSnapPlans] = useState<Record<string, { cue: string; deconstruction: string; plan: string }>>(() => {
-    const parsed = storage.guest.snapPlans.get()
-    if (typeof parsed === 'object' && parsed !== null) return parsed
-    return {}
-  })
+  const [localSnapPlans, setLocalSnapPlans] = useState<LocalSnapPlanMap>({})
   // Ref to access localSnapPlans in callbacks without stale closures
-  const localSnapPlansRef = useRef<Record<string, { cue: string; deconstruction: string; plan: string }>>({})
+  const localSnapPlansRef = useRef<LocalSnapPlanMap>({})
   useEffect(() => { localSnapPlansRef.current = localSnapPlans }, [localSnapPlans])
-  
-  // Persist local plans to localStorage and broadcast for cross-tab sync
-  useEffect(() => {
-    storage.guest.snapPlans.set(localSnapPlans)
-    broadcastSnapbackUpdate()
-  }, [localSnapPlans])
-  
-  // Listen for localStorage changes from other tabs (guest mode plan sync)
-  // We need to update both localSnapPlans AND snapPlans when another tab changes
-  const localSnapPlansStorageRef = useRef<Record<string, { cue: string; deconstruction: string; plan: string }>>({})
-  useEffect(() => {
-    localSnapPlansStorageRef.current = localSnapPlans
-  }, [localSnapPlans])
-  
-  useEffect(() => {
-    const handleStorage = (event: StorageEvent) => {
-      if (event.key === STORAGE_KEYS.localSnapPlans && event.newValue) {
-        try {
-          const parsed = JSON.parse(event.newValue)
-          if (typeof parsed === 'object' && parsed !== null) {
-            setLocalSnapPlans(parsed)
-            // Also update snapPlans for UI to reflect changes
-            setSnapPlans((cur) => {
-              const updated = { ...cur }
-              Object.entries(parsed as Record<string, { cue: string; deconstruction: string; plan: string }>).forEach(([key, plan]) => {
-                updated[key] = { cue: plan.cue, deconstruction: plan.deconstruction, plan: plan.plan }
-              })
-              return updated
-            })
-          }
-        } catch {}
-      }
-    }
-    window.addEventListener('storage', handleStorage)
-    return () => window.removeEventListener('storage', handleStorage)
-  }, [])
 
   // Snapback plans (DB-backed); initialize empty and hydrate from DB rows
   type SnapbackPlan = { cue: string; deconstruction: string; plan: string }
@@ -7874,32 +7950,50 @@ useEffect(() => {
   const [snapPlans, setSnapPlans] = useState<SnapbackPlanState>({})
   const snapPlansRef = useRef<SnapbackPlanState>({})
   useEffect(() => { snapPlansRef.current = snapPlans }, [snapPlans])
-  
-  // Listen for localStorage changes from other tabs (guest mode localTriggers sync)
-  // This is here because setSnapPlans needs to be defined first
-  useEffect(() => {
-    const handleStorage = (event: StorageEvent) => {
-      if (event.key === STORAGE_KEYS.localSnapbackTriggers && event.newValue) {
-        try {
-          const parsed = JSON.parse(event.newValue)
-          if (Array.isArray(parsed)) {
-            const triggers = parsed as LocalTrigger[]
-            setLocalTriggers(triggers)
-            // Also update snapPlans with the plan data from triggers
-            setSnapPlans((cur) => {
-              const updated = { ...cur }
-              triggers.forEach((t) => {
-                updated[t.id] = { cue: t.cue, deconstruction: t.deconstruction, plan: t.plan }
-              })
-              return updated
-            })
-          }
-        } catch {}
-      }
+
+  const reloadGuestOverviewRows = useCallback(async () => {
+    const ownerId = getCurrentUserId()
+    if (ownerId !== GUEST_USER_ID) {
+      setLocalTriggers([])
+      setLocalSnapPlans({})
+      return
     }
-    window.addEventListener('storage', handleStorage)
-    return () => window.removeEventListener('storage', handleStorage)
+    try {
+      await hydrateSnapbackOverview(ownerId)
+      const rows = readSnapbackOverviewRows(ownerId)
+      const nextTriggers = toGuestLocalTriggers(rows)
+      const nextPlans = toGuestLocalPlans(rows)
+      setLocalTriggers((current) =>
+        JSON.stringify(current) === JSON.stringify(nextTriggers) ? current : nextTriggers,
+      )
+      setLocalSnapPlans((current) =>
+        JSON.stringify(current) === JSON.stringify(nextPlans) ? current : nextPlans,
+      )
+    } catch {
+      setLocalTriggers([])
+      setLocalSnapPlans({})
+    }
   }, [])
+
+  useEffect(() => {
+    void reloadGuestOverviewRows()
+  }, [historyOwnerId, reloadGuestOverviewRows])
+
+  useEffect(() => {
+    const unsubscribe = subscribeToSnapbackSync(() => {
+      void reloadGuestOverviewRows()
+    })
+    return unsubscribe
+  }, [reloadGuestOverviewRows])
+
+  useEffect(() => {
+    if (!isGuestUser) {
+      return
+    }
+    const rows = toOverviewRowsForUser(GUEST_USER_ID, localTriggers, localSnapPlans)
+    writeSnapbackOverviewRows(GUEST_USER_ID, rows)
+    broadcastSnapbackUpdate()
+  }, [isGuestUser, localTriggers, localSnapPlans])
   
   const saveTimersRef = useRef<Map<string, number>>(new Map())
   // Ref to access localTriggers in persistPlanForId without causing re-renders
@@ -7911,7 +8005,7 @@ useEffect(() => {
     // Check if this is a local trigger (guest user)
     const localTrigger = localTriggersRef.current.find((t) => t.id === idKey)
     if (localTrigger) {
-      // Update local trigger in state (which will persist to localStorage)
+      // Update local trigger in state (persisted to guest IDB by effect).
       setLocalTriggersRef.current((cur) => cur.map((t) => 
         t.id === idKey ? { ...t, cue: plan.cue, deconstruction: plan.deconstruction, plan: plan.plan } : t
       ))
@@ -7920,7 +8014,7 @@ useEffect(() => {
     }
     // Check if we have a DB row for this trigger
     const row = snapDbRows.find((r) => r.id === idKey)
-    // For triggers without a DB row (history-derived or guest), save to local storage
+    // For triggers without a DB row (history-derived or guest), keep local in guest IDB.
     if (!row) {
       setLocalSnapPlans((cur) => ({ ...cur, [idKey]: { cue: plan.cue, deconstruction: plan.deconstruction, plan: plan.plan } }))
       setSnapPlans((cur) => ({ ...cur, [idKey]: { ...plan } }))
@@ -8117,7 +8211,7 @@ useEffect(() => {
     }
     setSnapPlans((cur) => {
       const next: SnapbackPlanState = { ...cur }
-      // Update existing plans with fresh data from DB/localStorage
+      // Update existing plans with fresh data from DB/IDB
       // This ensures cross-tab sync works for authenticated users
       for (const [k, v] of Object.entries(mergedPlans)) {
         next[k] = v
@@ -8214,13 +8308,6 @@ useEffect(() => {
     }
     return counts
   }, [effectiveHistory])
-
-  // Persist current overview trigger labels for the Snapback panel to mirror
-  useEffect(() => {
-    if (typeof window === 'undefined') return
-    const labels = combinedLegend.map((i) => i.label)
-    storage.focus.overviewTriggers.set(labels)
-  }, [combinedLegend.map((i) => i.label).join('|')])
 
   const [selectedTriggerKey, setSelectedTriggerKey] = useState<string | null>(null)
   // Stable handler for trigger selection - uses data-id attribute to avoid inline closures

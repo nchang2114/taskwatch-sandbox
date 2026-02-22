@@ -11,7 +11,7 @@
  */
 
 const DB_NAME = 'taskwatch'
-const DB_VERSION = 4
+const DB_VERSION = 6
 
 export const STORE = {
   goals: 'goals',
@@ -22,7 +22,7 @@ export const STORE = {
   lifeRoutines: 'lifeRoutines',
   userPreferences: 'userPreferences',
   dailyListEntries: 'dailyListEntries',
-  seedState: 'seedState',
+  snapbackOverview: 'snapbackOverview',
 } as const
 
 export type StoreName = (typeof STORE)[keyof typeof STORE]
@@ -87,9 +87,15 @@ export function openDB(): Promise<IDBDatabase> {
         store.createIndex('userId', 'userId', { unique: false })
       }
 
-      // seedState: userId keyPath (one record per user)
-      if (!db.objectStoreNames.contains(STORE.seedState)) {
-        db.createObjectStore(STORE.seedState, { keyPath: 'userId' })
+      // snapbackOverview: id (keyPath), user_id index
+      if (!db.objectStoreNames.contains(STORE.snapbackOverview)) {
+        const store = db.createObjectStore(STORE.snapbackOverview, { keyPath: 'id' })
+        store.createIndex('user_id', 'user_id', { unique: false })
+      }
+
+      // Drop deprecated legacy seed-state store.
+      if (db.objectStoreNames.contains('seedState')) {
+        db.deleteObjectStore('seedState')
       }
     }
     request.onsuccess = () => resolve(request.result)

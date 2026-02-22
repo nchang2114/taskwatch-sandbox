@@ -22,6 +22,8 @@ export type UserPreferencesRecord = {
   defaultCalendarView: 2 | 3 | 4 | 5 | 6 | 'week'
   snapToInterval: 0 | 5 | 10 | 15
   showMilliseconds: boolean
+  // Internal app metadata (not user-facing preference).
+  guestDefaultsSeedVersion?: number
 }
 
 // ── Defaults ────────────────────────────────────────────────────────────────
@@ -70,6 +72,21 @@ export function updatePreference<K extends keyof Omit<UserPreferencesRecord, 'us
 export function clearPreferencesCache(userId: string): void {
   cache.delete(userId)
   deleteFromIdb(userId).catch(() => {})
+}
+
+export async function readGuestDefaultsSeedVersion(userId: string): Promise<number | null> {
+  await hydrateUserPreferences(userId)
+  const prefs = readPreferences(userId)
+  const current = prefs.guestDefaultsSeedVersion
+  if (typeof current === 'number' && Number.isFinite(current)) {
+    return current
+  }
+  return null
+}
+
+export async function writeGuestDefaultsSeedVersion(userId: string, version: number): Promise<void> {
+  await hydrateUserPreferences(userId)
+  updatePreference(userId, 'guestDefaultsSeedVersion', version)
 }
 
 // ── IDB helpers ─────────────────────────────────────────────────────────────

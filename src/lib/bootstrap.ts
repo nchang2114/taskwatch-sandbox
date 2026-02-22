@@ -29,6 +29,7 @@ import { pushRepeatingRulesToSupabase, syncRepeatingRulesFromSupabase } from './
 import { pushAllHistoryToSupabase, syncHistoryWithSupabase, sanitizeHistoryRecords } from './sessionHistory'
 import { pushDailyListToSupabase, syncDailyListFromSupabase } from './dailyListRemote'
 import { readDailyListEntries, clearDailyListEntries } from './idbDailyList'
+import { clearSnapbackOverviewCache, hydrateSnapbackOverview, readSnapbackOverviewRows } from './idbSnapbackOverview'
 import { storage } from './storage'
 
 // Type for ID mappings returned from migrations
@@ -532,57 +533,23 @@ const migrateGuestData = async (): Promise<void> => {
     await pushDailyListToSupabase(guestDailyEntries)
   }
 
-  // Migrate Snapback triggers and plans
-  type LocalTrigger = { id: string; label: string; cue: string; deconstruction: string; plan: string }
-  type LocalPlan = { cue: string; deconstruction: string; plan: string }
-
-  let localTriggers: LocalTrigger[] = []
-  let localPlans: Record<string, LocalPlan> = {}
-
-  // Read local triggers (custom triggers created by guest)
-  const triggersData = storage.guest.snapbackTriggers.get()
-  if (triggersData && Array.isArray(triggersData)) {
-    localTriggers = triggersData
-    console.log('[bootstrap] Found', localTriggers.length, 'local snapback triggers')
+  // Migrate Snapback overview rows from guest IDB cache.
+  // hydrateSnapbackOverview() performs one-time legacy localStorage migration
+  // for guest users, so this covers both old and new local formats.
+  await hydrateSnapbackOverview(GUEST_USER_ID)
+  const localSnapbackRows = readSnapbackOverviewRows(GUEST_USER_ID)
+  if (localSnapbackRows.length > 0) {
+    console.log('[bootstrap] Found', localSnapbackRows.length, 'local snapback triggers')
   }
+  const triggersToMigrate: SnapbackTriggerPayload[] = localSnapbackRows
+    .filter((row) => typeof row.trigger_name === 'string' && row.trigger_name.trim().length > 0)
+    .map((row) => ({
+      trigger_name: row.trigger_name.trim(),
+      cue_text: row.cue_text ?? '',
+      deconstruction_text: row.deconstruction_text ?? '',
+      plan_text: row.plan_text ?? '',
+    }))
 
-  // Read local plans (plans for history-derived triggers like Doomscrolling)
-  const plansData = storage.guest.snapPlans.get()
-  if (plansData && typeof plansData === 'object') {
-    localPlans = plansData
-    console.log('[bootstrap] Found local snapback plans for', Object.keys(localPlans).length, 'triggers')
-  }
-  
-  // Build list of triggers to migrate
-  const triggersToMigrate: SnapbackTriggerPayload[] = []
-  
-  // Add custom triggers from localTriggers
-  localTriggers.forEach((lt) => {
-    const label = lt.label?.trim()
-    if (label) {
-      triggersToMigrate.push({
-        trigger_name: label,
-        cue_text: lt.cue ?? '',
-        deconstruction_text: lt.deconstruction ?? '',
-        plan_text: lt.plan ?? '',
-      })
-    }
-  })
-  
-  // Add triggers from localPlans (these are history-derived triggers with edited plans)
-  // The key format is "trigger-{triggerName}" or just the trigger name
-  Object.entries(localPlans).forEach(([key, plan]) => {
-    const triggerName = key.startsWith('trigger-') ? key.slice(8) : key
-    if (triggerName && !triggersToMigrate.some((t) => t.trigger_name.toLowerCase() === triggerName.toLowerCase())) {
-      triggersToMigrate.push({
-        trigger_name: triggerName,
-        cue_text: plan.cue ?? '',
-        deconstruction_text: plan.deconstruction ?? '',
-        plan_text: plan.plan ?? '',
-      })
-    }
-  })
-  
   if (triggersToMigrate.length > 0) {
     console.log('[bootstrap] Migrating', triggersToMigrate.length, 'snapback triggers to DB')
     await pushSnapbackTriggersToSupabase(triggersToMigrate, { skipDuplicateCheck: true })
@@ -598,8 +565,11 @@ const migrateGuestData = async (): Promise<void> => {
   storage.domain.repeatingRules.remove('__guest__')
   clearGoalsCache('__guest__')
   // Clear snapback guest data
+  clearSnapbackOverviewCache('__guest__')
   storage.guest.snapbackTriggers.remove()
   storage.guest.snapPlans.remove()
+  storage.focus.snapbackCustomTriggers.remove()
+  storage.focus.overviewTriggers.remove()
 }
 
 export const bootstrapGuestDataIfNeeded = async (userId: string | null | undefined): Promise<boolean> => {

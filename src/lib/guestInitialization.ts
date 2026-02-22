@@ -2,7 +2,7 @@ import { DEMO_GOALS } from './demoGoals'
 import { createGoalsSnapshot, publishGoalsSnapshot } from './goalsSync'
 import { assembleSnapshot, hydrateGoalsData, readQuickListTasks } from './idbGoals'
 import { hydrateLifeRoutines, readLifeRoutinesFromCache } from './idbLifeRoutines'
-import { readSeedState, writeSeedState } from './idbSeedState'
+import { readGuestDefaultsSeedVersion, writeGuestDefaultsSeedVersion } from './idbUserPreferences'
 import { getDefaultLifeRoutines, writeStoredLifeRoutines } from './lifeRoutines'
 import { GUEST_USER_ID, getCurrentUserId } from './namespaceManager'
 import {
@@ -67,8 +67,8 @@ export async function ensureGuestDefaultsInitialized(userId?: string): Promise<v
     try {
       await Promise.all([hydrateGoalsData(GUEST_USER_ID), hydrateLifeRoutines(GUEST_USER_ID)])
 
-      const seedState = await readSeedState(GUEST_USER_ID).catch(() => null)
-      if (seedState?.guestDefaultsSeedVersion === GUEST_DEFAULTS_SEED_VERSION) {
+      const seedVersion = await readGuestDefaultsSeedVersion(GUEST_USER_ID).catch(() => null)
+      if (seedVersion === GUEST_DEFAULTS_SEED_VERSION) {
         return
       }
 
@@ -81,9 +81,7 @@ export async function ensureGuestDefaultsInitialized(userId?: string): Promise<v
         seedGuestDefaults()
       }
 
-      await writeSeedState(GUEST_USER_ID, {
-        guestDefaultsSeedVersion: GUEST_DEFAULTS_SEED_VERSION,
-      }).catch(() => {})
+      await writeGuestDefaultsSeedVersion(GUEST_USER_ID, GUEST_DEFAULTS_SEED_VERSION).catch(() => {})
     } catch {
       // Initialization is best-effort; avoid blocking app render.
     }

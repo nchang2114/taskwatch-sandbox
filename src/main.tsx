@@ -7,6 +7,7 @@ import { hydrateMilestones } from './lib/idbMilestones'
 import { hydrateLifeRoutines } from './lib/idbLifeRoutines'
 import { hydrateUserPreferences } from './lib/idbUserPreferences'
 import { hydrateDailyList } from './lib/idbDailyList'
+import { hydrateSnapbackOverview } from './lib/idbSnapbackOverview'
 import { getCurrentUserId, GUEST_USER_ID, setCurrentUserId } from './lib/namespaceManager'
 import { ensureGuestDefaultsInitialized } from './lib/guestInitialization'
 import { ensureSingleUserSession } from './lib/supabaseClient'
@@ -54,9 +55,11 @@ async function boot() {
     hydrateLifeRoutines(userId),
     hydrateUserPreferences(userId),
     hydrateDailyList(userId),
+    hydrateSnapbackOverview(userId),
   ]
   if (userId !== GUEST_USER_ID) {
     hydrationTasks.push(hydrateLifeRoutines(GUEST_USER_ID))
+    hydrationTasks.push(hydrateSnapbackOverview(GUEST_USER_ID))
   }
   await Promise.all(hydrationTasks)
   if (userId === GUEST_USER_ID) {
