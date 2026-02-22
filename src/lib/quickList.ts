@@ -192,12 +192,6 @@ export const readStoredQuickList = (): QuickListEntry[] => {
   if (typeof window === 'undefined') return []
   const userId = getCurrentUserId()
   const tasks = readQuickListTasks(userId)
-
-  if (tasks.length === 0 && userId === GUEST_USER_ID) {
-    // Seed defaults for guest
-    return writeStoredQuickList(bundleQuickList(userId))
-  }
-
   return bundleFromCache(userId, tasks)
 }
 
@@ -262,36 +256,16 @@ function bundleFromCache(userId: string, tasks: TaskRecord[]): QuickListEntry[] 
     }))
 }
 
-/** Bundle default items for guest (when cache is empty). */
-function bundleQuickList(userId: string): QuickListEntry[] {
-  const { tasks, subtasks } = getDefaultQuickListRecords(userId)
-  writeQuickListToCache(userId, tasks, subtasks)
-  const subtasksByTask = new Map<string, SubtaskRecord[]>()
-  for (const s of subtasks) {
-    const list = subtasksByTask.get(s.taskId) ?? []
-    list.push(s)
-    subtasksByTask.set(s.taskId, list)
-  }
-  return tasks.map((task) => ({
-    ...task,
-    subtasks: (subtasksByTask.get(task.id) ?? []).slice().sort((a, b) => a.sortIndex - b.sortIndex),
-  }))
-}
-
 // ── Namespace change listener ────────────────────────────────────────────────
 
 if (typeof window !== 'undefined') {
-  onUserChange((previous, next) => {
+  onUserChange((_previous, next) => {
     if (next === GUEST_USER_ID) {
-      if (previous !== GUEST_USER_ID) {
-        // Seed guest defaults
-        const { tasks, subtasks } = getDefaultQuickListRecords(next)
-        writeQuickListToCache(next, tasks, subtasks)
-        try {
-          const entries = bundleFromCache(next, tasks)
-          window.dispatchEvent(new CustomEvent(QUICK_LIST_UPDATE_EVENT, { detail: entries }))
-        } catch {}
-      }
+      // Guest defaults are seeded centrally by guestInitialization.ts.
+      const entries = bundleFromCache(next, readQuickListTasks(next))
+      try {
+        window.dispatchEvent(new CustomEvent(QUICK_LIST_UPDATE_EVENT, { detail: entries }))
+      } catch {}
     } else {
       // Clear QL cache for new auth user (will be populated by sync)
       writeQuickListToCache(next, [], [])

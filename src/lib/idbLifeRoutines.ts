@@ -15,7 +15,6 @@ import type { SurfaceStyle } from './surfaceStyles'
 export type LifeRoutineRecord = {
   id: string
   userId: string
-  bucketId: string
   title: string
   blurb: string
   surfaceStyle: SurfaceStyle
@@ -112,7 +111,6 @@ export function clearLifeRoutinesCache(userId: string): void {
 function toConfig(r: LifeRoutineRecord): LifeRoutineConfig {
   return {
     id: r.id,
-    bucketId: r.bucketId,
     title: r.title,
     blurb: r.blurb,
     surfaceStyle: r.surfaceStyle,
@@ -124,7 +122,6 @@ function toRecord(userId: string, c: LifeRoutineConfig): LifeRoutineRecord {
   return {
     id: c.id,
     userId,
-    bucketId: c.bucketId,
     title: c.title,
     blurb: c.blurb,
     surfaceStyle: c.surfaceStyle,

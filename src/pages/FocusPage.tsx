@@ -944,7 +944,7 @@ export function FocusPage({ viewportWidth: _viewportWidth, showMilliseconds = tr
   const [lifeRoutineOwnerSignal, setLifeRoutineOwnerSignal] = useState(0)
   const initialLifeRoutineCountRef = useRef(lifeRoutineTasks.length)
   const lifeRoutineBucketIds = useMemo(
-    () => new Set(lifeRoutineTasks.map((task) => task.bucketId)),
+    () => new Set(lifeRoutineTasks.map((task) => task.id)),
     [lifeRoutineTasks],
   )
   const [quickListItems, setQuickListItems] = useState<QuickListEntry[]>(() => readStoredQuickList())
@@ -972,9 +972,7 @@ export function FocusPage({ viewportWidth: _viewportWidth, showMilliseconds = tr
   const lifeRoutineColorByBucket = useMemo(() => {
     const map = new Map<string, string>()
     lifeRoutineTasks.forEach((r) => {
-      if (r.bucketId) {
-        map.set(r.bucketId, gradientFromSurface(r.surfaceStyle))
-      }
+      map.set(r.id, gradientFromSurface(r.surfaceStyle))
     })
     return map
   }, [lifeRoutineTasks])
@@ -6405,7 +6403,7 @@ useEffect(() => {
                           const taskLower = task.title.trim().toLocaleLowerCase()
                           const matches = focusSource
                             ? focusSource.goalId === LIFE_ROUTINES_GOAL_ID &&
-                              focusSource.bucketId === task.bucketId &&
+                              focusSource.bucketId === task.id &&
                               currentTaskLower === taskLower
                             : !isDefaultTask && currentTaskLower === taskLower
                           const rowClassName = [
@@ -6424,7 +6422,7 @@ useEffect(() => {
                                 onClick={() =>
                                   handleSelectTask(task.title, {
                                     goalId: LIFE_ROUTINES_GOAL_ID,
-                                    bucketId: task.bucketId,
+                                    bucketId: task.id,
                                     goalName: LIFE_ROUTINES_NAME,
                                     bucketName: task.title,
                                     taskId: task.id,
@@ -7061,7 +7059,7 @@ useEffect(() => {
                     const taskLower = task.title.trim().toLocaleLowerCase()
                     const matches = focusSource
                       ? focusSource.goalId === LIFE_ROUTINES_GOAL_ID &&
-                        focusSource.bucketId === task.bucketId &&
+                        focusSource.bucketId === task.id &&
                         currentTaskLower === taskLower
                       : !isDefaultTask && currentTaskLower === taskLower
                     const rowClassName = [
@@ -7080,7 +7078,7 @@ useEffect(() => {
                           onClick={() =>
                             handleSelectTask(task.title, {
                               goalId: LIFE_ROUTINES_GOAL_ID,
-                              bucketId: task.bucketId,
+                              bucketId: task.id,
                               goalName: LIFE_ROUTINES_NAME,
                               bucketName: task.title,
                               taskId: task.id,

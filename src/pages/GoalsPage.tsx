@@ -90,7 +90,7 @@ import {
 } from '../lib/sessionHistory'
 import { logDebug, logInfo, logWarn } from '../lib/logging'
 import { isRecentlyFullSynced } from '../lib/bootstrap'
-import { storage, STORAGE_KEYS } from '../lib/storage'
+import { STORAGE_KEYS } from '../lib/storage'
 import { getCurrentUserId, GUEST_USER_ID } from '../lib/namespaceManager'
 import { readMilestones as readMilestonesFromCache, writeMilestones as writeMilestonesToCache } from '../lib/idbMilestones'
 import {
@@ -255,44 +255,6 @@ const createTaskDetails = (overrides?: Partial<TaskDetails>): TaskDetails => ({
 const LIFE_ROUTINES_NAME = 'Daily Life'
 const LIFE_ROUTINES_GOAL_ID = 'life-routines'
 const LIFE_ROUTINES_SURFACE: GoalSurfaceStyle = 'linen'
-
-const sanitizeSubtasks = (value: unknown): TaskSubtask[] => {
-  if (!Array.isArray(value)) {
-    return []
-  }
-  return value
-    .map((item) => {
-      if (typeof item !== 'object' || item === null) {
-        return null
-      }
-      const candidate = item as Record<string, unknown>
-      const id = typeof candidate.id === 'string' ? candidate.id : null
-      if (!id) {
-        return null
-      }
-      const text = typeof candidate.text === 'string' ? candidate.text : ''
-      const completed = Boolean(candidate.completed)
-      const sortIndex =
-        typeof candidate.sortIndex === 'number'
-          ? candidate.sortIndex
-          : typeof (candidate as any).sort_index === 'number'
-            ? ((candidate as any).sort_index as number)
-            : 0
-      const updatedAt =
-        typeof (candidate as any).updatedAt === 'string'
-          ? ((candidate as any).updatedAt as string)
-          : typeof (candidate as any).updated_at === 'string'
-            ? ((candidate as any).updated_at as string)
-            : undefined
-      const out: TaskSubtask = updatedAt
-        ? { id, text, completed, sortIndex, updatedAt }
-        : { id, text, completed, sortIndex }
-      return out
-    })
-    .filter((item): item is TaskSubtask => Boolean(item))
-}
-
-
 
 const areTaskDetailsEqual = (a: TaskDetails, b: TaskDetails): boolean => {
   if (
@@ -5507,7 +5469,7 @@ export default function GoalsPage(): ReactElement {
       }))
       return stamped
     }
-    return DEFAULT_GOALS
+    return []
   })
   const latestGoalsRef = useRef(goals)
   // Drag cleanup refs (must be at top level for global cleanup useEffect)
@@ -7144,10 +7106,10 @@ export default function GoalsPage(): ReactElement {
     return lifeRoutineTasks.find((task) => task.id === activeLifeRoutineCustomizerId) ?? null
   }, [lifeRoutineTasks, activeLifeRoutineCustomizerId])
   useEffect(() => {
-    if (!lifeRoutinesSyncedRef.current) return
     // Don't save to storage while actively renaming - it can cause re-renders that lose focus
     if (renamingLifeRoutineId) return
-    writeStoredLifeRoutines(lifeRoutineTasks)
+    // Always write to cache/IDB so changes survive refresh, but only push to Supabase after initial sync completes
+    writeStoredLifeRoutines(lifeRoutineTasks, { sync: lifeRoutinesSyncedRef.current })
   }, [lifeRoutineTasks, renamingLifeRoutineId])
   useEffect(() => {
     if (typeof window === 'undefined') {
@@ -8991,7 +8953,7 @@ export default function GoalsPage(): ReactElement {
         current &&
         current.goalId === LIFE_ROUTINES_GOAL_ID &&
         current.taskId === routineId &&
-        (!routine || current.bucketId === routine.bucketId)
+        (!routine || current.bucketId === routine.id)
       ) {
         return null
       }
@@ -9004,7 +8966,6 @@ export default function GoalsPage(): ReactElement {
     const title = 'New routine'
     const newRoutine: LifeRoutineConfig = {
       id,
-      bucketId: id,
       title,
       blurb: 'Describe the cadence you want to build.',
       surfaceStyle: DEFAULT_SURFACE_STYLE,
@@ -12247,7 +12208,7 @@ const normalizedSearch = searchTerm.trim().toLowerCase()
     broadcastFocusTask({
       goalId: LIFE_ROUTINES_GOAL_ID,
       goalName: LIFE_ROUTINES_NAME,
-      bucketId: routine.bucketId,
+      bucketId: routine.id,
       bucketName: routine.title,
       taskId: routine.id,
       taskName: routine.title,
@@ -12267,12 +12228,12 @@ const normalizedSearch = searchTerm.trim().toLowerCase()
       const isSame =
         current &&
         current.goalId === LIFE_ROUTINES_GOAL_ID &&
-        current.bucketId === routine.bucketId &&
+        current.bucketId === routine.id &&
         current.taskId === routine.id
       if (isSame) {
         return null
       }
-      return { goalId: LIFE_ROUTINES_GOAL_ID, bucketId: routine.bucketId, taskId: routine.id }
+      return { goalId: LIFE_ROUTINES_GOAL_ID, bucketId: routine.id, taskId: routine.id }
     })
   }, [])
 
@@ -13736,11 +13697,11 @@ const normalizedSearch = searchTerm.trim().toLowerCase()
                     <div className="goal-insert-line" style={{ top: `${lifeRoutineLineTop}px` }} aria-hidden />
                   ) : null}
                   {lifeRoutineTasks.map((task, index) => {
-                    const focusKey = makeTaskFocusKey(LIFE_ROUTINES_GOAL_ID, task.bucketId, task.id)
+                    const focusKey = makeTaskFocusKey(LIFE_ROUTINES_GOAL_ID, task.id, task.id)
                     const isPromptActive =
                       focusPromptTarget &&
                       focusPromptTarget.goalId === LIFE_ROUTINES_GOAL_ID &&
-                      focusPromptTarget.bucketId === task.bucketId &&
+                      focusPromptTarget.bucketId === task.id &&
                       focusPromptTarget.taskId === task.id
                     const isRenamingRoutine = renamingLifeRoutineId === task.id
                     const isEditingRoutineDescription = editingLifeRoutineDescriptionId === task.id
@@ -13949,7 +13910,7 @@ const normalizedSearch = searchTerm.trim().toLowerCase()
                                   broadcastScheduleTask({
                                     goalId: LIFE_ROUTINES_GOAL_ID,
                                     goalName: LIFE_ROUTINES_NAME,
-                                    bucketId: task.bucketId,
+                                    bucketId: task.id,
                                     bucketName: task.title,
                                     taskId: task.id,
                                     taskName: task.title,

@@ -13,6 +13,7 @@ import { MIGRATION_LOCK_STORAGE_KEY, setMigrationLock, clearMigrationLock, isLoc
 import { readCachedSessionTokens } from './lib/authStorage'
 import { storage, STORAGE_KEYS } from './lib/storage'
 import { bootstrapGuestDataIfNeeded, clearAllLocalStorage, clearLastFullSyncTimestamp } from './lib/bootstrap'
+import { ensureGuestDefaultsInitialized } from './lib/guestInitialization'
 import { setCurrentUserId, getCurrentUserId } from './lib/namespaceManager'
 import { assembleSnapshot as assembleGoalsFromCache } from './lib/idbGoals'
 import { readPreferences, updatePreference } from './lib/idbUserPreferences'
@@ -1166,8 +1167,7 @@ function MainApp() {
       }
 
       try {
-        // Set namespace — triggers domain change listeners which seed
-        // guest defaults or clear data for auth users
+        // Set namespace — triggers domain change listeners
         setCurrentUserId(userId)
 
         if (userId) {
@@ -1177,6 +1177,8 @@ function MainApp() {
           } catch (error) {
             console.error('[bootstrap] failed during alignLocalStoresForUser', error)
           }
+        } else {
+          await ensureGuestDefaultsInitialized()
         }
         
         // Mark alignment as complete so other tabs don't retry

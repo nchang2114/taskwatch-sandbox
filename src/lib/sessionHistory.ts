@@ -281,9 +281,6 @@ const buildLifeRoutineSurfaceLookups = (): {
     if (typeof routine.id === 'string' && routine.id.trim().length > 0) {
       keys.add(routine.id.trim())
     }
-    if (typeof routine.bucketId === 'string' && routine.bucketId.trim().length > 0) {
-      keys.add(routine.bucketId.trim())
-    }
     keys.forEach((key) => {
       if (!idOrBucket.has(key)) {
         idOrBucket.set(key, surface)
@@ -991,13 +988,7 @@ const readHistoryRecords = (): HistoryRecord[] => {
   try {
     const userId = getCurrentUserId()
     const parsed = storage.domain.history.get(userId)
-    const isGuestContext = userId === GUEST_USER_ID
     if (!parsed) {
-      if (isGuestContext) {
-        const sampleRecords = createSampleHistoryRecords()
-        writeHistoryRecords(sampleRecords)
-        return sampleRecords
-      }
       return []
     }
     const records = sanitizeHistoryRecords(parsed)
@@ -1119,15 +1110,14 @@ const persistRecords = (records: HistoryRecord[]): HistoryEntry[] => {
   return activeEntries
 }
 
-// Namespace change listener: seed guest defaults or clear for auth user
+// Namespace change listener: swap active history namespace.
 if (typeof window !== 'undefined') {
-  onUserChange((previous, next) => {
+  onUserChange((_previous, next) => {
     if (next === GUEST_USER_ID) {
-      if (previous !== GUEST_USER_ID) {
-        const samples = createSampleHistoryRecords()
-        writeHistoryRecords(samples)
-        broadcastHistoryRecords(samples)
-      }
+      // Guest defaults are seeded centrally by guestInitialization.ts.
+      const guestRecords = sanitizeHistoryRecords(storage.domain.history.get(next))
+      writeHistoryRecords(guestRecords)
+      broadcastHistoryRecords(guestRecords)
     } else {
       writeHistoryRecords([])
       broadcastHistoryRecords([])

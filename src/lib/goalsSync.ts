@@ -1,6 +1,5 @@
 import type { Goal } from '../pages/GoalsPage'
 import { DEFAULT_SURFACE_STYLE, ensureSurfaceStyle, type SurfaceStyle } from './surfaceStyles'
-import { DEMO_GOALS } from './demoGoals'
 import { fetchGoalsHierarchy } from './goalsApi'
 import { ensureSingleUserSession } from './supabaseClient'
 import { getCurrentUserId, GUEST_USER_ID, onUserChange } from './namespaceManager'
@@ -236,24 +235,18 @@ export const subscribeToGoalsSnapshot = (
   }
 }
 
-const getGuestSnapshot = (): GoalSnapshot[] => {
-  try {
-    return createGoalsSnapshot(DEMO_GOALS as unknown as Goal[])
-  } catch {
-    return []
-  }
-}
-
 export const readGoalsSnapshotOwner = (): string => getCurrentUserId()
 
-// Namespace change listener: seed guest defaults or clear for auth user
+// Namespace change listener: swap active goals namespace.
 if (typeof window !== 'undefined') {
-  onUserChange((previous, next) => {
+  onUserChange((_previous, next) => {
     if (next === GUEST_USER_ID) {
-      if (previous !== GUEST_USER_ID) {
-        const snapshot = getGuestSnapshot()
-        publishGoalsSnapshot(snapshot, next)
-      }
+      // Guest defaults are seeded centrally by guestInitialization.ts.
+      const snapshot = assembleSnapshot(next)
+      try {
+        const event = new CustomEvent<GoalSnapshot[]>(EVENT_NAME, { detail: snapshot })
+        window.dispatchEvent(event)
+      } catch {}
     } else {
       // Clear when switching to a real user — bootstrap will fill it
       clearGoalsCache(next)

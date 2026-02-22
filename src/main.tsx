@@ -7,7 +7,9 @@ import { hydrateMilestones } from './lib/idbMilestones'
 import { hydrateLifeRoutines } from './lib/idbLifeRoutines'
 import { hydrateUserPreferences } from './lib/idbUserPreferences'
 import { hydrateDailyList } from './lib/idbDailyList'
-import { getCurrentUserId } from './lib/namespaceManager'
+import { getCurrentUserId, GUEST_USER_ID, setCurrentUserId } from './lib/namespaceManager'
+import { ensureGuestDefaultsInitialized } from './lib/guestInitialization'
+import { ensureSingleUserSession } from './lib/supabaseClient'
 
 // Some third-party instrumentation assumes document.classList exists; provide a no-op shim to prevent runtime errors.
 if (typeof document !== 'undefined' && !(document as any).classList) {
@@ -36,14 +38,30 @@ if (typeof document !== 'undefined' && !(document as any).classList) {
 }
 
 async function boot() {
+  // Resolve the actual auth session before hydration so we load the correct
+  // namespace (guest vs authenticated user) on first paint.
+  try {
+    const session = await ensureSingleUserSession()
+    setCurrentUserId(session?.user?.id ?? null)
+  } catch {
+    setCurrentUserId(null)
+  }
+
   const userId = getCurrentUserId()
-  await Promise.all([
+  const hydrationTasks: Array<Promise<void>> = [
     hydrateGoalsData(userId),
     hydrateMilestones(userId),
     hydrateLifeRoutines(userId),
     hydrateUserPreferences(userId),
     hydrateDailyList(userId),
-  ])
+  ]
+  if (userId !== GUEST_USER_ID) {
+    hydrationTasks.push(hydrateLifeRoutines(GUEST_USER_ID))
+  }
+  await Promise.all(hydrationTasks)
+  if (userId === GUEST_USER_ID) {
+    await ensureGuestDefaultsInitialized(userId)
+  }
   createRoot(document.getElementById('root')!).render(
     <StrictMode>
       <App />

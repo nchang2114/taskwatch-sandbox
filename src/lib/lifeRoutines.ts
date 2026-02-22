@@ -3,7 +3,6 @@ import { DEFAULT_SURFACE_STYLE, ensureSurfaceStyle, type SurfaceStyle } from './
 
 export type LifeRoutineConfig = {
   id: string
-  bucketId: string
   title: string
   blurb: string
   surfaceStyle: SurfaceStyle
@@ -57,9 +56,8 @@ const surfaceStyleFromColour = (colour: string | null | undefined): SurfaceStyle
   return match ? match[0] : DEFAULT_SURFACE_STYLE
 }
 
-import { storage } from './storage'
 import { getCurrentUserId, GUEST_USER_ID, onUserChange } from './namespaceManager'
-import { readLifeRoutinesFromCache, writeLifeRoutinesToCache } from './idbLifeRoutines'
+import { hydrateLifeRoutines, readLifeRoutinesFromCache, writeLifeRoutinesToCache } from './idbLifeRoutines'
 
 export const LIFE_ROUTINE_UPDATE_EVENT = 'nc-life-routines:updated'
 /** @deprecated Use GUEST_USER_ID from namespaceManager instead */
@@ -71,7 +69,6 @@ const cloneRoutine = (routine: LifeRoutineConfig): LifeRoutineConfig => ({ ...ro
 const LIFE_ROUTINE_DEFAULTS: LifeRoutineConfig[] = [
   {
     id: 'life-sleep',
-    bucketId: 'life-sleep',
     title: 'Sleep',
     blurb: 'Wind-down rituals, lights-out target, and no-screens buffer.',
     surfaceStyle: 'midnight',
@@ -79,7 +76,6 @@ const LIFE_ROUTINE_DEFAULTS: LifeRoutineConfig[] = [
   },
   {
     id: 'life-cook',
-    bucketId: 'life-cook',
     title: 'Cook/Eat',
     blurb: 'Prep staples, plan groceries, and keep easy meals ready.',
     surfaceStyle: 'grove',
@@ -87,7 +83,6 @@ const LIFE_ROUTINE_DEFAULTS: LifeRoutineConfig[] = [
   },
   {
     id: 'life-travel',
-    bucketId: 'life-travel',
     title: 'Travel',
     blurb: 'Commutes, drives, and any time you’re physically getting from A to B.',
     surfaceStyle: 'cool-blue',
@@ -95,7 +90,6 @@ const LIFE_ROUTINE_DEFAULTS: LifeRoutineConfig[] = [
   },
   {
     id: 'life-mindfulness',
-    bucketId: 'life-mindfulness',
     title: 'Mindfulness',
     blurb: 'Breathwork, journaling prompts, and quick resets.',
     surfaceStyle: 'muted-lavender',
@@ -103,7 +97,6 @@ const LIFE_ROUTINE_DEFAULTS: LifeRoutineConfig[] = [
   },
   {
     id: 'life-admin',
-    bucketId: 'life-admin',
     title: 'Life Admin',
     blurb: 'Inbox zero, bills, and those small adulting loops.',
     surfaceStyle: 'neutral-grey-blue',
@@ -111,7 +104,6 @@ const LIFE_ROUTINE_DEFAULTS: LifeRoutineConfig[] = [
   },
   {
     id: 'life-nature',
-    bucketId: 'life-nature',
     title: 'Nature',
     blurb: 'Walks outside, sunlight breaks, or a weekend trail plan.',
     surfaceStyle: 'fresh-teal',
@@ -119,7 +111,6 @@ const LIFE_ROUTINE_DEFAULTS: LifeRoutineConfig[] = [
   },
   {
     id: 'life-socials',
-    bucketId: 'life-socials',
     title: 'Socials',
     blurb: 'Reach out to friends, plan hangs, and reply to messages.',
     surfaceStyle: 'sunset-orange',
@@ -127,7 +118,6 @@ const LIFE_ROUTINE_DEFAULTS: LifeRoutineConfig[] = [
   },
   {
     id: 'life-relationships',
-    bucketId: 'life-relationships',
     title: 'Relationships',
     blurb: 'Date nights, check-ins, and celebrate the small stuff.',
     surfaceStyle: 'soft-magenta',
@@ -135,7 +125,6 @@ const LIFE_ROUTINE_DEFAULTS: LifeRoutineConfig[] = [
   },
   {
     id: 'life-chill',
-    bucketId: 'life-chill',
     title: 'Chill',
     blurb: 'Reading sessions, board games, or general downtime.',
     surfaceStyle: 'deep-indigo',
@@ -160,7 +149,6 @@ const sanitizeLifeRoutine = (value: unknown): LifeRoutineConfig | null => {
   if (!id) {
     return null
   }
-  const bucketIdRaw = typeof record.bucketId === 'string' ? record.bucketId.trim() : ''
   const titleRaw = typeof record.title === 'string' ? record.title.trim() : ''
   const blurbRaw = typeof record.blurb === 'string' ? record.blurb.trim() : ''
   const surfaceStyle = ensureSurfaceStyle(record.surfaceStyle, DEFAULT_SURFACE_STYLE)
@@ -168,7 +156,6 @@ const sanitizeLifeRoutine = (value: unknown): LifeRoutineConfig | null => {
 
   return {
     id,
-    bucketId: bucketIdRaw || id,
     title: titleRaw || 'Routine',
     blurb: blurbRaw || '',
     surfaceStyle,
@@ -192,18 +179,10 @@ export const sanitizeLifeRoutineList = (value: unknown): LifeRoutineConfig[] => 
     result.push(cloneRoutine(routine))
   }
   // Preserve empty if user intentionally removed all
-  return result.map((routine, index) => {
-    const normalized = cloneRoutine(routine)
-    const bucketId =
-      typeof normalized.bucketId === 'string' && normalized.bucketId.trim().length > 0
-        ? normalized.bucketId.trim()
-        : normalized.id
-    return {
-      ...normalized,
-      bucketId,
-      sortIndex: index,
-    }
-  })
+  return result.map((routine, index) => ({
+    ...cloneRoutine(routine),
+    sortIndex: index,
+  }))
 }
 
 const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
@@ -229,10 +208,13 @@ type LifeRoutineDbRow = {
 
 const storeLifeRoutinesLocal = (routines: LifeRoutineConfig[], userId?: string | null): LifeRoutineConfig[] => {
   // Ensure all routines have stable UUIDs before storing
-  const normalized = routines.map((routine) => ({
-    ...cloneRoutine(routine),
-    id: ensureRoutineId(routine.id),
-  }))
+  const normalized = routines.map((routine) => {
+    const id = ensureRoutineId(routine.id)
+    return {
+      ...cloneRoutine(routine),
+      id,
+    }
+  })
   
   if (typeof window !== 'undefined') {
     try {
@@ -269,7 +251,6 @@ const mapDbRowToRoutine = (row: LifeRoutineDbRow): LifeRoutineConfig | null => {
   const sortIndex = typeof row.sort_index === 'number' && Number.isFinite(row.sort_index) ? row.sort_index : 0
   return {
     id,
-    bucketId: id,
     title,
     blurb,
     surfaceStyle,
@@ -359,25 +340,13 @@ export const readStoredLifeRoutines = (): LifeRoutineConfig[] => {
     return []
   }
   try {
-    const userId = getCurrentUserId()
-    const isGuestContext = userId === GUEST_USER_ID
-    const parsed = readLifeRoutinesFromCache(userId)
+    const parsed = readLifeRoutinesFromCache(getCurrentUserId())
     if (parsed.length === 0) {
-      if (isGuestContext) {
-        const defaults = getDefaultLifeRoutines()
-        storeLifeRoutinesLocal(defaults, userId)
-        return defaults
-      }
       return []
     }
     const sanitized = sanitizeLifeRoutineList(parsed)
     if (sanitized.length > 0) {
       return sanitized
-    }
-    if (isGuestContext) {
-      const defaults = getDefaultLifeRoutines()
-      storeLifeRoutinesLocal(defaults, userId)
-      return defaults
     }
     return []
   } catch {
@@ -398,14 +367,23 @@ export const writeStoredLifeRoutines = (
   return stored
 }
 
-// Namespace change listener: seed guest defaults
+// Namespace change listener: refresh life-routine state for the active user.
 if (typeof window !== 'undefined') {
   onUserChange((_previous, next) => {
     if (next === GUEST_USER_ID) {
-      const existingGuest = readRawLifeRoutinesLocal(GUEST_USER_ID)
-      if (existingGuest.length === 0) {
-        storeLifeRoutinesLocal(getDefaultLifeRoutines(), GUEST_USER_ID)
-      }
+      // Hydrate guest cache before dispatching so listeners read the latest
+      // guest routines (which may be intentionally empty).
+      void (async () => {
+        try {
+          await hydrateLifeRoutines(GUEST_USER_ID)
+        } catch {
+          // Ignore hydration errors; listeners will read best-effort state.
+        }
+        try {
+          window.dispatchEvent(new Event(LIFE_ROUTINE_USER_EVENT))
+        } catch {}
+      })()
+      return
     }
     try {
       window.dispatchEvent(new Event(LIFE_ROUTINE_USER_EVENT))
@@ -420,6 +398,15 @@ export const syncLifeRoutinesWithSupabase = async (): Promise<LifeRoutineConfig[
   const session = await ensureSingleUserSession()
   if (!session) {
     return null
+  }
+
+  // Ensure the in-memory cache is populated for this user before deciding
+  // whether local or remote should win. This prevents false "empty local"
+  // reads during startup/user alignment races.
+  try {
+    await hydrateLifeRoutines(session.user.id)
+  } catch {
+    // Non-fatal: continue and fall back to existing cache read behavior.
   }
   
   const localRaw = readRawLifeRoutinesLocal(session.user.id)
@@ -452,13 +439,7 @@ export const syncLifeRoutinesWithSupabase = async (): Promise<LifeRoutineConfig[
     return storeLifeRoutinesLocal(sanitized, session.user.id)
   }
 
-  // Both empty: check for guest data to migrate, otherwise use defaults
-  const guestRoutines = readRawLifeRoutinesLocal(LIFE_ROUTINE_GUEST_USER_ID)
-  const routinesToUse = Array.isArray(guestRoutines) && guestRoutines.length > 0
-    ? sanitizeLifeRoutineList(guestRoutines)
-    : getDefaultLifeRoutines()
-
-  const stored = storeLifeRoutinesLocal(routinesToUse, session.user.id)
-  void pushLifeRoutinesToSupabase(stored)
-  return stored
+  // Both empty: keep empty. Default seeding is handled only during
+  // first-time account bootstrap in bootstrap.ts.
+  return storeLifeRoutinesLocal([], session.user.id)
 }

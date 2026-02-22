@@ -11,7 +11,12 @@ import {
   FALLBACK_GOAL_COLOR,
   upsertGoalMilestone,
 } from './goalsApi'
-import { pushLifeRoutinesToSupabase, syncLifeRoutinesWithSupabase, type LifeRoutineConfig } from './lifeRoutines'
+import {
+  getDefaultLifeRoutines,
+  pushLifeRoutinesToSupabase,
+  syncLifeRoutinesWithSupabase,
+  type LifeRoutineConfig,
+} from './lifeRoutines'
 import { GUEST_USER_ID } from './namespaceManager'
 import { createGoalsSnapshot, syncGoalsSnapshotFromSupabase } from './goalsSync'
 import { assembleSnapshot as assembleGoalsFromCache, clearGoalsCache, readQuickListTasks, readQuickListSubtasks, clearQuickListCache, QUICK_LIST_CONTAINER_ID, type TaskRecord, type SubtaskRecord } from './idbGoals'
@@ -492,6 +497,11 @@ const migrateGuestData = async (): Promise<void> => {
     routines = routinesData
     console.log('[bootstrap] Migrating', routines.length, 'life routines')
   }
+  // Fresh-account seeding: if no guest routines exist, seed defaults once during bootstrap.
+  if (routines.length === 0) {
+    routines = getDefaultLifeRoutines()
+    console.log('[bootstrap] Seeding default life routines for fresh account:', routines.length)
+  }
   
   // Clear snapshots after reading
   storage.bootstrap.snapshotLifeRoutines.remove()
@@ -500,9 +510,7 @@ const migrateGuestData = async (): Promise<void> => {
   storage.bootstrap.snapshotHistory.remove()
   storage.bootstrap.snapshotRepeating.remove()
   
-  if (routines.length > 0) {
-    await pushLifeRoutinesToSupabase(routines, { strict: true, skipOrphanDelete: true })
-  }
+  await pushLifeRoutinesToSupabase(routines, { strict: true, skipOrphanDelete: true })
 
   // Read quick list from IDB cache (already hydrated/migrated at boot)
   const qlTasks = readQuickListTasks(GUEST_USER_ID)
