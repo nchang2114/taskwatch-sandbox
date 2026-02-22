@@ -6140,6 +6140,28 @@ export default function GoalsPage(): ReactElement {
     })
   }, [dailyListEntries])
 
+  const ensureDailySubtasksExpanded = useCallback((taskId: string) => {
+    setDailyTaskUiState((current) => {
+      const existing = current[taskId]
+      if (existing && existing.expanded && !existing.subtasksCollapsed) {
+        return current
+      }
+      const base = existing ?? {
+        expanded: false,
+        subtasksCollapsed: true,
+        notesCollapsed: true,
+      }
+      return {
+        ...current,
+        [taskId]: {
+          ...base,
+          expanded: true,
+          subtasksCollapsed: false,
+        },
+      }
+    })
+  }, [])
+
   // ── Daily To-Do: handlers ────────────────────────────────────────────────
   const removeDailyListEntry = useCallback((entryId: string) => {
     setDailyListEntries((current) => {
@@ -6943,6 +6965,9 @@ export default function GoalsPage(): ReactElement {
           }),
         )
         setQuickListItems(stored)
+        if (created) {
+          ensureDailySubtasksExpanded(taskId)
+        }
       })
 
       if (created) {
@@ -6966,7 +6991,7 @@ export default function GoalsPage(): ReactElement {
         persistQuickSubtasks(taskId, targetSubs, 'add')
       }
     },
-    [persistQuickSubtasks, quickListItems],
+    [ensureDailySubtasksExpanded, persistQuickSubtasks, quickListItems],
   )
   const updateQuickSubtaskText = useCallback(
     (taskId: string, subtaskId: string, value: string) => {
@@ -8229,6 +8254,7 @@ export default function GoalsPage(): ReactElement {
           copy.splice(at, 0, newSubtask)
           return copy
         })
+        ensureDailySubtasksExpanded(taskId)
       })
 
       if (options?.focus) {
@@ -8258,7 +8284,7 @@ export default function GoalsPage(): ReactElement {
         }
       }
     },
-    [updateGoalTaskSubtasks, updateTaskDetails],
+    [ensureDailySubtasksExpanded, updateGoalTaskSubtasks, updateTaskDetails],
   )
 
 
@@ -10033,6 +10059,27 @@ const normalizedSearch = searchTerm.trim().toLowerCase()
                             const { value } = sanitizeEditableValue(node, raw, MAX_TASK_TEXT_LENGTH)
                             handleTaskEditChange(task.id, value)
                           }}
+                          onPaste={(event) => {
+                            event.preventDefault()
+                            const node = event.currentTarget as HTMLSpanElement
+                            const text = event.clipboardData?.getData('text/plain') ?? ''
+                            const sanitized = text.replace(/\n+/g, ' ')
+                            const current = node.textContent ?? ''
+                            const selection = typeof window !== 'undefined' ? window.getSelection() : null
+                            let next = current
+                            if (selection && selection.rangeCount > 0) {
+                              const range = selection.getRangeAt(0)
+                              if (node.contains(range.endContainer)) {
+                                const prefix = current.slice(0, range.startOffset)
+                                const suffix = current.slice(range.endOffset)
+                                next = `${prefix}${sanitized}${suffix}`
+                              }
+                            } else {
+                              next = current + sanitized
+                            }
+                            const { value } = sanitizeEditableValue(node, next, MAX_TASK_TEXT_LENGTH)
+                            handleTaskEditChange(task.id, value)
+                          }}
                           onKeyDown={(e) => {
                             if (e.key === 'Enter' || e.key === 'Escape') {
                               e.preventDefault()
@@ -10044,9 +10091,7 @@ const normalizedSearch = searchTerm.trim().toLowerCase()
                           tabIndex={0}
                           aria-label="Edit task text"
                           spellCheck={false}
-                        >
-                          {taskEdits[task.id]}
-                        </span>
+                        />
                       )
                     ) : (
                       <button
